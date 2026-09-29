@@ -10,6 +10,8 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from tools.linux_build import MINIUPNPC_DEFINES, MINIUPNPC_DIR, miniupnpc_sources  # noqa: E402
 BUILD = ROOT / "build/macos"
 LLVM = Path(os.environ.get("HALO_MACOS_LLVM_BIN", "/opt/homebrew/opt/llvm/bin"))
 SDL = Path(os.environ.get("HALO_MACOS_SDL_PREFIX", "/opt/homebrew/opt/sdl3"))
@@ -32,7 +34,10 @@ def build_plugin():
     require(LLVM / "llvm-config")
     flags = shlex.split(subprocess.check_output(
         [LLVM / "llvm-config", "--cxxflags", "--ldflags", "--libs", "core", "passes"], text=True))
-    run(LLVM / "clang++", "-shared", "-fPIC", "port/macos/compiler/guest_rebase.cpp",
+    # Homebrew's clang defaults to a Command Line Tools sysroot that need not
+    # exist on an Xcode-only Mac; point it at the active SDK
+    sysroot = subprocess.check_output(["xcrun", "--show-sdk-path"], text=True).strip()
+    run(LLVM / "clang++", "-shared", "-fPIC", "-isysroot", sysroot, "port/macos/compiler/guest_rebase.cpp",
         "-o", BUILD / "guest_rebase.dylib", *flags)
 
 
@@ -58,6 +63,13 @@ def build_host():
     for source in sources:
         obj = obj_dir / (source.name + ".o")
         run("clang", *flags, "-c", source, "-o", obj)
+        objects.append(obj)
+    # internet play's UPnP (posix_upnp.c, with port/third_party/miniupnpc), as
+    # the Android host builds it
+    upnp_flags = flags + [f"-I{MINIUPNPC_DIR / 'include'}", f"-I{MINIUPNPC_DIR / 'src'}", *MINIUPNPC_DEFINES]
+    for source in [ROOT / "port/linux/src/posix_upnp.c", *miniupnpc_sources()]:
+        obj = obj_dir / ("miniupnpc_" + source.name + ".o")
+        run("clang", *upnp_flags, *([] if source.name == "posix_upnp.c" else ["-w"]), "-c", source, "-o", obj)
         objects.append(obj)
     run("clang", *objects, f"-L{SDL / 'lib'}", "-lSDL3",
         *(f"-F{directory}" for directory in frameworks),

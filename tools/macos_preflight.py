@@ -24,8 +24,8 @@ NTSC_BUILD = "01.10.12.2276"
 SUPPORTED_BUILDS = (BUILD, NTSC_BUILD)
 CAMPAIGN = ("a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40")
 # Same verified SDK input as libs/d3d8/generate_sdk_overlay.py.
-D3D8_SHA256 = "7f7f603e1b2fa13ef36a05923eaa36d0d7094302522edbac9855b28f0909f1a1"
-SDK_HEADERS = ("xtl.h", "winnt.h", "d3d8.h", "d3d8types.h", "d3d8perf.h", "dsound.h", "xbdm.h")
+# the clean-room XDK declarations upstream ships in port/include/xdk (no Xbox SDK needed)
+SDK_HEADERS = ("xtl.h", "windef.h", "winbase.h", "xbox.h", "xbdm.h", "d3d8perf.h", "xdk_pdb.h", "xdk_d3d8.h", "xdk_dsound.h")
 
 
 def directory_entries(path):
@@ -110,12 +110,6 @@ def check_sdk(include):
         missing = [name for name in SDK_HEADERS if name not in entries or not entries[name].is_file()]
         if missing:
             result["errors"].append("missing SDK headers: " + ", ".join(missing))
-        d3d = entries.get("d3d8.h")
-        if d3d and d3d.is_file():
-            digest = hashlib.sha256(d3d.read_bytes()).hexdigest()
-            result["d3d8_sha256"] = digest
-            if digest != D3D8_SHA256:
-                result["errors"].append("D3D8.h differs from this repository's verified SDK input")
         result["ready"] = not result["errors"]
     except (OSError, ValueError) as error:
         result["errors"].append(str(error))
@@ -158,7 +152,7 @@ def run_probe(compiler, output):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sdk-include", type=Path, default=ROOT / "xbox/include")
+    parser.add_argument("--sdk-include", type=Path, default=ROOT / "port/include/xdk")
     parser.add_argument("--data-root", type=Path, default=Path(os.environ.get("HALO_DATA_ROOT", ROOT / "assets")))
     parser.add_argument("--probe", action="store_true", help="compile/run native address-space diagnostics")
     parser.add_argument("--cc", default="clang", help="host compiler for --probe")
