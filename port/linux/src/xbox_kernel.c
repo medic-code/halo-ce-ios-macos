@@ -641,12 +641,21 @@ VOID WINAPI Sleep(DWORD milliseconds)
 
 /* ---------- time */
 
+/* milliseconds since the game started, as the Xbox counts from its boot:
+the game keeps ticks in signed 32-bit longs and compares them with
+timestamps that start at zero (a host's pregame keep-alive deadline), which
+a machine up for 25 days breaks with a negative count */
 DWORD WINAPI GetTickCount(void)
 {
+	static unsigned long long start;
 	struct timespec now;
+	unsigned long long milliseconds;
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
-	return (DWORD)((unsigned long long)now.tv_sec * 1000ULL + (unsigned long long)now.tv_nsec / 1000000ULL);
+	milliseconds = (unsigned long long)now.tv_sec * 1000ULL + (unsigned long long)now.tv_nsec / 1000000ULL;
+	if (!start)
+		start = milliseconds;
+	return (DWORD)(milliseconds - start);
 }
 
 /* The Xbox performance counter runs at the 733 MHz CPU clock. Report a

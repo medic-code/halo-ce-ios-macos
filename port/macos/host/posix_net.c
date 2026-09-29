@@ -97,7 +97,31 @@ static int darwin_accept4(int fd, struct sockaddr *a, socklen_t *n, int flags) {
         fcntl(r, F_SETFD, FD_CLOEXEC);
     return r;
 }
+
+/* HALO_NET_TRACE=1: every stream send/recv on stderr, to diagnose a dead
+   connection */
+#include <stdio.h>
+static int net_trace(void) {
+    static int state = -1;
+    if (state < 0)
+        state = getenv("HALO_NET_TRACE") != NULL;
+    return state;
+}
+static ssize_t darwin_send(int fd, const void *p, size_t n, int f) {
+    ssize_t r = send(fd, p, n, f);
+    if (net_trace())
+        fprintf(stderr, "net: send(%d, %zu) = %zd errno=%d\n", fd, n, r, r < 0 ? errno : 0);
+    return r;
+}
+static ssize_t darwin_recv(int fd, void *p, size_t n, int f) {
+    ssize_t r = recv(fd, p, n, f);
+    if (net_trace())
+        fprintf(stderr, "net: recv(%d, %zu) = %zd errno=%d\n", fd, n, r, r < 0 ? errno : 0);
+    return r;
+}
 #define SOCK_CLOEXEC 0x80000
+#define send darwin_send
+#define recv darwin_recv
 #define socket darwin_socket
 #define accept4 darwin_accept4
 #define bind darwin_bind
