@@ -143,12 +143,14 @@ struct game
 	int payload_size;
 	struct p2p_listing listing;
 	/* its invite's token (none: a password's game); its host's ping
-	(-1: not known), whether it is being probed, and when it last was */
+	(-1: not known), whether it is being probed, and when it last was;
+	whether Refresh asked for it to be timed again, until that probe ends */
 	int has_token;
 	unsigned char token[P2P_TOKEN_SIZE];
 	int ping;
 	int probing;
 	unsigned long probed_time;
+	int refreshing;
 };
 
 struct tombstone
@@ -679,13 +681,14 @@ static void listing_take(const struct queued *queued, const struct listing *list
 }
 
 /* the game as listed: whether joining it failed, and its host's ping and
-whether it is being probed */
+whether it is being probed, after Refresh or not */
 static void game_listed(const struct game *game, struct p2p_listing *listing)
 {
 	*listing = game->listing;
 	listing->failed = (unsigned char)identifier_failed(listing->identifier);
 	listing->ping = (short)game->ping;
 	listing->probing = (unsigned char)game->probing;
+	listing->refreshing = (unsigned char)game->refreshing;
 }
 
 static int listing_order(const void *first, const void *second);
@@ -834,6 +837,7 @@ void p2p_lobby_probed(const unsigned char *identifier, int ping)
 		if (game->used && !memcmp(game->listing.identifier, identifier, P2P_IDENTIFIER_SIZE))
 		{
 			game->probing = 0;
+			game->refreshing = 0;
 			game->probed_time = p2p_now() | 1;
 			/* (one not reached this time keeps the last it had) */
 			if (ping >= 0)
@@ -971,11 +975,14 @@ void p2p_lobby_refresh(void)
 	pthread_mutex_lock(&p2p_lock);
 	if (lobby.browsing)
 		lobby.query_wanted = 1;
-	/* (the pings timed again) */
+	/* (the pings timed again, a probe under way included) */
 	for (index = 0; index < MAXIMUM_GAMES; index++)
 	{
-		if (!lobby.games[index].probing)
-			lobby.games[index].probed_time = 0;
+		struct game *game = &lobby.games[index];
+
+		if (!game->probing)
+			game->probed_time = 0;
+		game->refreshing = game->used && game->has_token;
 	}
 	pthread_mutex_unlock(&p2p_lock);
 }

@@ -2,8 +2,8 @@
 BROWSER_PING_TEXT.C (test)
 
 The server browser's ping cell (menu_functions.c's browser_ping_text) for a
-game open ('o'), closed ('c'), live ('l') or failed ('f'), from
-test_browser_ping_text.py's listing.inc and under_test.inc.
+game open ('o'), closed ('c'), live ('l') or failed ('f'), after Refresh
+or not, from test_browser_ping_text.py's listing.inc and under_test.inc.
 */
 
 #include "harness.h"
@@ -14,6 +14,9 @@ test_browser_ping_text.py's listing.inc and under_test.inc.
 #define usnprintf(buffer, size, ...) swprintf(buffer, size, __VA_ARGS__)
 
 #include "under_test.inc"
+
+/* the "refresh" case's games: timed again after Refresh */
+static int refreshed;
 
 static int shows(char state, int ping, int probing, unsigned long now, wchar_t const *expected)
 {
@@ -26,6 +29,7 @@ static int shows(char state, int ping, int probing, unsigned long now, wchar_t c
 	game.failed = state == 'f';
 	game.ping = (short)ping;
 	game.probing = (unsigned char)probing;
+	game.refreshing = (unsigned char)refreshed;
 	return !wcscmp(browser_ping_text(&game, now, text, 16), expected);
 }
 
@@ -34,7 +38,16 @@ int main(int argc, char **argv)
 	const char *case_name = argc > 1 ? argv[1] : "";
 
 	CASE("number")
-		CHECK(shows('o', 42, 0, 0, L"42") && shows('o', 42, 1, 700, L"42"), "a ping shows, kept while timed again");
+		CHECK(shows('o', 42, 0, 0, L"42") && shows('o', 42, 1, 700, L"42"),
+			"a ping shows, kept while timed again every two minutes");
+	else CASE("refresh")
+	{
+		refreshed = 1;
+		CHECK(shows('o', 42, 1, 300, L"..") && shows('c', 42, 1, 600, L"..."),
+			"a ping timed again after Refresh: dots");
+		CHECK(shows('o', 42, 0, 300, L"42"), "a ping after Refresh, its host not timed yet, still shows");
+		CHECK(shows('f', 42, 1, 0, L"FAILED"), "FAILED over a ping timed after Refresh");
+	}
 	else CASE("dots")
 	{
 		CHECK(shows('o', -1, 1, 299, L".") && shows('o', -1, 1, 300, L"..") && shows('o', -1, 1, 600, L"...") &&
