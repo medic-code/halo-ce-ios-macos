@@ -1059,22 +1059,23 @@ static int sdl_gamepads(SDL_Gamepad *gamepads[PORT_COUNT])
 /* whether one gamepad is port 1's (port_gamepad) */
 static BOOL lone_gamepad_split;
 
-/* no button of the gamepad held, its sticks and triggers at rest */
-static BOOL gamepad_idle(SDL_Gamepad *gamepad)
+/* the gamepad's buttons held, and its sticks and triggers away from rest */
+static int gamepad_inputs_held(SDL_Gamepad *gamepad)
 {
+	int count = 0;
 	int index;
 
 	for (index = 0; index < SDL_GAMEPAD_BUTTON_COUNT; index++)
-	{
-		if (SDL_GetGamepadButton(gamepad, (SDL_GamepadButton)index))
-			return FALSE;
-	}
+		count += SDL_GetGamepadButton(gamepad, (SDL_GamepadButton)index) != 0;
 	for (index = 0; index < SDL_GAMEPAD_AXIS_COUNT; index++)
-	{
-		if (abs(SDL_GetGamepadAxis(gamepad, (SDL_GamepadAxis)index)) > 8000)
-			return FALSE;
-	}
-	return TRUE;
+		count += abs(SDL_GetGamepadAxis(gamepad, (SDL_GamepadAxis)index)) > 8000;
+	return count;
+}
+
+/* no button of the gamepad held, its sticks and triggers at rest */
+static BOOL gamepad_idle(SDL_Gamepad *gamepad)
+{
+	return gamepad_inputs_held(gamepad) == 0;
 }
 
 /* the gamepad of a port: the first shares port 0 with the keyboard, but for
@@ -1161,6 +1162,75 @@ static void sdl_gamepad_state(SDL_Gamepad *gamepad, XINPUT_GAMEPAD *pad)
 	if (abs(value) > abs(pad->sThumbRX)) pad->sThumbRX = value;
 	value = stick(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY), TRUE);
 	if (abs(value) > abs(pad->sThumbRY)) pad->sThumbRY = value;
+}
+
+/* ---------- the device the prompts name (halo_keyboard.h) */
+
+/* whether controller 1's prompts name the keyboard's keys: they name the
+device of the latest new press, the keyboard and mouse (a key, a mouse
+button, the wheel) or the gamepad (a button, a stick or trigger pushed from
+rest, and in Android and browser builds the touch controls' stick and look).
+Moving the mouse does not count, so a nudged mouse leaves a controller's
+player with the controller's. Android starts with the controller's, the
+other builds with the keyboard's. */
+#ifdef HALO_ANDROID
+static BOOL keyboard_prompts = FALSE;
+#else
+static BOOL keyboard_prompts = TRUE;
+#endif
+/* (the inputs held at the last read, and whether a menu was up) */
+static int keyboard_inputs_before;
+static int gamepad_inputs_before;
+static BOOL prompts_in_menus;
+#if defined(HALO_ANDROID) || defined(HALO_WEB)
+static Uint64 touch_seen_ms;
+#endif
+
+static int keyboard_inputs_held(const struct platform_input_state *input)
+{
+	int count = input->mouse_wheel != 0.0f;
+	int index;
+
+	for (index = 0; index < SDL_SCANCODE_COUNT; index++)
+		count += input->keys[index] != 0;
+	for (index = 0; index < PLATFORM_MOUSE_BUTTON_COUNT; index++)
+		count += input->mouse_buttons[index] != 0;
+	return count;
+}
+
+/* a device has a new press when it holds more inputs than at the last read;
+the keyboard and mouse's win when both have one */
+static void prompt_device_update(int keyboard_inputs, int gamepad_inputs)
+{
+	if (gamepad_inputs > gamepad_inputs_before)
+		keyboard_prompts = FALSE;
+	if (keyboard_inputs > keyboard_inputs_before)
+		keyboard_prompts = TRUE;
+	keyboard_inputs_before = keyboard_inputs;
+	gamepad_inputs_before = gamepad_inputs;
+}
+
+/* port 0's devices, at each read of its state */
+static void prompt_devices_read(const struct platform_input_state *input, SDL_Gamepad *gamepad)
+{
+	int gamepad_inputs = gamepad ? gamepad_inputs_held(gamepad) : 0;
+
+#if defined(HALO_ANDROID) || defined(HALO_WEB)
+	pthread_mutex_lock(&mouse_lock);
+	if (touch_aimed_ms != touch_seen_ms)
+		gamepad_inputs++;
+	touch_seen_ms = touch_aimed_ms;
+	pthread_mutex_unlock(&mouse_lock);
+#endif
+	prompt_device_update(keyboard_inputs_held(input), gamepad_inputs);
+	prompts_in_menus = input->menus;
+}
+
+int halo_keyboard_prompts(short controller_index)
+{
+	if (controller_index != 0 || !keyboard_prompts)
+		return HALO_KEYBOARD_PROMPTS_NONE;
+	return prompts_in_menus ? HALO_KEYBOARD_PROMPTS_MENUS : HALO_KEYBOARD_PROMPTS_GAME;
 }
 
 /* ---------- XAPI */
@@ -1273,6 +1343,7 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 		BOOL console_active;
 
 		platform_input_read(&input, TRUE);
+		prompt_devices_read(&input, port_gamepad(gamepads, count, 0));
 		mouse_poll(&input);
 		wheel_update();
 		keyboard_actions_held = 0;
