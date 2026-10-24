@@ -598,6 +598,7 @@ struct network_game *network_game_server_get_game(struct network_game_server *se
 #include "custom_edition_cache.h" /* port: port/linux/game/custom_edition_cache.c */
 #include "latency_meter.h" /* port: port/linux/game/latency_meter.c */
 #include "touch_postgame.h" /* port: port/linux/game/touch_postgame.c */
+#include "button_prompts.h" /* port: port/linux/game/button_prompts.c */
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
@@ -8954,6 +8955,12 @@ static boolean internal_rasterize_score(
 		ustrncpy(
 			buffer,
 			format,
+			buffer_size);
+		/* port: the keyboard's player is told the scores' key */
+		buffer[buffer_size - 1] = 0;
+		button_prompt_scores_key(
+			player->local_player_index,
+			buffer,
 			buffer_size);
 		break;
 	default:

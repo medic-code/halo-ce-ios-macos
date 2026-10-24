@@ -10,4 +10,9 @@ wchar_t const *button_prompt_text(
 	short local_player_index,
 	short icon_type);
 
+void button_prompt_scores_key(
+	short local_player_index,
+	wchar_t *text,
+	long size);
+
 #endif
