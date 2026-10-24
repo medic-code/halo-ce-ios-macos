@@ -147,6 +147,7 @@ symbols in this file:
 #include "text/unicode.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "controller_remap.h" /* port: port/linux/game/controller_remap_game.c */
+#include "button_prompts.h" /* port: port/linux/game/button_prompts.c */
 
 #include <stddef.h>
 
@@ -1598,7 +1599,20 @@ void hud_messaging_update(
 					case _hud_message_type_icon:
 						{
 							short icon_index = NONE;
+							/* port: the keyboard's player is shown the key */
+							wchar_t const *key_text = button_prompt_text(
+								local_player_index,
+								element->data);
 
+							if (key_text)
+							{
+								render_state_text(
+									&line_bounds,
+									&line_cursor,
+									key_text,
+									FALSE);
+								break;
+							}
 							if (element->data > _icon_right_stick)
 							{
 								if (element->data <= _icon_look)
