@@ -57,6 +57,17 @@ unsigned long halo_keyboard_actions(short controller_index);
 game and in the menus alike */
 int halo_push_to_talk_held(void);
 
+/* the keys, not the buttons, while controller 1's keyboard or mouse was
+pressed after its gamepad (port/linux/game/button_prompts.c) */
+enum halo_keyboard_prompts
+{
+	HALO_KEYBOARD_PROMPTS_NONE,
+	HALO_KEYBOARD_PROMPTS_GAME,
+	HALO_KEYBOARD_PROMPTS_MENUS
+};
+
+int halo_keyboard_prompts(short controller_index);
+
 /* the first controller's buttons (with the touch controls'), as the text
 chat's on-screen keyboard reads them: a bit for each (port/linux/game/
 network_chat.c). The game gets none of the controller while that keyboard is

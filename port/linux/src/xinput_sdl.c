@@ -1176,22 +1176,23 @@ port_gamepad also runs on the input thread's rumble (XInputSetState), which
 must not read the game's state while the game's thread has it */
 static BOOL split_players;
 
-/* no button of the gamepad held, its sticks and triggers at rest */
-static BOOL gamepad_idle(SDL_Gamepad *gamepad)
+static Uint64 gamepad_inputs_held(SDL_Gamepad *gamepad)
 {
+	Uint64 held = 0;
 	int index;
 
 	for (index = 0; index < SDL_GAMEPAD_BUTTON_COUNT; index++)
-	{
-		if (SDL_GetGamepadButton(gamepad, (SDL_GamepadButton)index))
-			return FALSE;
-	}
+		held |= (Uint64)(SDL_GetGamepadButton(gamepad, (SDL_GamepadButton)index) != 0) << index;
 	for (index = 0; index < SDL_GAMEPAD_AXIS_COUNT; index++)
-	{
-		if (abs(SDL_GetGamepadAxis(gamepad, (SDL_GamepadAxis)index)) > 8000)
-			return FALSE;
-	}
-	return TRUE;
+		held |= (Uint64)(abs(SDL_GetGamepadAxis(gamepad, (SDL_GamepadAxis)index)) > 8000) <<
+			(SDL_GAMEPAD_BUTTON_COUNT + index);
+	return held;
+}
+
+/* no button of the gamepad held, its sticks and triggers at rest */
+static BOOL gamepad_idle(SDL_Gamepad *gamepad)
+{
+	return gamepad_inputs_held(gamepad) == 0;
 }
 
 /* the gamepad of a port: the first shares port 0 with the keyboard, but for
@@ -1513,6 +1514,71 @@ static void virtual_gamepads_update(void)
 #endif
 }
 
+/* ---------- the device the prompts name (halo_keyboard.h) */
+
+/* the device of the latest new press; moving the mouse does not count, so
+a nudged mouse leaves a controller's player with the controller's */
+#ifdef HALO_ANDROID
+static BOOL keyboard_prompts = FALSE;
+#else
+static BOOL keyboard_prompts = TRUE;
+#endif
+static unsigned char keyboard_held_before[SDL_SCANCODE_COUNT + PLATFORM_MOUSE_BUTTON_COUNT + 1];
+static Uint64 gamepad_held_before;
+static BOOL prompts_in_menus;
+#if defined(HALO_ANDROID) || defined(HALO_WEB)
+static Uint64 touch_seen_ms;
+#endif
+
+static BOOL keyboard_pressed(const struct platform_input_state *input)
+{
+	BOOL pressed = FALSE;
+	int index;
+
+	for (index = 0; index < (int)sizeof(keyboard_held_before); index++)
+	{
+		unsigned char held = index < SDL_SCANCODE_COUNT ? input->keys[index] != 0 :
+			index < SDL_SCANCODE_COUNT + PLATFORM_MOUSE_BUTTON_COUNT ?
+			input->mouse_buttons[index - SDL_SCANCODE_COUNT] != 0 : input->mouse_wheel != 0.0f;
+
+		pressed = pressed || (held && !keyboard_held_before[index]);
+		keyboard_held_before[index] = held;
+	}
+	return pressed;
+}
+
+/* the keyboard and mouse's press wins when both devices have one */
+static void prompt_device_update(const struct platform_input_state *input, Uint64 gamepad_held,
+	BOOL gamepad_moved)
+{
+	if (gamepad_moved || (gamepad_held & ~gamepad_held_before))
+		keyboard_prompts = FALSE;
+	if (keyboard_pressed(input))
+		keyboard_prompts = TRUE;
+	gamepad_held_before = gamepad_held;
+}
+
+static void prompt_devices_read(const struct platform_input_state *input, SDL_Gamepad *gamepad)
+{
+	BOOL touched = FALSE;
+
+#if defined(HALO_ANDROID) || defined(HALO_WEB)
+	pthread_mutex_lock(&mouse_lock);
+	touched = touch_aimed_ms != touch_seen_ms;
+	touch_seen_ms = touch_aimed_ms;
+	pthread_mutex_unlock(&mouse_lock);
+#endif
+	prompt_device_update(input, gamepad ? gamepad_inputs_held(gamepad) : 0, touched);
+	prompts_in_menus = input->menus;
+}
+
+int halo_keyboard_prompts(short controller_index)
+{
+	if (controller_index != 0 || !keyboard_prompts)
+		return HALO_KEYBOARD_PROMPTS_NONE;
+	return prompts_in_menus ? HALO_KEYBOARD_PROMPTS_MENUS : HALO_KEYBOARD_PROMPTS_GAME;
+}
+
 /* ---------- XAPI */
 
 VOID WINAPI XInitDevices(DWORD preallocation_type_count, PXDEVICE_PREALLOC_TYPE preallocation_types)
@@ -1674,6 +1740,7 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 		short aiming_deflection;
 
 		platform_input_read(&input, TRUE);
+		prompt_devices_read(&input, port_gamepad(gamepads, count, 0));
 		mouse_poll(&input);
 		wheel_update();
 		keyboard_actions_held = 0;
