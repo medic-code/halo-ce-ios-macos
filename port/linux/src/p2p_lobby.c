@@ -67,6 +67,7 @@ and on Refresh. A game with a password is not: its token is sealed.
 #include "p2p_internal.h"
 #include "halo_port_limits.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -195,8 +196,9 @@ static struct
 	int republish_wanted;
 	unsigned long republish_time;
 
-	/* browsing */
+	/* browsing, and the order shown (p2p_lobby_set_order) */
 	int browsing;
+	int order, order_reversed;
 	int query_wanted;
 	struct queued queue[MAXIMUM_QUEUED];
 	int queue_count;
@@ -991,12 +993,39 @@ int p2p_lobby_browsing(void)
 	return lobby.browsing;
 }
 
-/* the order shown: the most players first; then those joining has not
-failed, the open ones, and by name */
+/* names A to Z, whatever their case */
+static int name_order(const char *a, const char *b)
+{
+	while (*a && tolower((unsigned char)*a) == tolower((unsigned char)*b))
+	{
+		a++;
+		b++;
+	}
+	return tolower((unsigned char)*a) - tolower((unsigned char)*b);
+}
+
+/* the order shown: lobby.order's (p2p_lobby_set_order); then the most
+players first, those joining has not failed, the open ones, and by name */
 static int listing_order(const void *first, const void *second)
 {
 	const struct p2p_listing *a = first, *b = second;
+	int order;
 
+	if (lobby.order == P2P_LOBBY_ORDER_PING)
+	{
+		int a_ping = a->failed ? -1 : a->ping, b_ping = b->failed ? -1 : b->ping;
+
+		/* (those with none last, reversed or not) */
+		if ((a_ping < 0) != (b_ping < 0))
+			return a_ping < 0 ? 1 : -1;
+		order = a_ping - b_ping;
+	}
+	else if (lobby.order == P2P_LOBBY_ORDER_NAME)
+		order = name_order(a->name, b->name);
+	else
+		order = b->player_count - a->player_count;
+	if (order)
+		return lobby.order_reversed ? -order : order;
 	if (a->player_count != b->player_count)
 		return b->player_count - a->player_count;
 	if (a->failed != b->failed)
@@ -1019,9 +1048,30 @@ int p2p_lobby_games(struct p2p_listing *games, int maximum_count)
 		game_listed(&lobby.games[index], &games[count]);
 		count++;
 	}
-	pthread_mutex_unlock(&p2p_lock);
+	/* (under the lock: the order is the p2p thread's too, update_probes) */
 	qsort(games, (size_t)count, sizeof(*games), listing_order);
+	pthread_mutex_unlock(&p2p_lock);
 	return count;
+}
+
+void p2p_lobby_set_order(int order, int reversed)
+{
+	pthread_mutex_lock(&p2p_lock);
+	lobby.order = order == P2P_LOBBY_ORDER_PING || order == P2P_LOBBY_ORDER_NAME ? order : P2P_LOBBY_ORDER_PLAYERS;
+	lobby.order_reversed = reversed ? 1 : 0;
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+int p2p_lobby_order(int *reversed)
+{
+	int order;
+
+	pthread_mutex_lock(&p2p_lock);
+	order = lobby.order;
+	if (reversed)
+		*reversed = lobby.order_reversed;
+	pthread_mutex_unlock(&p2p_lock);
+	return order;
 }
 
 int p2p_listing_unlock(struct p2p_listing *listing, const char *password)

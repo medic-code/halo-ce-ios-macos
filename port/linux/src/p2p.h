@@ -167,9 +167,24 @@ browser: the tunnel still reaches its host, and no other invite was joined
 since. Such a game has no text chat, whatever its host says
 (port/linux/game/network_chat.c) */
 int p2p_joined_listed_host(void);
-/* a copy of the public games found, in the order shown (the most players
-first; then those not failed, the open ones, by name); returns their count */
+/* a copy of the public games found, in the order shown (p2p_lobby_set_order;
+then the most players, those not failed, the open ones, by name); returns
+their count */
 int p2p_lobby_games(struct p2p_listing *games, int maximum_count);
+/* the order the public games are shown and their hosts timed in, for the
+rest of the run: by players, the most first (at the start); by ping, the
+lowest first; by name, A to Z (whatever the case); reversed, the other way.
+Those with no ping (not yet timed, a password's, one joining failed) are
+last by ping either way */
+enum
+{
+	P2P_LOBBY_ORDER_PLAYERS,
+	P2P_LOBBY_ORDER_PING,
+	P2P_LOBBY_ORDER_NAME,
+};
+void p2p_lobby_set_order(int order, int reversed);
+/* the order (P2P_LOBBY_ORDER_*), and whether it is reversed */
+int p2p_lobby_order(int *reversed);
 /* how many hosts list a game of a newer network version, which is not
 shown (an old build sees none of the games) */
 int p2p_lobby_newer_games(void);

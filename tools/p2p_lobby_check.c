@@ -15,8 +15,10 @@ alone; and the hosts' pings: a game's host probed with its listing's token,
 its ping listed and kept, probed again on Refresh (marked as Refresh's
 until that probe ends, a probe of its own two minutes on not), and a game
 with a password never; and the probes started in the order the games are
-shown, past one refused, none while listings wait to be checked. Prints
-PASS or the failures.
+shown, past one refused, none while listings wait to be checked; the games
+shown by players, by ping and by name, each either way, and probed again
+on Refresh in the order shown, which is kept while the browser is off.
+Prints PASS or the failures.
 */
 
 #include "p2p_internal.h"
@@ -439,13 +441,46 @@ static void lobby_checks(void)
 		"a game whose password is taken off is listed open");
 }
 
-/* four games, heard as Alpha, Bravo, Charlie, Delta (Charlie's join failed),
-are shown as Bravo, Delta, Charlie, Alpha: their hosts are probed in that
-order, past Bravo's refused, and none while listings wait to be checked */
+/* whether the games are shown in this order (their names, a space after
+each), and their hosts probed in it on Refresh */
+static int shown_as(const char *expected)
+{
+	struct p2p_listing all[4];
+	char shown[4 * (P2P_LISTING_NAME_SIZE + 1) + 1] = "";
+	int count = p2p_lobby_games(all, 4), index;
+
+	for (index = 0; index < count; index++)
+	{
+		strcat(shown, all[index].name);
+		strcat(shown, " ");
+	}
+	if (strcmp(shown, expected))
+	{
+		printf("shown: %s(not %s)\n", shown, expected);
+		return 0;
+	}
+	probe_count = 0;
+	p2p_lobby_refresh();
+	lobby_update(hosting_token, 0, 16);
+	for (index = 0; index < count; index++)
+	{
+		if (index >= probe_count || memcmp(probed_hosts[index], all[index].identifier, P2P_IDENTIFIER_SIZE))
+		{
+			printf("probed out of the order shown: %s\n", expected);
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/* four games, heard as alpha, Bravo, Charlie, Delta (Charlie's join failed),
+are shown as Bravo, Delta, Charlie, alpha: their hosts are probed in that
+order, past Bravo's refused, and none while listings wait to be checked;
+then in each order p2p_lobby_set_order gives */
 static void probe_order_checks(void)
 {
 	static const unsigned char token[P2P_TOKEN_SIZE] = { 9, 9, 9 };
-	static const char *names[] = { "Alpha", "Bravo", "Charlie", "Delta" };
+	static const char *names[] = { "alpha", "Bravo", "Charlie", "Delta" };
 	static const int player_counts[] = { 2, 9, 5, 5 }, shown[] = { 1, 3, 2, 0 };
 	unsigned char hash[P2P_KEY_HASH_SIZE], payloads[4][512], identifiers[4][P2P_IDENTIFIER_SIZE];
 	char slots[4][2 * P2P_KEY_HASH_SIZE + 1];
@@ -503,6 +538,36 @@ static void probe_order_checks(void)
 	for (index = 0; index < 4; index++)
 		check(!memcmp(probed_hosts[index], identifiers[shown[index]], P2P_IDENTIFIER_SIZE),
 			"the games are probed in the order shown");
+	/* pings: alpha 30, Bravo 80, Charlie 10 (but its join failed), Delta
+	none */
+	pthread_mutex_lock(&p2p_lock);
+	p2p_lobby_probed(identifiers[0], 30);
+	p2p_lobby_probed(identifiers[1], 80);
+	p2p_lobby_probed(identifiers[2], 10);
+	pthread_mutex_unlock(&p2p_lock);
+	check(p2p_lobby_order(NULL) == P2P_LOBBY_ORDER_PLAYERS, "the games are shown by players at the start");
+	check(shown_as("Bravo Delta Charlie alpha "), "by players, the most first");
+	p2p_lobby_set_order(P2P_LOBBY_ORDER_PLAYERS, 1);
+	check(shown_as("alpha Delta Charlie Bravo "), "by players, the fewest first");
+	p2p_lobby_set_order(P2P_LOBBY_ORDER_PING, 0);
+	check(shown_as("alpha Bravo Delta Charlie "), "by ping, the lowest first, those with none last");
+	p2p_lobby_set_order(P2P_LOBBY_ORDER_PING, 1);
+	check(shown_as("Bravo alpha Delta Charlie "), "by ping, the highest first, those with none still last");
+	p2p_lobby_set_order(P2P_LOBBY_ORDER_NAME, 0);
+	check(shown_as("alpha Bravo Charlie Delta "), "by name, A to Z whatever the case");
+	p2p_lobby_set_order(P2P_LOBBY_ORDER_NAME, 1);
+	check(shown_as("Delta Charlie Bravo alpha "), "by name, Z to A");
+	/* kept while the browser is off and on again */
+	p2p_lobby_browse(0);
+	p2p_lobby_browse(1);
+	{
+		int reversed = 0;
+
+		check(p2p_lobby_order(&reversed) == P2P_LOBBY_ORDER_NAME && reversed,
+			"the order is kept while the browser is off");
+	}
+	p2p_lobby_set_order(99, 0);
+	check(p2p_lobby_order(NULL) == P2P_LOBBY_ORDER_PLAYERS, "an order not known is by players");
 }
 
 int main(void)
