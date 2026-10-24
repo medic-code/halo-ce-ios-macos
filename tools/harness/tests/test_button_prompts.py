@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
 CASES = ["controller-unchanged", "other-players", "action-keys", "rebound", "unbound", "buttons-in-game", "menus",
-         "custom-icons"]
+         "scores-hint", "custom-icons"]
 
 # a fault in button_prompts.c or xinput_sdl.c and the cases that must catch it
 NEGATIVE_CONTROLS = {
@@ -20,6 +20,7 @@ NEGATIVE_CONTROLS = {
                              "HALO_KEYBOARD_ZOOM,\n\tHALO_KEYBOARD_CROUCH,\n\tHALO_KEYBOARD_JUMP,"), ["action-keys"]),
     "keys-for-everyone": (("prompts == HALO_KEYBOARD_PROMPTS_NONE || ", ""), ["controller-unchanged"]),
     "no-menu-keys": (("prompts == HALO_KEYBOARD_PROMPTS_MENUS &&", "FALSE &&"), ["menus"]),
+    "scores-hint-unchanged": (("if (!key || size <= 0)", "if (TRUE)"), ["scores-hint"]),
     "no-action-name": (("\tif (!name[0])\n\t{\n\t\tchar *character;", "\tif (FALSE)\n\t{\n\t\tchar *character;"),
                        ["unbound"]),
 }

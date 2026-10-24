@@ -15,4 +15,12 @@ wchar_t const *button_prompt_text(
 	short local_player_index,
 	short icon_type);
 
+/* "Hold BACK for score" (the multiplayer text's, game_engine.c) with BACK
+the scores' key for a local player on the keyboard and mouse ("Hold Tab
+for score"); unchanged for the others */
+void button_prompt_scores_key(
+	short local_player_index,
+	wchar_t *text,
+	long size);
+
 #endif

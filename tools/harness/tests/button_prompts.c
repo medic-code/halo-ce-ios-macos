@@ -171,6 +171,21 @@ int main(int argc, char **argv)
 		expect(_prompt_icon_action, L"E");
 		return 0;
 	}
+	CASE("scores-hint")
+	{
+		wchar_t text[64] = L"Hold BACK for score";
+		wchar_t controller[64] = L"Hold BACK for score";
+		wchar_t short_buffer[8] = L"BACK!";
+
+		button_prompt_scores_key(0, text, NUMBEROF(text));
+		CHECK(!wcscmp(text, L"Hold Tab for score"), "the hint read %ls", text);
+		button_prompt_scores_key(1, controller, NUMBEROF(controller));
+		CHECK(!wcscmp(controller, L"Hold BACK for score"), "player 2's hint read %ls", controller);
+		bindings[HALO_KEYBOARD_SCOREBOARD][0] = MOUSE_MIDDLE;
+		button_prompt_scores_key(0, short_buffer, NUMBEROF(short_buffer));
+		CHECK(!wcscmp(short_buffer, L"Mouse M"), "a short buffer read %ls", short_buffer);
+		return 0;
+	}
 	CASE("custom-icons")
 	{
 		for (icon = NUMBER_OF_PROMPT_ICONS; icon < NUMBER_OF_PROMPT_ICONS + 8; icon++)

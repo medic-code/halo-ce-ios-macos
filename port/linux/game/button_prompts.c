@@ -13,7 +13,8 @@ config.toml's [controls], as Controls Setup shows it (the action's name when
 none is bound); a button, in the game, as the key of the action that the
 profile's button layout puts on it; with a menu up, as the key that presses
 it there. An icon with no key (the D-pad in the game, the map's custom
-icons) stays the controller's.
+icons) stays the controller's. The multiplayer hint that names the Back
+button in its text ("Hold BACK for score") names the scores' key.
 */
 
 #include "cseries.h"
@@ -216,4 +217,36 @@ wchar_t const *button_prompt_text(
 		text[index] = (wchar_t)(unsigned char)name[index];
 	text[index] = 0;
 	return text;
+}
+
+void button_prompt_scores_key(
+	short local_player_index,
+	wchar_t *text,
+	long size)
+{
+	static wchar_t const button[] = L"BACK";
+	wchar_t const *key = button_prompt_text(local_player_index, _prompt_icon_back_button);
+	wchar_t rest[BUTTON_PROMPT_TEXT_LENGTH * 2];
+	long at;
+	long index;
+
+	if (!key || size <= 0)
+		return;
+	for (at = 0; text[at]; at++)
+	{
+		for (index = 0; button[index] && text[at + index] == button[index]; index++)
+			;
+		if (!button[index])
+			break;
+	}
+	if (!text[at])
+		return;
+	for (index = 0; text[at + NUMBEROF(button) - 1 + index] && index < NUMBEROF(rest) - 1; index++)
+		rest[index] = text[at + NUMBEROF(button) - 1 + index];
+	rest[index] = 0;
+	for (index = 0; key[index] && at < size - 1; index++)
+		text[at++] = key[index];
+	for (index = 0; rest[index] && at < size - 1; index++)
+		text[at++] = rest[index];
+	text[at] = 0;
 }
