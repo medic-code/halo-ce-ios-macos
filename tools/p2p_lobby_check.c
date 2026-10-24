@@ -17,8 +17,10 @@ until that probe ends, a probe of its own two minutes on not), and a game
 with a password never; and the probes started in the order the games are
 shown, past one refused, none while listings wait to be checked; the games
 shown by players, by ping and by name, each either way, and probed again
-on Refresh in the order shown, which is kept while the browser is off.
-Prints PASS or the failures.
+on Refresh in the order shown, which is kept while the browser is off; the
+filters, each hiding only its games, which are not probed on Refresh (but
+those hidden by their ping), and a game with no ping kept by the ping's;
+each filter off showing every game again. Prints PASS or the failures.
 */
 
 #include "p2p_internal.h"
@@ -570,11 +572,147 @@ static void probe_order_checks(void)
 	check(p2p_lobby_order(NULL) == P2P_LOBBY_ORDER_PLAYERS, "an order not known is by players");
 }
 
+/* whether the games the filter shows are these (their names, a space after
+each) and the filter hides `hidden`, and on Refresh `probed` hosts are
+probed: the shown, in the order shown, and any hidden by their ping */
+static int filtered_as(const struct p2p_lobby_filter *filter, const char *expected, int hidden, int probed)
+{
+	struct p2p_listing all[8];
+	char shown[8 * (P2P_LISTING_NAME_SIZE + 1) + 1] = "";
+	int count, index;
+
+	p2p_lobby_set_filter(filter);
+	count = p2p_lobby_games(all, 8);
+	for (index = 0; index < count; index++)
+	{
+		strcat(shown, all[index].name);
+		strcat(shown, " ");
+	}
+	probe_count = 0;
+	p2p_lobby_refresh();
+	lobby_update(hosting_token, 0, 16);
+	if (strcmp(shown, expected) || p2p_lobby_filtered_games() != hidden || probe_count != probed)
+	{
+		printf("shown: %s(not %s), %d hidden (not %d), %d probed (not %d)\n", shown, expected,
+			p2p_lobby_filtered_games(), hidden, probe_count, probed);
+		return 0;
+	}
+	for (index = 0; index < count && probed == count; index++)
+	{
+		if (memcmp(probed_hosts[index], all[index].identifier, P2P_IDENTIFIER_SIZE))
+		{
+			printf("probed out of the order shown: %s\n", expected);
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/* five games, shown by players: Full (16 of 16, CTF, teams, 40 ms), Slow (4,
+Slayer, teams, 120 ms), Fresh (3, King, no ping yet), Coop (2 of 4, co-op,
+60 ms) and Empty (0, Slayer, 20 ms); each filter hides only its games */
+static void filter_checks(void)
+{
+	static const unsigned char token[P2P_TOKEN_SIZE] = { 5, 5, 5 };
+	static const char *names[] = { "Full", "Slow", "Fresh", "Coop", "Empty" };
+	static const int player_counts[] = { 16, 4, 3, 2, 0 }, maximum_counts[] = { 16, 16, 16, 4, 16 };
+	static const int engines[] = { 1, 2, 4, 0, 2 }, teams[] = { 1, 1, 0, 0, 0 }, pings[] = { 40, 120, -1, 60, 20 };
+	const char *all = "Full Slow Fresh Coop Empty ";
+	struct p2p_lobby_filter filter;
+	unsigned char hash[P2P_KEY_HASH_SIZE], payloads[5][512], identifiers[5][P2P_IDENTIFIER_SIZE];
+	char slots[5][2 * P2P_KEY_HASH_SIZE + 1];
+	int sizes[5], index;
+
+	/* (the games before expire) */
+	clock_now += 91000;
+	lobby_update(token, 0, 16);
+	hosting_token = token;
+	p2p_lobby_set_order(P2P_LOBBY_ORDER_PLAYERS, 0);
+	for (index = 0; index < 5; index++)
+	{
+		seed[0] = (unsigned char)(index + 11);
+		p2p_ed25519_public(seed, signing_key, x25519_secret);
+		p2p_x25519(x25519_public, x25519_secret, NULL);
+		p2p_set_hosting_public(1);
+		p2p_set_game_listing(names[index], "bloodgulch", "Game", engines[index], 0, 1, 0, teams[index]);
+		clock_now += 6000;
+		lobby_update(token, player_counts[index], maximum_counts[index]);
+		memcpy(payloads[index], published, (size_t)published_size);
+		sizes[index] = published_size;
+		p2p_key_hash(x25519_public, hash);
+		p2p_hex(hash, P2P_KEY_HASH_SIZE, slots[index]);
+		p2p_identifier_from_hash(hash, identifiers[index]);
+		p2p_set_hosting_public(0);
+		lobby_update(token, 0, 16);
+	}
+	pthread_mutex_lock(&p2p_lock);
+	for (index = 0; index < 5; index++)
+		p2p_lobby_slot_heard(slots[index], payloads[index], sizes[index], 0);
+	pthread_mutex_unlock(&p2p_lock);
+	lobby_update(token, 0, 16);
+	pthread_mutex_lock(&p2p_lock);
+	for (index = 0; index < 5; index++)
+	{
+		if (pings[index] >= 0)
+			p2p_lobby_probed(identifiers[index], pings[index]);
+	}
+	pthread_mutex_unlock(&p2p_lock);
+	memset(&filter, 0, sizeof(filter));
+	check(filtered_as(&filter, all, 0, 5), "no filter: every game shown and probed");
+	filter.hide_empty = 1;
+	check(filtered_as(&filter, "Full Slow Fresh Coop ", 1, 4), "SHOW EMPTY SERVERS off hides the empty game");
+	filter.hide_empty = 0;
+	filter.hide_full = 1;
+	check(filtered_as(&filter, "Slow Fresh Coop Empty ", 1, 4), "SHOW FULL SERVERS off hides the full game");
+	filter.hide_full = 0;
+	filter.ping_limit = 100;
+	check(filtered_as(&filter, "Full Fresh Coop Empty ", 1, 5),
+		"PING < 100 hides the slow game, which is still probed, and keeps the one with no ping");
+	filter.ping_limit = 40;
+	check(filtered_as(&filter, "Fresh Empty ", 3, 5), "PING < 40 hides a ping of 40");
+	filter.ping_limit = 0;
+	filter.engine_type = 2;
+	check(filtered_as(&filter, "Slow Empty ", 3, 2), "GAME TYPE SLAYER shows the Slayer games alone");
+	filter.engine_type = 0;
+	filter.teams = P2P_LOBBY_TEAMS_FREE_FOR_ALL;
+	check(filtered_as(&filter, "Fresh Empty ", 3, 2), "FREE-FOR-ALL hides the team and co-op games");
+	filter.teams = P2P_LOBBY_TEAMS_ONLY;
+	check(filtered_as(&filter, "Full Slow ", 3, 2), "TEAMPLAY shows the team games alone");
+	filter.teams = P2P_LOBBY_TEAMS_ANY;
+	check(filtered_as(&filter, all, 0, 5), "every filter off shows every game again");
+	/* the slow game's ping comes under the limit: shown */
+	filter.ping_limit = 100;
+	p2p_lobby_set_filter(&filter);
+	pthread_mutex_lock(&p2p_lock);
+	p2p_lobby_probed(identifiers[1], 90);
+	pthread_mutex_unlock(&p2p_lock);
+	check(filtered_as(&filter, all, 0, 5), "a game hidden by its ping shows once its ping is under the limit");
+	/* kept while the browser is off */
+	filter.hide_full = 1;
+	p2p_lobby_set_filter(&filter);
+	p2p_lobby_browse(0);
+	p2p_lobby_browse(1);
+	pthread_mutex_lock(&p2p_lock);
+	for (index = 0; index < 5; index++)
+		p2p_lobby_slot_heard(slots[index], payloads[index], sizes[index], 0);
+	pthread_mutex_unlock(&p2p_lock);
+	lobby_update(token, 0, 16);
+	{
+		struct p2p_listing shown[8];
+
+		check(p2p_lobby_games(shown, 8) == 4 && p2p_lobby_filtered_games() == 1,
+			"the filter is kept while the browser is off");
+	}
+	memset(&filter, 0, sizeof(filter));
+	p2p_lobby_set_filter(&filter);
+}
+
 int main(void)
 {
 	crypto_checks();
 	lobby_checks();
 	probe_order_checks();
+	filter_checks();
 	printf("%s (%d failures)\n", failures ? "FAIL" : "PASS", failures);
 	return failures != 0;
 }

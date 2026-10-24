@@ -58,7 +58,9 @@ of MAXIMUM_QUEUED; the rest is dropped (hosts publish again).
 
 Each game's host is probed for its ping (p2p_probe_start: the tunnel to it
 timed, p2p.c), a few at once, in the order shown, again each PROBE_REFRESH
-and on Refresh. A game with a password is not: its token is sealed.
+and on Refresh. A game with a password is not: its token is sealed. Nor is
+one the server browser's filters hide (p2p_lobby_set_filter), unless only
+its ping hides it.
 */
 
 #include "platform.h"
@@ -196,9 +198,11 @@ static struct
 	int republish_wanted;
 	unsigned long republish_time;
 
-	/* browsing, and the order shown (p2p_lobby_set_order) */
+	/* browsing, the order shown (p2p_lobby_set_order) and the games hidden
+	(p2p_lobby_set_filter) */
 	int browsing;
 	int order, order_reversed;
+	struct p2p_lobby_filter filter;
 	int query_wanted;
 	struct queued queue[MAXIMUM_QUEUED];
 	int queue_count;
@@ -692,10 +696,34 @@ static void game_listed(const struct game *game, struct p2p_listing *listing)
 	listing->refreshing = (unsigned char)game->refreshing;
 }
 
+/* whether the filter shows the game; `timing`: whatever its ping (its host
+is timed again, and it shows once its ping is under the limit) */
+static int listing_shown(const struct p2p_listing *listing, int timing)
+{
+	const struct p2p_lobby_filter *filter = &lobby.filter;
+	int ping = listing->failed ? -1 : listing->ping;
+
+	if (filter->hide_empty && !listing->player_count)
+		return 0;
+	if (filter->hide_full && listing->player_count >= listing->maximum_player_count)
+		return 0;
+	if (!timing && filter->ping_limit > 0 && ping >= filter->ping_limit)
+		return 0;
+	if (filter->engine_type && listing->engine_type != filter->engine_type)
+		return 0;
+	if (filter->teams != P2P_LOBBY_TEAMS_ANY &&
+		(!listing->engine_type || (listing->has_teams != 0) != (filter->teams == P2P_LOBBY_TEAMS_ONLY)))
+	{
+		return 0;
+	}
+	return 1;
+}
+
 static int listing_order(const void *first, const void *second);
 
 /* the hosts' pings: those not known lately probed, in the order shown,
-while there is room (a few refused, and the rest wait for a later pass) */
+while there is room (a few refused, and the rest wait for a later pass); not
+those of the games the filter hides, but for their ping */
 static void update_probes(void)
 {
 	unsigned char started[MAXIMUM_GAMES] = { 0 };
@@ -717,6 +745,8 @@ static void update_probes(void)
 				continue;
 			}
 			game_listed(game, &other);
+			if (!listing_shown(&other, 1))
+				continue;
 			if (!next || listing_order(&other, &best) < 0)
 			{
 				best = other;
@@ -1046,7 +1076,8 @@ int p2p_lobby_games(struct p2p_listing *games, int maximum_count)
 		if (!lobby.games[index].used)
 			continue;
 		game_listed(&lobby.games[index], &games[count]);
-		count++;
+		if (listing_shown(&games[count], 0))
+			count++;
 	}
 	/* (under the lock: the order is the p2p thread's too, update_probes) */
 	qsort(games, (size_t)count, sizeof(*games), listing_order);
@@ -1072,6 +1103,31 @@ int p2p_lobby_order(int *reversed)
 		*reversed = lobby.order_reversed;
 	pthread_mutex_unlock(&p2p_lock);
 	return order;
+}
+
+void p2p_lobby_set_filter(const struct p2p_lobby_filter *filter)
+{
+	pthread_mutex_lock(&p2p_lock);
+	lobby.filter = *filter;
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+int p2p_lobby_filtered_games(void)
+{
+	struct p2p_listing listing;
+	int count = 0;
+	int index;
+
+	pthread_mutex_lock(&p2p_lock);
+	for (index = 0; index < MAXIMUM_GAMES; index++)
+	{
+		if (!lobby.games[index].used)
+			continue;
+		game_listed(&lobby.games[index], &listing);
+		count += !listing_shown(&listing, 0);
+	}
+	pthread_mutex_unlock(&p2p_lock);
+	return count;
 }
 
 int p2p_listing_unlock(struct p2p_listing *listing, const char *password)
