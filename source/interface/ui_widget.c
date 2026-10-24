@@ -654,6 +654,7 @@ struct widget_instance;
 #include "interface/progress_bar.h"
 #include "interface/ui_widget_game_data_input_functions.h"
 #include "custom_edition_maps.h" /* port: port/linux/game/custom_edition_maps.c */
+#include "button_prompts.h" /* port: port/linux/game/button_prompts.c */
 #include "interface/ui_widget_event_handler_functions.h"
 #include "interface/ui_widget_text_search_and_replace_functions.h"
 #include "interface/virtual_keyboard.h"
@@ -4147,8 +4148,19 @@ void draw_string_and_hack_in_icons(
 		{
 			short remapped_icon_type;
 			short icon_index;
+			wchar_t const *key_text;
 
 			current = icon_spec + wcslen(icon_names[icon_type]);
+			/* port: the keyboard's player is shown the key in the text in
+			place of the icon */
+			key_text = button_prompt_text(
+				local_player_index_for_draw_string_and_hack_in_icons,
+				icon_type);
+			if (key_text)
+			{
+				render_state_text(bounds, &cursor_bounds, key_text);
+				continue;
+			}
 			remapped_icon_type = remap_sticks_for_local_player(
 				icon_type,
 				local_player_index_for_draw_string_and_hack_in_icons);
