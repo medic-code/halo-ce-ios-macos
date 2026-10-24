@@ -67,6 +67,8 @@ enum halo_keyboard_prompts
 };
 
 int halo_keyboard_prompts(short controller_index);
+/* the action's first binding as Controls Setup shows it, else its name */
+void halo_keyboard_action_key(int action, char *name, unsigned int size);
 
 /* the first controller's buttons (with the touch controls'), as the text
 chat's on-screen keyboard reads them: a bit for each (port/linux/game/
