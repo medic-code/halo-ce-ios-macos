@@ -3987,6 +3987,8 @@ wait is longer) */
 join that failed */
 #define LOBBY_BROWSER_LOOK_TIME 6000
 #define LOBBY_BROWSER_FAILED_TIME 8000
+/* the longest the line below the rows says it is refreshing */
+#define LOBBY_BROWSER_REFRESH_TIME 10000
 
 static struct
 {
@@ -4123,26 +4125,40 @@ static void lobby_browser_focus_row(struct widget_instance *list, short row)
 	}
 }
 
-/* a game's ping cell (the dots without a colour: pc_menu_text_color
-colours a number only) */
+/* a game's ping cell: a known ping stays while the two-minute probe runs,
+but gives way to dots after Refresh (dots are uncoloured: pc_menu_text_color
+colours numbers only) */
 static wchar_t const *browser_ping_text(struct p2p_listing const *game, unsigned long now, wchar_t *text, int size)
 {
 	static wchar_t const dots[3][4] = { L".", L"..", L"..." };
 
 	if (game->failed)
 		return L"FAILED";
+	if (game->probing && (game->ping < 0 || game->refreshing))
+		return dots[(now / 300) % 3];
 	if (game->ping >= 0)
 	{
 		usnprintf(text, size - 1, L"%d", game->ping);
 		return text;
 	}
-	if (game->probing)
-		return dots[(now / 300) % 3];
 	if (!game->open)
 		return L"CLOSED";
 	if (game->in_progress)
 		return L"LIVE";
 	return L"-";
+}
+
+/* whether a game Refresh asked to be timed again still waits for its ping */
+static boolean browser_refreshing(void)
+{
+	short index;
+
+	for (index = 0; index < lobby_browser.count; index++)
+	{
+		if (lobby_browser.games[index].refreshing)
+			return TRUE;
+	}
+	return FALSE;
 }
 
 /* "gamespy screen update" for the server browser: the rows (scrolled on
@@ -4287,6 +4303,8 @@ static void lobby_browser_update(struct widget_instance *list)
 				L"Strict NAT, turn on UPnP: could not reach %s" :
 				L"Could not reach %s", name);
 		}
+		else if (now - lobby_browser.begin_time < LOBBY_BROWSER_REFRESH_TIME && browser_refreshing())
+			usnprintf(text, NUMBEROF(text) - 1, L"Refreshing...");
 		else if (!lobby_browser.count)
 		{
 			/* (an old build sees none of the games: it says why) */

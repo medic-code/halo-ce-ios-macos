@@ -12,10 +12,11 @@ slot, an older one, a retained one of long ago, a tombstone and a listing
 older than it each handled as they must be; a game with a password,
 listed locked (its token nowhere in the listing), opened by its password
 alone; and the hosts' pings: a game's host probed with its listing's token,
-its ping listed and kept, probed again on Refresh, and a game with a
-password never; and the probes started in the order the games are shown,
-past one refused, none while listings wait to be checked. Prints PASS or the
-failures.
+its ping listed and kept, probed again on Refresh (marked as Refresh's
+until that probe ends, a probe of its own two minutes on not), and a game
+with a password never; and the probes started in the order the games are
+shown, past one refused, none while listings wait to be checked. Prints
+PASS or the failures.
 */
 
 #include "p2p_internal.h"
@@ -88,9 +89,11 @@ void p2p_signal_lobby_quit(void) {}
 
 /* the probes asked for (p2p.c's), the last one's host and token, and the
 hosts in the order probed: each ends at once, its host not reached (as
-p2p.c's does when it needs no tunnel), but refused_host's is refused; more
-than 64 asked for in one pass stops the check */
+p2p.c's does when it needs no tunnel), but refused_host's is refused, and
+none ends while probes_held; more than 64 asked for in one pass stops the
+check */
 static const unsigned char *refused_host;
+static int probes_held;
 static int probe_count, probe_asked;
 static unsigned char probed_hash[P2P_KEY_HASH_SIZE], probed_token[P2P_TOKEN_SIZE];
 static unsigned char probed_hosts[16][P2P_IDENTIFIER_SIZE];
@@ -110,7 +113,8 @@ int p2p_probe_start(const unsigned char *host_hash, const unsigned char *token)
 		return 0;
 	memcpy(probed_hosts[probe_count % 16], host, P2P_IDENTIFIER_SIZE);
 	probe_count++;
-	p2p_lobby_probed(host, -1);
+	if (!probes_held)
+		p2p_lobby_probed(host, -1);
 	return 1;
 }
 
@@ -326,6 +330,32 @@ static void lobby_checks(void)
 	lobby_update(token, 3, 16);
 	check(probe_count == 2 && games(&listing) == 1 && listing.ping == 42,
 		"Refresh times the ping again; one not reached keeps the last");
+	/* Refresh's probe held open: the game marked as Refresh's until it
+	ends; the next probe, past two minutes on (the host heard on its 30 s),
+	not */
+	probes_held = 1;
+	p2p_lobby_refresh();
+	check(games(&listing) == 1 && listing.refreshing, "Refresh marks the game it times again");
+	lobby_update(token, 3, 16);
+	check(probe_count == 3 && games(&listing) == 1 && listing.probing && listing.refreshing && listing.ping == 42,
+		"the game is marked while Refresh's probe is under way");
+	pthread_mutex_lock(&p2p_lock);
+	p2p_lobby_probed(listing.identifier, 40);
+	pthread_mutex_unlock(&p2p_lock);
+	check(games(&listing) == 1 && !listing.probing && !listing.refreshing && listing.ping == 40,
+		"the probe's end takes the mark off");
+	for (count = 0; count < 5; count++)
+	{
+		clock_now += 30000;
+		lobby_update(token, 3, 16);
+		hear(published, published_size, 0, NULL);
+	}
+	check(probe_count == 4 && games(&listing) == 1 && listing.probing && !listing.refreshing && listing.ping == 40,
+		"a probe two minutes on is not marked as Refresh's");
+	pthread_mutex_lock(&p2p_lock);
+	p2p_lobby_probed(listing.identifier, 42);
+	pthread_mutex_unlock(&p2p_lock);
+	probes_held = 0;
 	/* the older one again: no change */
 	hear(first, first_size, 0, NULL);
 	check(games(&listing) == 1 && listing.in_progress, "an older listing is ignored");
@@ -387,7 +417,8 @@ static void lobby_checks(void)
 	count = probe_count;
 	p2p_lobby_refresh();
 	lobby_update(token, 3, 16);
-	check(probe_count == count, "a game with a password is not probed");
+	check(probe_count == count && games(&listing) == 1 && !listing.refreshing,
+		"a game with a password is not probed, nor marked by Refresh");
 	{
 		int offset, found = 0;
 

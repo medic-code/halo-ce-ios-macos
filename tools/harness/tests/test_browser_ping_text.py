@@ -17,7 +17,7 @@ def generated(fault=None):
             ('under_test.inc', code))
 
 
-@pytest.mark.parametrize('case', ['number', 'dots', 'status', 'dash'])
+@pytest.mark.parametrize('case', ['number', 'refresh', 'dots', 'status', 'dash'])
 def test_case(case):
     status, output = run(build('browser_ping_text', generated()), case)
     assert status == 0, output
@@ -25,9 +25,10 @@ def test_case(case):
 
 @pytest.mark.parametrize('fault,case', [
     (('now / 300', 'now / 600'), 'dots'),
-    (('if (game->probing)', 'if (game->probing && game->open && !game->in_progress)'), 'dots'),
+    (('if (game->probing &&', 'if (game->open && !game->in_progress && game->probing &&'), 'dots'),
     (('if (game->failed)', 'if (0)'), 'status'),
-    (('game->ping >= 0', 'game->ping >= 0 && !game->probing'), 'number'),
+    (('game->ping < 0 || game->refreshing', 'game->ping < 0 || 1'), 'number'),
+    (('game->ping < 0 || game->refreshing', 'game->ping < 0'), 'refresh'),
 ])
 def test_negative_control(fault, case):
     status, output = run(build('browser_ping_text', generated(fault)), case)
