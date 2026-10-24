@@ -167,9 +167,10 @@ browser: the tunnel still reaches its host, and no other invite was joined
 since. Such a game has no text chat, whatever its host says
 (port/linux/game/network_chat.c) */
 int p2p_joined_listed_host(void);
-/* a copy of the public games found, in the order shown (p2p_lobby_set_order;
-then the most players, those not failed, the open ones, by name); returns
-their count */
+/* a copy of the public games found that the filter shows
+(p2p_lobby_set_filter), in the order shown (p2p_lobby_set_order; then the
+most players, those not failed, the open ones, by name); returns their
+count */
 int p2p_lobby_games(struct p2p_listing *games, int maximum_count);
 /* the order the public games are shown and their hosts timed in, for the
 rest of the run: by players, the most first (at the start); by ping, the
@@ -185,6 +186,34 @@ enum
 void p2p_lobby_set_order(int order, int reversed);
 /* the order (P2P_LOBBY_ORDER_*), and whether it is reversed */
 int p2p_lobby_order(int *reversed);
+/* the games the server browser's FILTERS hide, for the rest of the run
+(all zero, at the start: none): not shown, and their hosts not timed, but
+for those hidden by their ping, timed as the others are so that each shows
+again once its ping is under the limit */
+struct p2p_lobby_filter
+{
+	/* games with no players; games with every place taken */
+	int hide_empty, hide_full;
+	/* milliseconds: a game whose ping is known and is this or more (0: no
+	limit); one with no ping (not yet timed, a password's, one joining
+	failed) is shown */
+	int ping_limit;
+	/* only the games of this gametype engine (1 to 5: CTF, Slayer, Oddball,
+	King of the Hill, Race; 0: any) */
+	int engine_type;
+	/* P2P_LOBBY_TEAMS_*: any game; only free-for-all games; only team games
+	(either of these: no co-op game) */
+	int teams;
+};
+enum
+{
+	P2P_LOBBY_TEAMS_ANY,
+	P2P_LOBBY_TEAMS_FREE_FOR_ALL,
+	P2P_LOBBY_TEAMS_ONLY,
+};
+void p2p_lobby_set_filter(const struct p2p_lobby_filter *filter);
+/* how many of the public games found the filter hides */
+int p2p_lobby_filtered_games(void);
 /* how many hosts list a game of a newer network version, which is not
 shown (an old build sees none of the games) */
 int p2p_lobby_newer_games(void);
