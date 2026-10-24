@@ -3786,10 +3786,59 @@ static void focus_off_hidden(struct widget_instance *bar)
 	}
 }
 
-/* whether the browser's list's child can take focus (once visible) */
+/* whether the browser's list's child can take focus (once visible): the
+server browser's column titles too, which sort its games */
 static boolean browser_item_usable(struct widget_instance *child)
 {
-	return browser_row_index(child) != NONE || !strcmp(child->name, "join_game_button_bar");
+	return browser_row_index(child) != NONE || !strcmp(child->name, "join_game_button_bar") ||
+		(!strcmp(child->name, "join_game_header") && multiplayer.mode == _multiplayer_mode_server_browser);
+}
+
+/* the server browser's column titles that sort its games, in
+P2P_LOBBY_ORDER_*'s order */
+static char const *const browser_sort_headers[] =
+{
+	"op_sort_header_players", "op_sort_header_ping", "op_sort_header_server_name",
+};
+
+/* the order a column title sorts by (P2P_LOBBY_ORDER_*), NONE if it sorts
+nothing */
+static short browser_sort_column(struct widget_instance *header)
+{
+	short column;
+
+	for (column = 0; column < NUMBEROF(browser_sort_headers); column++)
+	{
+		if (!strcmp(header->name, browser_sort_headers[column]))
+			return column;
+	}
+	return NONE;
+}
+
+/* the server browser's column titles: those that sort take the focus, the
+one sorted by has it and shows its arrow, up for the lowest (or A) first and
+down for the most first */
+static void browser_sort_headers_show(struct widget_instance *headers)
+{
+	struct widget_instance *header;
+	int reversed;
+	int order = p2p_lobby_order(&reversed);
+	short header_index = 0;
+
+	for (header = headers ? headers->child : NULL; header; header = header->next, header_index++)
+	{
+		struct widget_instance *arrows = named(header, "header_sort_arrows", 0);
+		boolean sorted = browser_sort_column(header) == order;
+
+		header->disabled = browser_sort_column(header) == NONE;
+		visible_set(arrows, sorted);
+		if (!sorted)
+			continue;
+		visible_set(named(arrows, "header_sort_up_arrow", 0), (order == P2P_LOBBY_ORDER_PLAYERS) == reversed);
+		visible_set(named(arrows, "header_sort_down_arrow", 0), (order == P2P_LOBBY_ORDER_PLAYERS) != reversed);
+		headers->focused_child = header;
+		headers->parameters.list.selected_index = header_index;
+	}
 }
 
 /* the browser's focus, off what cannot have it (at the start, or a row whose
@@ -3860,7 +3909,9 @@ static boolean browser_initialize(struct widget_instance *screen, struct event_r
 		struct widget_instance *list = named(screen, "join_game_items_list", 0);
 		struct widget_instance *child;
 
-		/* (only the games' rows and the buttons take focus: not the column titles, which sort nothing, nor the ticker) */
+		/* (only the games' rows, the server browser's column titles and the
+		buttons take focus: not LAN's titles, which sort nothing, nor the
+		ticker) */
 		for (child = list ? list->child : NULL; child; child = child->next)
 			child->disabled = !browser_item_usable(child);
 		if (list)
@@ -3868,10 +3919,12 @@ static boolean browser_initialize(struct widget_instance *screen, struct event_r
 	}
 	visible_set(named(screen, "scroll_up_button", 0), FALSE);
 	visible_set(named(screen, "scroll_down_button", 0), FALSE);
-	/* (the columns' sort arrows, both of each over its title: the list is
-	not sorted) */
+	/* (the columns' sort arrows, both of each over its title: the server
+	browser's sorted column's only) */
 	for (index = 0; named(screen, "header_sort_arrows", index); index++)
 		visible_set(named(screen, "header_sort_arrows", index), FALSE);
+	if (multiplayer.mode == _multiplayer_mode_server_browser)
+		browser_sort_headers_show(named(screen, "join_game_header", 0));
 	multiplayer.game_chosen = 0;
 	/* (the server browser's games are internet play's listings; joining
 	one reaches its host, whose game the client then finds as Direct Link's) */
@@ -4706,6 +4759,27 @@ static boolean browser_select(struct widget_instance *widget, struct event_recor
 		}
 		return browser_join(widget, controller, widget_deleted);
 	}
+	return TRUE;
+}
+
+/* "gamespy select header" (the server browser's SERVER NAME, PLAYERS and
+PING): its games in the column's order, and the other way at each press on
+it again, from the first game. Not the A press a join posts:
+lobby_browser_select */
+static boolean browser_sort(struct widget_instance *widget, short controller, boolean *widget_deleted)
+{
+	short column = browser_sort_column(widget);
+	int reversed;
+
+	if (lobby_browser.ready)
+		return lobby_browser_select(widget, controller, NONE, widget_deleted);
+	if (multiplayer.mode != _multiplayer_mode_server_browser || column == NONE)
+		return TRUE;
+	p2p_lobby_set_order(column, p2p_lobby_order(&reversed) == column && !reversed);
+	lobby_browser.first = 0;
+	lobby_browser.chosen = 0;
+	browser_sort_headers_show(widget->parent);
+	ui_play_audio_feedback_sound(SOUND_CURSOR);
 	return TRUE;
 }
 
@@ -6329,6 +6403,10 @@ boolean pc_menu_event_function_invoke(
 		else if (!strcmp(name, "gamespy select item") || !strcmp(name, "gamespy select button"))
 		{
 			return browser_select(widget, event, controller, widget_deleted);
+		}
+		else if (!strcmp(name, "gamespy select header"))
+		{
+			return browser_sort(widget, controller, widget_deleted);
 		}
 		else if (!strcmp(name, "gamespy back handler") && text_field_editing(NULL))
 		{
