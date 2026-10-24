@@ -708,6 +708,34 @@ static void bindings_read(void)
 	}
 }
 
+/* (the bindings as the controller's reads last read them: XInputGetState) */
+void halo_keyboard_action_key(int action, char *name, unsigned int size)
+{
+	int slot;
+
+	if (!size)
+		return;
+	name[0] = 0;
+	if (action < 0 || action >= NUMBER_OF_HALO_KEYBOARD_ACTIONS)
+		return;
+	for (slot = 0; slot < MAXIMUM_BINDINGS && !name[0]; slot++)
+	{
+		char binding[64];
+
+		halo_input_name(bindings[action][slot], binding, sizeof(binding));
+		if (bindings[action][slot] >= 0 && binding[0])
+			halo_input_shown_name(binding, name, size);
+	}
+	if (!name[0])
+	{
+		char *character;
+
+		snprintf(name, size, "%s", binding_settings[action] + strlen("controls."));
+		for (character = name; *character; character++)
+			*character = *character == '_' ? ' ' : *character >= 'a' && *character <= 'z' ? (char)(*character - 32) : *character;
+	}
+}
+
 static BOOL input_held(const struct platform_input_state *input, int code)
 {
 	BOOL wheel = SDL_GetTicks() < wheel_press_until_ms;
