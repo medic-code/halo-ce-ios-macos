@@ -959,6 +959,12 @@ GAME joins only with the correct password. The invite link of the game joins
 it without the password. The host keeps the password only while the game
 runs.
 
+The Server Browser shows the games with the most players first. Selecting a
+column title (a click, or A on it: up from the first game) sorts the games
+by it: PLAYERS the most first, PING the lowest first (games with no ping
+last), SERVER NAME A to Z. Selecting it again sorts them the other way; the
+arrow over the title shows which. The order lasts until the game quits.
+
 In the Server Browser, as in Custom Edition's, a click selects a game
 (outlined in yellow), and a click on the selected game, a double click, A,
 Enter or JOIN joins it. The game joins the invite of the game, as for a

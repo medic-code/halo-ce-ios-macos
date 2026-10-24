@@ -2528,7 +2528,7 @@ static __inline boolean widget_instance_can_handle_events(
 takes no events and has nothing in it that does, which its game passes over
 (its rows of settings take none themselves, but their spinners do), or one
 hidden (a list's rows past its items: port/linux/game/menu_functions.c) or
-disabled (the server browser's column titles, which sort nothing) */
+disabled (the browsers' column titles that sort nothing) */
 static boolean widget_instance_port_is_label(
 	struct widget_instance *widget)
 {
