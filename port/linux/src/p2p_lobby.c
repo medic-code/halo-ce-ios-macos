@@ -35,10 +35,11 @@ one deletes or keeps is no authority, so
   one of its own): a deletion is undone in seconds;
 - a browser takes only a signed listing whose key's hash is its slot's,
   keeps the newest of each host (by sequence), drops one not heard in
-  GAME_EXPIRY (on its own clock; a retained copy is taken only if its time
-  is within RETAINED_WINDOW of this machine's, from a host that died and
-  left it, and a live one only within LIVE_WINDOW, so an old listing
-  published again by someone else does not list a game long gone), takes
+  GAME_EXPIRY, or since a Refresh's query went out once REFRESH_WAIT has
+  passed (on its own clock; a retained copy is taken only if its time is
+  within RETAINED_WINDOW of this machine's, from a host that died and left
+  it, and a live one only within LIVE_WINDOW, so an old listing published
+  again by someone else does not list a game long gone), takes
   a host's closing listing (a tombstone) as its end, and ignores an
   emptied slot (a wipe is not a delete).
 A host that stops publishes a tombstone, then clears its slot. Going private
@@ -98,6 +99,9 @@ enum
 	TRIGGER_INTERVAL = 5000,
 	QUERY_JITTER = 2000,
 	GAME_EXPIRY = 90000,
+	/* (a host asked publishes within QUERY_JITTER, or TRIGGER_INTERVAL after
+	its last publish) */
+	REFRESH_WAIT = TRIGGER_INTERVAL + QUERY_JITTER,
 	PROBE_REFRESH = 120000,
 	TOMBSTONE_TIME = 600000,
 	VERIFY_BUDGET = 2,
@@ -786,6 +790,15 @@ static void update_browsing(void)
 	}
 	if (lobby.queue_count && !lobby.browsing)
 		lobby.queue_count = 0;
+	if (lobby.refresh_time && elapsed(lobby.refresh_time, REFRESH_WAIT))
+	{
+		for (index = 0; index < MAXIMUM_GAMES; index++)
+		{
+			if (lobby.games[index].used && (long)(lobby.games[index].heard_time - lobby.refresh_time) < 0)
+				lobby.games[index].used = 0;
+		}
+		lobby.refresh_time = 0;
+	}
 	for (index = 0; index < MAXIMUM_GAMES; index++)
 	{
 		if (lobby.games[index].used && elapsed(lobby.games[index].heard_time, GAME_EXPIRY))
@@ -818,7 +831,8 @@ void p2p_lobby_probed(const unsigned char *identifier, int ping)
 
 void p2p_lobby_query_sent(void)
 {
-	if (lobby.refresh_wanted)
+	/* (pressed again while waiting: the wait is the first's) */
+	if (lobby.refresh_wanted && (!lobby.refresh_time || elapsed(lobby.refresh_time, REFRESH_WAIT)))
 		lobby.refresh_time = p2p_now() ? p2p_now() : 1;
 	lobby.refresh_wanted = 0;
 }
