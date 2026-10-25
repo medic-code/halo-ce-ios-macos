@@ -538,6 +538,12 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"Hosting: the minutes a player kicked by a vote cannot join again (1 to\n"
 		"1440)." },
+	{ "network.host_ping_limit", _config_integer, "0", "HALO_NET_HOST_PING_LIMIT", _environment_value,
+		_platform_all,
+		"Hosting: kick an internet player whose ping to this machine stays above\n"
+		"this many milliseconds (the median of 5 seconds), in the lobby or in\n"
+		"their first 10 seconds in a match; they may join again. 0: no limit.\n"
+		"A system link (LAN) player has none." },
 	{ "network.map_share", _config_boolean, "true", "HALO_NET_MAP_SHARE", _environment_value, _platform_all,
 		"Hosting: send a player who joins without the game's Custom Edition map\n"
 		"the map (from custom_maps), and the resource maps it needs that the\n"
