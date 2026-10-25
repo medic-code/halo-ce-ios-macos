@@ -1,6 +1,6 @@
 """The server browser's FILTERS panel (menu_functions.c's section of that
-name): its rows' values shown, kept and applied to the lobby's filter, each
-row's help, and SHOW MISSING MAPS."""
+name): its rows' values read from their settings, shown, kept, written and
+applied to the lobby's filter, each row's help, and SHOW MISSING MAPS."""
 import re
 import sys
 from pathlib import Path
@@ -22,7 +22,7 @@ def generated(fault=None):
             ('under_test.inc', code))
 
 
-@pytest.mark.parametrize('case', ['apply', 'show', 'save', 'shown', 'help', 'maps'])
+@pytest.mark.parametrize('case', ['load', 'apply', 'show', 'save', 'shown', 'help', 'maps'])
 def test_case(case):
     status, output = run(build('browser_filters', generated()), case)
     assert status == 0, output
@@ -31,20 +31,28 @@ def test_case(case):
 @pytest.mark.parametrize('fault,case', [
     (('filter.hide_empty = !filter_values[_filter_empty];', 'filter.hide_empty = filter_values[_filter_empty];'),
      'apply'),
-    (('filter_ping_limits[PIN(filter_values[_filter_ping], 0, NUMBEROF(filter_ping_limits) - 1)]',
+    (('atoi(filter_pings[PIN(filter_values[_filter_ping], 0, NUMBEROF(filter_pings) - 2)])',
       'filter_values[_filter_ping]'), 'apply'),
+    (('			config_default(filter_rows[row].setting, text, sizeof(text));', ';'), 'load'),
+    (('		config_text(filter_rows[row].setting, text, sizeof(text));', ';'), 'load'),
+    (('{ "game_type_spinner", "network.browser_game_type", filter_engines, 5, FALSE },',
+      '{ "game_type_spinner", "network.browser_game_type", filter_teams, 5, FALSE },'), 'load'),
+    (('value == filter_values[index] || ', ''), 'save'),
+    (('		if (!config_write(filter_rows[index].setting, filter_rows[index].values[value]))\n'
+      '			platform_log("menus: could not write %s to config.toml", filter_rows[index].setting);\n', ''),
+     'save'),
     (('filter.teams = filter_values[_filter_teams];', ';'), 'apply'),
     (('	list->visible = !shown;', ';'), 'show'),
     (('spinner->parameters.list.selected_index = filter_values[index];', ';'), 'show'),
     (('	menu->focused_child = menu->child;', ';'), 'show'),
     (('screen->focused_child = shown ? panel : list;', ';'), 'show'),
-    (('filter_values[index] = spinner->parameters.list.selected_index;', ';'), 'save'),
+    (('		filter_values[index] = value;', ';'), 'save'),
     (('	browser_filter_apply();\n	lobby_browser.first = 0;', '	lobby_browser.first = 0;'), 'save'),
     (('	lobby_browser.first = 0;', ';'), 'save'),
     (('multiplayer.mode == _multiplayer_mode_server_browser && ', ''), 'shown'),
     (('(filter_rows[index].help_each_value ? spinner->parameters.list.selected_index : 0)',
       'spinner->parameters.list.selected_index'), 'help'),
-    (('{ "game_options_spinner", 6, TRUE },', '{ "game_options_spinner", 5, TRUE },'), 'help'),
+    (('filter_teams, 6, TRUE },', 'filter_teams, 5, TRUE },'), 'help'),
     (('	if (filter_values[_filter_missing_maps])', '	if (0)'), 'maps'),
     (('strlen(map) < P2P_LISTING_MAP_SIZE && ', ''), 'maps'),
     ((' && campaign_level_of(map) == NONE', ''), 'maps'),

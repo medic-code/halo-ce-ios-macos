@@ -505,6 +505,27 @@ static const struct config_setting config_settings[] =
 		"in everyone's server browser: anyone can see and join it) or, false,\n"
 		"PRIVATE (only players with its invite link can join). Server Setup's\n"
 		"LISTING changes it for each game." },
+	{ "network.browser_show_empty", _config_boolean, "true", "HALO_NET_BROWSER_SHOW_EMPTY", _environment_value,
+		_platform_all,
+		"The server browser's FILTERS (their OK writes these): false hides the\n"
+		"games with no players." },
+	{ "network.browser_show_full", _config_boolean, "true", "HALO_NET_BROWSER_SHOW_FULL", _environment_value,
+		_platform_all,
+		"False hides the server browser's games with every place taken." },
+	{ "network.browser_ping", _config_integer, "0", "HALO_NET_BROWSER_PING", _environment_value, _platform_all,
+		"50, 100, 150, 200 or 300 hides the server browser's games whose ping is\n"
+		"that many milliseconds or more (a game with no ping yet stays); 0, none." },
+	{ "network.browser_game_type", _config_string, "\"any\"", "HALO_NET_BROWSER_GAME_TYPE", _environment_value,
+		_platform_all,
+		"\"ctf\", \"slayer\", \"oddball\", \"king\" or \"race\": the server browser\n"
+		"shows only the games of that game engine; \"any\", every game." },
+	{ "network.browser_teamplay", _config_string, "\"any\"", "HALO_NET_BROWSER_TEAMPLAY", _environment_value,
+		_platform_all,
+		"\"free_for_all\" or \"teams\": the server browser shows only those games\n"
+		"(no co-op game); \"any\", every game." },
+	{ "network.browser_show_missing_maps", _config_boolean, "true", "HALO_NET_BROWSER_SHOW_MISSING_MAPS",
+		_environment_value, _platform_all,
+		"False hides the server browser's games on maps this machine has not got." },
 	{ "network.voice_lobby", _config_boolean, "true", "HALO_NET_VOICE_LOBBY", _environment_value, _platform_all,
 		"Hosting: voice chat in the lobby, before and after a game, where every\n"
 		"player hears every other." },

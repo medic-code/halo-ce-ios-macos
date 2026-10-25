@@ -3,8 +3,9 @@ BROWSER_FILTERS.C (test)
 
 The server browser's FILTERS panel (menu_functions.c's section of that name),
 as join_game.filters.xml lays it out, from test_browser_filters.py's lobby.inc
-and under_test.inc: the lobby's filter from the rows' values, the panel
-shown and hidden, OK, the help of each row, and SHOW MISSING MAPS.
+and under_test.inc: the rows' values from their settings, the lobby's
+filter from them, the panel shown and hidden, OK (the values written), the
+help of each row, and SHOW MISSING MAPS.
 */
 
 #include "harness.h"
@@ -55,6 +56,55 @@ static struct widget_instance *screen_of(struct widget_instance *widget)
 		widget = widget->parent;
 	return widget;
 }
+
+/* the settings (port_config.c): their defaults, their values, and the
+writes */
+static char const *const setting_names[] = { "network.browser_show_empty", "network.browser_show_full",
+	"network.browser_ping", "network.browser_game_type", "network.browser_teamplay",
+	"network.browser_show_missing_maps" };
+static char const *const setting_defaults[] = { "true", "true", "0", "any", "any", "true" };
+static char setting_values[6][32];
+static int writes;
+static int setting_index(char const *name)
+{
+	int index;
+
+	for (index = 0; index < 6; index++)
+	{
+		if (!strcmp(setting_names[index], name))
+			return index;
+	}
+	return -1;
+}
+static int config_text(char const *name, char *text, unsigned int size)
+{
+	int index = setting_index(name);
+
+	if (index < 0)
+		return 0;
+	snprintf(text, size, "%s", setting_values[index][0] ? setting_values[index] : setting_defaults[index]);
+	return 1;
+}
+static int config_default(char const *name, char *text, unsigned int size)
+{
+	int index = setting_index(name);
+
+	if (index < 0)
+		return 0;
+	snprintf(text, size, "%s", setting_defaults[index]);
+	return 1;
+}
+static int config_write(char const *name, char const *value)
+{
+	int index = setting_index(name);
+
+	if (index < 0)
+		return 0;
+	snprintf(setting_values[index], sizeof(setting_values[index]), "%s", value);
+	writes++;
+	return 1;
+}
+#define platform_log(...) ((void)0)
 
 /* the lobby's filter (p2p_lobby.c), the browser's mode and games */
 static struct p2p_lobby_filter lobby_filter;
@@ -163,7 +213,29 @@ int main(int argc, char **argv)
 	const char *case_name = argc > 1 ? argv[1] : "";
 
 	setup();
-	CASE("apply")
+	browser_filters_load();
+	CASE("load")
+	{
+		static short const defaults[6] = { 1, 1, 0, 0, P2P_LOBBY_TEAMS_ANY, 1 };
+		int index;
+
+		for (index = 0; index < 6; index++)
+			CHECK(filter_values[index] == defaults[index], "row %d: its setting's default", index);
+		snprintf(setting_values[0], 32, "false");
+		snprintf(setting_values[2], 32, "150");
+		snprintf(setting_values[3], 32, "king");
+		snprintf(setting_values[4], 32, "teams");
+		browser_filters_load();
+		CHECK(!filter_values[_filter_empty] && filter_values[_filter_ping] == 3 && filter_values[_filter_game_type] == 4 &&
+			filter_values[_filter_teams] == P2P_LOBBY_TEAMS_ONLY, "the settings' values");
+		snprintf(setting_values[1], 32, "maybe");
+		snprintf(setting_values[2], 32, "75");
+		snprintf(setting_values[3], 32, "swat");
+		browser_filters_load();
+		CHECK(filter_values[_filter_full] == 1 && filter_values[_filter_ping] == 0 && filter_values[_filter_game_type] == 0,
+			"a value not among a row's: its default");
+	}
+	else CASE("apply")
 	{
 		browser_filter_apply();
 		CHECK(filters_set == 1 && !lobby_filter.hide_empty && !lobby_filter.hide_full && !lobby_filter.ping_limit &&
@@ -211,10 +283,20 @@ int main(int argc, char **argv)
 		CHECK(browser_filters_save(&rows[6]), "OK succeeds");
 		for (index = 0; index < 6; index++)
 			CHECK(filter_values[index] == chosen[index], "row %d's value kept", index);
+		CHECK(writes == 5 && !strcmp(setting_values[0], "false") && !setting_values[1][0] &&
+			!strcmp(setting_values[2], "50") && !strcmp(setting_values[3], "slayer") &&
+			!strcmp(setting_values[4], "free_for_all") && !strcmp(setting_values[5], "false"),
+			"the values changed written (%d)", writes);
 		CHECK(filters_set == 1 && lobby_filter.hide_empty && !lobby_filter.hide_full && lobby_filter.ping_limit == 50 &&
 			lobby_filter.engine_type == 2 && lobby_filter.teams == P2P_LOBBY_TEAMS_FREE_FOR_ALL, "and applied");
 		CHECK(!panel.visible && list.visible && screen.focused_child == &list, "the panel hidden");
 		CHECK(lobby_browser.first == 0 && lobby_browser.chosen == 0, "the browser from its first game");
+		browser_filters_load();
+		CHECK(filter_values[_filter_teams] == P2P_LOBBY_TEAMS_FREE_FOR_ALL, "read back from the settings");
+		writes = 0;
+		browser_filters_show(&screen, TRUE);
+		browser_filters_save(&rows[6]);
+		CHECK(writes == 0, "nothing written with nothing changed");
 	}
 	else CASE("shown")
 	{
