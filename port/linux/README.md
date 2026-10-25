@@ -974,7 +974,8 @@ TEAMPLAY games only; neither shows co-op games) and SHOW MISSING MAPS (NO
 hides a game on a map this machine has not got, which map sharing would
 download on joining). OK applies them; B or CANCEL closes the filters
 unchanged. The browser does not time the hosts of the games the filters
-hide, except those PING or SHOW MISSING MAPS hides. The filters last until
+hide, except those PING or SHOW MISSING MAPS hides. When the filters hide
+every game, the line below the games says how many. The filters last until
 the game quits.
 
 In the Server Browser, as in Custom Edition's, a click selects a game

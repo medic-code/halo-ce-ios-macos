@@ -4072,6 +4072,8 @@ static struct
 	browser takes up again as it comes back */
 	struct p2p_listing password_game;
 	boolean password_joined;
+	/* the games SHOW MISSING MAPS hides */
+	short missing_maps;
 } lobby_browser;
 
 /* ---- the server browser's FILTERS: a panel over the browser
@@ -4166,19 +4168,23 @@ static boolean browser_map_missing(char const *map)
 }
 
 /* the games on maps this machine has got, if SHOW MISSING MAPS is NO (those
-it has not got timed still: the maps are looked for here, not on the p2p
-thread that times the hosts); returns how many are left */
+it has not got counted, and timed still: the maps are looked for here, not
+on the p2p thread that times the hosts); returns how many are left */
 static short lobby_browser_installed_games(struct p2p_listing *games, short count)
 {
 	short read;
 	short written = 0;
 
+	lobby_browser.missing_maps = 0;
 	if (filter_values[_filter_missing_maps])
 		return count;
 	for (read = 0; read < count; read++)
 	{
 		if (browser_map_missing(games[read].map))
+		{
+			lobby_browser.missing_maps++;
 			continue;
+		}
 		if (written != read)
 			games[written] = games[read];
 		written++;
@@ -4558,6 +4564,7 @@ static void lobby_browser_update(struct widget_instance *list)
 		{
 			/* (an old build sees none of the games: it says why) */
 			int newer = p2p_lobby_newer_games();
+			int hidden = p2p_lobby_filtered_games() + lobby_browser.missing_maps;
 
 			if (now - lobby_browser.begin_time < LOBBY_BROWSER_LOOK_TIME)
 				usnprintf(text, NUMBEROF(text) - 1, L"Looking for public games...");
@@ -4565,6 +4572,11 @@ static void lobby_browser_update(struct widget_instance *list)
 			{
 				usnprintf(text, NUMBEROF(text) - 1, L"%d %s on a newer version: update the game to join", newer,
 					newer == 1 ? L"game is" : L"games are");
+			}
+			else if (hidden)
+			{
+				usnprintf(text, NUMBEROF(text) - 1, L"%d %s hidden by FILTERS", hidden,
+					hidden == 1 ? L"game is" : L"games are");
 			}
 			else
 				usnprintf(text, NUMBEROF(text) - 1, L"No public games found");

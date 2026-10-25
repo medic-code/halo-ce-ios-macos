@@ -67,7 +67,7 @@ static void p2p_lobby_set_filter(const struct p2p_lobby_filter *filter)
 enum { _multiplayer_mode_lan, _multiplayer_mode_direct_link, _multiplayer_mode_server_browser };
 static struct { int mode; } multiplayer = { _multiplayer_mode_server_browser };
 struct p2p_listing { char map[P2P_LISTING_MAP_SIZE + 1]; };
-static struct { short first, chosen; } lobby_browser;
+static struct { short first, chosen, missing_maps; } lobby_browser;
 
 /* the maps: the Xbox's two and one Custom Edition map (custom_maps\coolmap),
 a campaign level (a30), and Custom Edition files (coolmap and oldmap, which
@@ -241,11 +241,11 @@ int main(int argc, char **argv)
 			"a_custom_map_named_to_the_limit_", "BEAVERCREEK" };
 		short count;
 
-		CHECK(installed(maps, 7) == 7 && files_looked_for == 0,
+		CHECK(installed(maps, 7) == 7 && lobby_browser.missing_maps == 0 && files_looked_for == 0,
 			"SHOW MISSING MAPS YES: every game, no map looked for");
 		filter_values[_filter_missing_maps] = FALSE;
 		count = installed(maps, 7);
-		CHECK(count == 6, "NO hides the game on a map not here (%d)", count);
+		CHECK(count == 6 && lobby_browser.missing_maps == 1, "NO hides the game on a map not here (%d)", count);
 		CHECK(files_looked_for == 2, "only maps not in the lists are looked for on disk (%d)", files_looked_for);
 		count = installed(maps, 7);
 		CHECK(count == 6 && files_looked_for == 2, "each map looked for once (%d)", files_looked_for);
