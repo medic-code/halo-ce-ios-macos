@@ -4077,9 +4077,10 @@ static struct
 } lobby_browser;
 
 /* ---- the server browser's FILTERS: a panel over the browser
-(filters_screen), its rows' values applied by OK; the games they hide are
-not shown, nor (but for those hidden by their ping, or their map) their
-hosts timed (p2p_lobby_set_filter) */
+(filters_screen), its rows' values applied by OK and written to their
+settings (network.browser_*); the games they hide are not shown, nor (but
+for those hidden by their ping, or their map) their hosts timed
+(p2p_lobby_set_filter) */
 
 enum
 {
@@ -4092,30 +4093,80 @@ enum
 	NUMBER_OF_FILTERS
 };
 
-/* the panel's spinners, in the order of its rows, and the first line of
-each's help (cap_filter_options: one for each value, but PING's and GAME
-TYPE's, which have one) */
+/* the settings' values, in the order of the spinners' (NO and YES; PING's
+limits in milliseconds, 0 for ANY; GAME TYPE's engines, ANY first; TEAMPLAY
+OPTIONS' P2P_LOBBY_TEAMS_*) */
+static char const *const filter_booleans[] = { "false", "true", NULL };
+static char const *const filter_pings[] = { "0", "50", "100", "150", "200", "300", NULL };
+static char const *const filter_engines[] = { "any", "ctf", "slayer", "oddball", "king", "race", NULL };
+static char const *const filter_teams[] = { "any", "free_for_all", "teams", NULL };
+
+/* the panel's spinners, in the order of its rows, their settings, and the
+first line of each's help (cap_filter_options: one for each value, but
+PING's and GAME TYPE's, which have one) */
 static struct
 {
 	char const *spinner;
+	char const *setting;
+	char const *const *values;
 	short help;
 	boolean help_each_value;
 } const filter_rows[NUMBER_OF_FILTERS] =
 {
-	{ "empty_servers_spinner", 0, TRUE },
-	{ "full_servers_spinner", 2, TRUE },
-	{ "ping_spinner", 4, FALSE },
-	{ "game_type_spinner", 5, FALSE },
-	{ "game_options_spinner", 6, TRUE },
-	{ "installed_maps_spinner", 9, TRUE },
+	{ "empty_servers_spinner", "network.browser_show_empty", filter_booleans, 0, TRUE },
+	{ "full_servers_spinner", "network.browser_show_full", filter_booleans, 2, TRUE },
+	{ "ping_spinner", "network.browser_ping", filter_pings, 4, FALSE },
+	{ "game_type_spinner", "network.browser_game_type", filter_engines, 5, FALSE },
+	{ "game_options_spinner", "network.browser_teamplay", filter_teams, 6, TRUE },
+	{ "installed_maps_spinner", "network.browser_show_missing_maps", filter_booleans, 9, TRUE },
 };
 
-/* PING's limits (milliseconds; 0: ANY) */
-static short const filter_ping_limits[] = { 0, 50, 100, 150, 200, 300 };
+/* each row's value: the index of its setting's in its values */
+static short filter_values[NUMBER_OF_FILTERS];
 
-/* each row's value (its spinner's: NO or YES; PING's limit; GAME TYPE's
-engine, 0 for ANY; TEAMPLAY OPTIONS' P2P_LOBBY_TEAMS_*): every game shown */
-static short filter_values[NUMBER_OF_FILTERS] = { TRUE, TRUE, 0, 0, P2P_LOBBY_TEAMS_ANY, TRUE };
+/* the index of a value in a row's values, NONE if it is not one */
+static short filter_value_index(short row, char const *text)
+{
+	short index;
+
+	for (index = 0; filter_rows[row].values[index]; index++)
+	{
+		if (!strcmp(filter_rows[row].values[index], text))
+			return index;
+	}
+	return NONE;
+}
+
+static short filter_value_count(short row)
+{
+	short count = 0;
+
+	while (filter_rows[row].values[count])
+		count++;
+	return count;
+}
+
+/* the rows' values, from their settings (one not among a row's values: its
+default) */
+static void browser_filters_load(void)
+{
+	short row;
+
+	for (row = 0; row < NUMBER_OF_FILTERS; row++)
+	{
+		char text[32] = "";
+		short value;
+
+		config_text(filter_rows[row].setting, text, sizeof(text));
+		value = filter_value_index(row, text);
+		if (value == NONE)
+		{
+			config_default(filter_rows[row].setting, text, sizeof(text));
+			value = filter_value_index(row, text);
+		}
+		filter_values[row] = value == NONE ? 0 : value;
+	}
+}
 
 /* the internet play lobby's filter, from the rows' values */
 static void browser_filter_apply(void)
@@ -4125,7 +4176,7 @@ static void browser_filter_apply(void)
 	csmemset(&filter, 0, sizeof(filter));
 	filter.hide_empty = !filter_values[_filter_empty];
 	filter.hide_full = !filter_values[_filter_full];
-	filter.ping_limit = filter_ping_limits[PIN(filter_values[_filter_ping], 0, NUMBEROF(filter_ping_limits) - 1)];
+	filter.ping_limit = atoi(filter_pings[PIN(filter_values[_filter_ping], 0, NUMBEROF(filter_pings) - 2)]);
 	filter.engine_type = filter_values[_filter_game_type];
 	filter.teams = filter_values[_filter_teams];
 	p2p_lobby_set_filter(&filter);
@@ -4230,8 +4281,9 @@ static boolean browser_filters_shown(struct widget_instance *screen)
 	return multiplayer.mode == _multiplayer_mode_server_browser && panel && panel->visible;
 }
 
-/* "gamespy update filter settings" (the panel's OK): its rows' values kept
-and applied, and the panel hidden, the browser's games from the first */
+/* "gamespy update filter settings" (the panel's OK): its rows' values kept,
+those changed written, and applied; the panel hidden, the browser's games
+from the first */
 static boolean browser_filters_save(struct widget_instance *widget)
 {
 	struct widget_instance *screen = screen_of(widget);
@@ -4240,9 +4292,13 @@ static boolean browser_filters_save(struct widget_instance *widget)
 	for (index = 0; index < NUMBER_OF_FILTERS; index++)
 	{
 		struct widget_instance *spinner = named(screen, filter_rows[index].spinner, 0);
+		short value = spinner ? spinner->parameters.list.selected_index : NONE;
 
-		if (spinner)
-			filter_values[index] = spinner->parameters.list.selected_index;
+		if (value < 0 || value == filter_values[index] || value >= filter_value_count(index))
+			continue;
+		filter_values[index] = value;
+		if (!config_write(filter_rows[index].setting, filter_rows[index].values[value]))
+			platform_log("menus: could not write %s to config.toml", filter_rows[index].setting);
 	}
 	browser_filter_apply();
 	lobby_browser.first = 0;
@@ -4295,6 +4351,7 @@ static void lobby_browser_begin(void)
 	lobby_browser.password_joined = FALSE;
 	lobby_browser.begin_time = system_milliseconds();
 	browser_map_count = 0;
+	browser_filters_load();
 	browser_filter_apply();
 	p2p_lobby_browse(TRUE);
 }

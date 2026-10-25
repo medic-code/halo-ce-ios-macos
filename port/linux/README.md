@@ -519,6 +519,12 @@ the setting for one start of the game. It has priority over the file.
 | `network.coop_pickups` | `"none"` | `HALO_NET_COOP_PICKUPS` | EXTRA PICKUPS in co-op Server Setup > Co-op Options. Modes: `"per_player"`, `"multiplier"`, `"none"`. Static mode uses the shared MULTIPLIER, capped at 8x. In per-player mode, the host scales scenario-placed campaign weapons, grenades, health kits, overshields and active camouflage by the shared PER PLAYER percentage, capped at 8 times their original count. Fractions are distributed over placements of the same item. Copies retain weapon ammunition and use clear nearby floor in the active BSP. No safe space or capacity means no extra pickup. Enemy drops, inventory and vehicles are excluded. Script-created supplies count surviving copies against their placement budget. Checkpoints retain pending counts and copies together, without multiplying again on restore. |
 | `network.coop_vehicles` | `"none"` | `HALO_NET_COOP_VEHICLES` | EXTRA VEHICLES after EXTRA PICKUPS in Co-op Options. Modes: `"per_player"`, `"multiplier"`, `"none"`. Each authored driveable vehicle supplies floor((players - 1) * Per Player * 2 / 300) extra copies in per-player mode, or floor((Multiplier - 1) * 2 / 3) extras in static mode, one at a time after a player drives the previous one clear of the home by the sum of both bounding-sphere radii plus 15%. Vehicle growth has an exact 2/3 modifier before rounding down; the default 50% requires four players for the first copy. Pelican cargo uses its unloaded resting position. Only the host spawns; obstructed pads and exhausted object capacity wait. Copies have no script name or AI passengers. In-memory checkpoint reverts restore the home table and budgets together; loading a disk/core checkpoint without that table forgets its old homes. None by default. |
 | `network.coop_enemies_multiplier` | `2` | `HALO_NET_COOP_ENEMIES_MULTIPLIER` | The shared static multiplier, `2` to `32`, for options set to STATIC MULTIPLIER. Enemy squads are this many times as large; pickups are capped at 8x; vehicles supply floor((Multiplier - 1) * 2 / 3) extra copies. MULTIPLIER in co-op's Server Setup > Co-op Options writes its choice here. |
+| `network.browser_show_empty` | `true` | `HALO_NET_BROWSER_SHOW_EMPTY` | The server browser's SHOW EMPTY SERVERS. `false`: the games with no players are hidden. OK in FILTERS writes its choice here. Refer to "Server browser". |
+| `network.browser_show_full` | `true` | `HALO_NET_BROWSER_SHOW_FULL` | SHOW FULL SERVERS. `false`: the games with every place taken are hidden. |
+| `network.browser_ping` | `0` | `HALO_NET_BROWSER_PING` | PING. `50`, `100`, `150`, `200` or `300`: the games whose ping is that many milliseconds or more are hidden (a game with no ping yet stays). `0`: none. |
+| `network.browser_game_type` | `"any"` | `HALO_NET_BROWSER_GAME_TYPE` | GAME TYPE. `"ctf"`, `"slayer"`, `"oddball"`, `"king"` or `"race"`: only the games of that game engine show. `"any"`: every game. |
+| `network.browser_teamplay` | `"any"` | `HALO_NET_BROWSER_TEAMPLAY` | TEAMPLAY OPTIONS. `"free_for_all"` or `"teams"`: only those games show (no co-op game). `"any"`: every game. |
+| `network.browser_show_missing_maps` | `true` | `HALO_NET_BROWSER_SHOW_MISSING_MAPS` | SHOW MISSING MAPS. `false`: the games on maps that you do not have are hidden. |
 | `network.voice_lobby` | `true` | `HALO_NET_VOICE_LOBBY` | When you host: `true`, all players hear all players in the lobby, before and after a game. |
 | `network.voice_mode` | `"team_global_enemy_proximity"` | `HALO_NET_VOICE_MODE` | When you host: who hears whom during a game. `"off"`; `"team_proximity"` (teammates who are near); `"team_enemy_proximity"` (all players who are near); `"team_global"` (all teammates); `"team_global_enemy_proximity"` (all teammates, and enemies who are near). Refer to "Voice chat". |
 | `network.voice_kbps` | `24` | `HALO_NET_VOICE_KBPS` | When you host: the voice quality in the lobby and in a game, in kilobits per second, `8` to `64`. |
@@ -975,8 +981,9 @@ hides a game on a map this machine has not got, which map sharing would
 download on joining). OK applies them; B or CANCEL closes the filters
 unchanged. The browser does not time the hosts of the games the filters
 hide, except those PING or SHOW MISSING MAPS hides. When the filters hide
-every game, the line below the games says how many. The filters last until
-the game quits.
+every game, the line below the games says how many. OK writes the filters
+to `config.toml` (`network.browser_*`), so they last from one run to the
+next.
 
 In the Server Browser, as in Custom Edition's, a click selects a game
 (outlined in yellow), and a click on the selected game, a double click, A,
