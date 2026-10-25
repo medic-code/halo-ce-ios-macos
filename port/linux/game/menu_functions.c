@@ -14,9 +14,9 @@ calls them from PC_MENU_FUNCTION_BASE on):
   decision", after which Settings' is the one being edited);
 - "gamespy screen init" hides the server browser's error and filter panels,
   and the title of the mode "mp type set mode" did not choose (Internet or
-  LAN); the server browser's FILTERS shows the filter panel, which its OK
-  ("gamespy update filter settings") and B or CANCEL ("gamespy back
-  handler") hide;
+  LAN); the server browser's FILTERS shows the filter panel, whose OK
+  ("gamespy update filter settings") applies it, and B or CANCEL ("gamespy
+  back handler") hides it;
 - its buttons' events: "mouse emit back event" and "mouse emit x event" push
   B and X (as the mouse does), "emit custom activation event" (an OK
   button) runs the screen's custom activation handler, "single prev cl item
@@ -4075,7 +4075,9 @@ static struct
 } lobby_browser;
 
 /* ---- the server browser's FILTERS: a panel over the browser
-(filters_screen) */
+(filters_screen), its rows' values applied by OK; the games they hide are
+not shown, nor (but for those hidden by their ping, or their map) their
+hosts timed (p2p_lobby_set_filter) */
 
 enum
 {
@@ -4106,15 +4108,94 @@ static struct
 	{ "installed_maps_spinner", 9, TRUE },
 };
 
-/* the FILTERS panel of the browser's screen shown, the focus on its first
-row; or hidden, the focus back on the browser's (on FILTERS). The
-browser's rows are hidden under it, so that the pointer passing over them
-does not take the focus */
+/* PING's limits (milliseconds; 0: ANY) */
+static short const filter_ping_limits[] = { 0, 50, 100, 150, 200, 300 };
+
+/* each row's value (its spinner's: NO or YES; PING's limit; GAME TYPE's
+engine, 0 for ANY; TEAMPLAY OPTIONS' P2P_LOBBY_TEAMS_*): every game shown */
+static short filter_values[NUMBER_OF_FILTERS] = { TRUE, TRUE, 0, 0, P2P_LOBBY_TEAMS_ANY, TRUE };
+
+static void browser_filter_apply(void)
+{
+	struct p2p_lobby_filter filter;
+
+	csmemset(&filter, 0, sizeof(filter));
+	filter.hide_empty = !filter_values[_filter_empty];
+	filter.hide_full = !filter_values[_filter_full];
+	filter.ping_limit = filter_ping_limits[PIN(filter_values[_filter_ping], 0, NUMBEROF(filter_ping_limits) - 1)];
+	filter.engine_type = filter_values[_filter_game_type];
+	filter.teams = filter_values[_filter_teams];
+	p2p_lobby_set_filter(&filter);
+}
+
+/* the maps of the server browser's games looked for, each once while it is
+open: whether this machine has not got it */
+static struct
+{
+	char name[P2P_LISTING_MAP_SIZE + 1];
+	boolean missing;
+} browser_maps[LOBBY_BROWSER_GAMES];
+static short browser_map_count;
+
+/* whether this machine has not got the map of a listed game, which names
+its scenario: one of the Xbox's maps, a campaign level (co-op) or a Custom
+Edition map's (custom_maps\<name>, beside another version of its name
+too). A name of the listing's full length may be cut short, and is not
+missing */
+static boolean browser_map_missing(char const *map)
+{
+	char const *const *names;
+	short count = ui_widget_port_multiplayer_maps(&names, NULL);
+	boolean missing = strlen(map) < P2P_LISTING_MAP_SIZE && campaign_level_of(map) == NONE;
+	short index;
+
+	for (index = 0; index < browser_map_count; index++)
+	{
+		if (!strcmp(browser_maps[index].name, map))
+			return browser_maps[index].missing;
+	}
+	for (index = 0; missing && index < count; index++)
+		missing = _stricmp(scenario_name(names[index]), map) != 0;
+	missing = missing && !custom_edition_map_file_present(map);
+	if (browser_map_count < NUMBEROF(browser_maps))
+	{
+		csmemcpy(browser_maps[browser_map_count].name, map, sizeof(browser_maps[0].name));
+		browser_maps[browser_map_count++].missing = missing;
+	}
+	return missing;
+}
+
+/* the games on maps this machine has got, if SHOW MISSING MAPS is NO (those
+it has not got timed still: the maps are looked for here, not on the p2p
+thread that times the hosts); returns how many are left */
+static short lobby_browser_installed_games(struct p2p_listing *games, short count)
+{
+	short read;
+	short written = 0;
+
+	if (filter_values[_filter_missing_maps])
+		return count;
+	for (read = 0; read < count; read++)
+	{
+		if (browser_map_missing(games[read].map))
+			continue;
+		if (written != read)
+			games[written] = games[read];
+		written++;
+	}
+	return written;
+}
+
+/* the FILTERS panel of the browser's screen shown, its rows the values and
+the focus on the first; or hidden, the focus back on the browser's (on
+FILTERS). The browser's rows are hidden under it, so that the pointer
+passing over them does not take the focus */
 static void browser_filters_show(struct widget_instance *screen, boolean shown)
 {
 	struct widget_instance *panel = named(screen, "filters_screen", 0);
 	struct widget_instance *menu = named(panel, "filters_options_menu", 0);
 	struct widget_instance *list = named(screen, "join_game_items_list", 0);
+	short index;
 
 	if (!panel || !menu || !list)
 		return;
@@ -4123,6 +4204,13 @@ static void browser_filters_show(struct widget_instance *screen, boolean shown)
 	screen->focused_child = shown ? panel : list;
 	if (!shown)
 		return;
+	for (index = 0; index < NUMBER_OF_FILTERS; index++)
+	{
+		struct widget_instance *spinner = named(menu, filter_rows[index].spinner, 0);
+
+		if (spinner && filter_values[index] < spinner->parameters.list.number_of_items)
+			spinner->parameters.list.selected_index = filter_values[index];
+	}
 	panel->focused_child = menu;
 	menu->focused_child = menu->child;
 	menu->parameters.list.selected_index = 0;
@@ -4135,10 +4223,24 @@ static boolean browser_filters_shown(struct widget_instance *screen)
 	return multiplayer.mode == _multiplayer_mode_server_browser && panel && panel->visible;
 }
 
-/* "gamespy update filter settings" (the panel's OK): the panel hidden */
+/* "gamespy update filter settings" (the panel's OK): its rows' values kept
+and applied, and the panel hidden, the browser's games from the first */
 static boolean browser_filters_save(struct widget_instance *widget)
 {
-	browser_filters_show(screen_of(widget), FALSE);
+	struct widget_instance *screen = screen_of(widget);
+	short index;
+
+	for (index = 0; index < NUMBER_OF_FILTERS; index++)
+	{
+		struct widget_instance *spinner = named(screen, filter_rows[index].spinner, 0);
+
+		if (spinner)
+			filter_values[index] = spinner->parameters.list.selected_index;
+	}
+	browser_filter_apply();
+	lobby_browser.first = 0;
+	lobby_browser.chosen = 0;
+	browser_filters_show(screen, FALSE);
 	ui_play_audio_feedback_sound(SOUND_FORWARD);
 	return TRUE;
 }
@@ -4185,6 +4287,8 @@ static void lobby_browser_begin(void)
 	lobby_browser.ready = FALSE;
 	lobby_browser.password_joined = FALSE;
 	lobby_browser.begin_time = system_milliseconds();
+	browser_map_count = 0;
+	browser_filter_apply();
 	p2p_lobby_browse(TRUE);
 }
 
@@ -4317,8 +4421,8 @@ static void lobby_browser_update(struct widget_instance *list)
 	unsigned long now = system_milliseconds();
 	short chosen;
 
-	lobby_browser.count = lobby_browser_valid_games(lobby_browser.games,
-		(short)p2p_lobby_games(lobby_browser.games, LOBBY_BROWSER_GAMES));
+	lobby_browser.count = lobby_browser_installed_games(lobby_browser.games, lobby_browser_valid_games(
+		lobby_browser.games, (short)p2p_lobby_games(lobby_browser.games, LOBBY_BROWSER_GAMES)));
 	if (focused == BROWSER_ROWS - 1 && lobby_browser.first + BROWSER_ROWS < lobby_browser.count && list_scrolls_at_end())
 	{
 		lobby_browser.first++;
