@@ -14,7 +14,9 @@ calls them from PC_MENU_FUNCTION_BASE on):
   decision", after which Settings' is the one being edited);
 - "gamespy screen init" hides the server browser's error and filter panels,
   and the title of the mode "mp type set mode" did not choose (Internet or
-  LAN);
+  LAN); the server browser's FILTERS shows the filter panel, which its OK
+  ("gamespy update filter settings") and B or CANCEL ("gamespy back
+  handler") hide;
 - its buttons' events: "mouse emit back event" and "mouse emit x event" push
   B and X (as the mouse does), "emit custom activation event" (an OK
   button) runs the screen's custom activation handler, "single prev cl item
@@ -3895,7 +3897,7 @@ static boolean browser_initialize(struct widget_instance *screen, struct event_r
 	char const *title = multiplayer.mode == _multiplayer_mode_lan ? "header_lan" :
 		multiplayer.mode == _multiplayer_mode_direct_link ? "header_direct_link" : "header_server_browser";
 	char const *const titles[] = { "header_internet", "header_lan", "header_direct_link", "header_server_browser" };
-	char const *const unused[] = { "op_browser_mode", "join_game_button_update", "join_game_button_filters" };
+	char const *const unused[] = { "op_browser_mode", "join_game_button_update" };
 	short index;
 
 	server_browser_initialize(screen);
@@ -3905,6 +3907,7 @@ static boolean browser_initialize(struct widget_instance *screen, struct event_r
 		visible_set(named(screen, unused[index], 0), FALSE);
 	visible_set(named(screen, "button_clipboard", 0), multiplayer.mode == _multiplayer_mode_direct_link);
 	visible_set(named(screen, "join_game_button_refresh", 0), multiplayer.mode == _multiplayer_mode_server_browser);
+	visible_set(named(screen, "join_game_button_filters", 0), multiplayer.mode == _multiplayer_mode_server_browser);
 	{
 		struct widget_instance *list = named(screen, "join_game_items_list", 0);
 		struct widget_instance *child;
@@ -4070,6 +4073,95 @@ static struct
 	struct p2p_listing password_game;
 	boolean password_joined;
 } lobby_browser;
+
+/* ---- the server browser's FILTERS: a panel over the browser
+(filters_screen) */
+
+enum
+{
+	_filter_empty,
+	_filter_full,
+	_filter_ping,
+	_filter_game_type,
+	_filter_teams,
+	_filter_missing_maps,
+	NUMBER_OF_FILTERS
+};
+
+/* the panel's spinners, in the order of its rows, and the first line of
+each's help (cap_filter_options: one for each value, but PING's and GAME
+TYPE's, which have one) */
+static struct
+{
+	char const *spinner;
+	short help;
+	boolean help_each_value;
+} const filter_rows[NUMBER_OF_FILTERS] =
+{
+	{ "empty_servers_spinner", 0, TRUE },
+	{ "full_servers_spinner", 2, TRUE },
+	{ "ping_spinner", 4, FALSE },
+	{ "game_type_spinner", 5, FALSE },
+	{ "game_options_spinner", 6, TRUE },
+	{ "installed_maps_spinner", 9, TRUE },
+};
+
+/* the FILTERS panel of the browser's screen shown, the focus on its first
+row; or hidden, the focus back on the browser's (on FILTERS). The
+browser's rows are hidden under it, so that the pointer passing over them
+does not take the focus */
+static void browser_filters_show(struct widget_instance *screen, boolean shown)
+{
+	struct widget_instance *panel = named(screen, "filters_screen", 0);
+	struct widget_instance *menu = named(panel, "filters_options_menu", 0);
+	struct widget_instance *list = named(screen, "join_game_items_list", 0);
+
+	if (!panel || !menu || !list)
+		return;
+	panel->visible = shown;
+	list->visible = !shown;
+	screen->focused_child = shown ? panel : list;
+	if (!shown)
+		return;
+	panel->focused_child = menu;
+	menu->focused_child = menu->child;
+	menu->parameters.list.selected_index = 0;
+}
+
+static boolean browser_filters_shown(struct widget_instance *screen)
+{
+	struct widget_instance *panel = named(screen, "filters_screen", 0);
+
+	return multiplayer.mode == _multiplayer_mode_server_browser && panel && panel->visible;
+}
+
+/* "gamespy update filter settings" (the panel's OK): the panel hidden */
+static boolean browser_filters_save(struct widget_instance *widget)
+{
+	browser_filters_show(screen_of(widget), FALSE);
+	ui_play_audio_feedback_sound(SOUND_FORWARD);
+	return TRUE;
+}
+
+/* "game settings lists text update" on the panel: the help of the row with
+the focus, for its value */
+static void browser_filters_help(struct widget_instance *menu)
+{
+	struct widget_instance *description = menu->parameters.list.extended_description;
+	short index;
+
+	for (index = 0; description && menu->focused_child && index < NUMBER_OF_FILTERS; index++)
+	{
+		struct widget_instance *spinner = named(menu->focused_child, filter_rows[index].spinner, 0);
+
+		if (spinner)
+		{
+			description->parameters.text_box.string_list_index = (short)(filter_rows[index].help +
+				(filter_rows[index].help_each_value ? spinner->parameters.list.selected_index : 0));
+			return;
+		}
+	}
+}
 
 /* the row of the browser's chosen game, NONE if it is not on the rows */
 static short browser_chosen_row(void)
@@ -4468,6 +4560,15 @@ static boolean lobby_browser_select(struct widget_instance *widget, short contro
 		p2p_lobby_refresh();
 		lobby_browser.begin_time = system_milliseconds();
 		ui_play_audio_feedback_sound(SOUND_FORWARD);
+		return TRUE;
+	}
+	if (strstr(widget->name, "button_filters"))
+	{
+		if (!lobby_browser.joining)
+		{
+			browser_filters_show(screen_of(widget), TRUE);
+			ui_play_audio_feedback_sound(SOUND_FORWARD);
+		}
 		return TRUE;
 	}
 	if (row == NONE && !strstr(widget->name, "button_join"))
@@ -6238,8 +6339,7 @@ static void gametype_option_help(struct widget_instance *list)
 				}
 		}
 	}
-	/* (the server browser's filters, hidden: their helps are fewer than
-	their values) */
+	/* (the server browser's filters: browser_filters_help) */
 	if (!description || !list->focused_child || !strncmp(list->name, "filters", 7))
 		return;
 	for (row = list->child; row; row = row->next)
@@ -6409,6 +6509,15 @@ boolean pc_menu_event_function_invoke(
 		else if (!strcmp(name, "gamespy back handler") && text_field_editing(NULL))
 		{
 			text_field_end(FALSE);
+		}
+		else if (!strcmp(name, "gamespy back handler") && browser_filters_shown(widget))
+		{
+			browser_filters_show(widget, FALSE);
+			ui_play_audio_feedback_sound(SOUND_BACK);
+		}
+		else if (!strcmp(name, "gamespy update filter settings"))
+		{
+			return browser_filters_save(widget);
 		}
 		else if (!strcmp(name, "port setup edit"))
 		{
@@ -6740,6 +6849,8 @@ void pc_menu_game_data_function_invoke(
 		gametype_edit_list_update(widget);
 	else if (!strcmp(name, "get edit game settings name"))
 		gametype_edit_name(widget);
+	else if (!strcmp(name, "game settings lists text update") && !strncmp(widget->name, "filters", 7))
+		browser_filters_help(widget);
 	else if (!strcmp(name, "game settings lists text update"))
 		gametype_option_help(widget);
 	else if (!strcmp(name, "mp edit profile set rule text"))
