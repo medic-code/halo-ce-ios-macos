@@ -14,9 +14,11 @@ listed locked (its token nowhere in the listing), opened by its password
 alone; and the hosts' pings: a game's host probed with its listing's token,
 its ping listed and kept, probed again on Refresh (marked as Refresh's
 until that probe ends, a probe of its own two minutes on not), and a game
-with a password never; and the probes started in the order the games are
+with a password never; the probes started in the order the games are
 shown (p2p_lobby_shown), those not shown last, past one refused, none
-while listings wait to be checked. Prints PASS or the failures.
+while listings wait to be checked; and Refresh: a game whose host is
+silent gone 7 s after the query went to a broker, one a master server
+lists kept. Prints PASS or the failures.
 */
 
 #include "p2p_internal.h"
@@ -77,10 +79,12 @@ void p2p_sign(const void *message, int size, unsigned char *signature)
 }
 void p2p_new_invite_if_listed(void) {}
 void p2p_signal_lobby_topics(int listed, int browsing) { (void)listed; (void)browsing; }
+static int query_brokers = 1, query_held;
 int p2p_signal_lobby_query(void)
 {
-	p2p_lobby_query_sent();
-	return 1;
+	if (query_brokers && !query_held)
+		p2p_lobby_query_sent();
+	return query_brokers;
 }
 void p2p_signal_lobby_publish(const unsigned char *listing, int size, int closing)
 {
@@ -137,6 +141,13 @@ static void lobby_update(const unsigned char *token, int player_count, int maxim
 	probe_asked = 0;
 	pthread_mutex_lock(&p2p_lock);
 	p2p_lobby_update(token, player_count, maximum_player_count);
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+static void query_send(void)
+{
+	pthread_mutex_lock(&p2p_lock);
+	p2p_lobby_query_sent();
 	pthread_mutex_unlock(&p2p_lock);
 }
 
@@ -453,6 +464,98 @@ static void lobby_checks(void)
 	hear(published, published_size, 0, NULL);
 	check(games(&listing) == 1 && !listing.locked && !strcmp(listing.invite, expected_invite),
 		"a game whose password is taken off is listed open");
+	/* (the host's jitter, 0x5a5a % 2000, is 1.13 s) */
+	clock_now += 10000;
+	p2p_lobby_refresh();
+	lobby_update(token, 3, 16);
+	pthread_mutex_lock(&p2p_lock);
+	p2p_lobby_query_heard();
+	pthread_mutex_unlock(&p2p_lock);
+	count = publish_count;
+	clock_now += 1999;
+	lobby_update(token, 3, 16);
+	check(publish_count == count + 1, "the host answers Refresh within 2 s");
+	clock_now += 4900;
+	lobby_update(token, 3, 16);
+	check(games(NULL) == 1, "a game is still listed 6.9 s after Refresh's query");
+	clock_now += 1;
+	hear(published, published_size, 0, NULL);
+	clock_now += 100;
+	lobby_update(token, 3, 16);
+	check(games(NULL) == 1, "a game whose host answers 6.9 s after Refresh's query is kept");
+	/* a wipe and a forged listing are no answer, and a second press does not
+	lengthen the wait */
+	clock_now += 10000;
+	query_held = 1;
+	p2p_lobby_refresh();
+	lobby_update(token, 3, 16);
+	hear(published, 0, 0, NULL);
+	memcpy(tampered, published, (size_t)published_size);
+	tampered[9] = (unsigned char)(tampered[9] + 50);
+	tampered[66] = 'X';
+	hear(tampered, published_size, 0, NULL);
+	clock_now += 3000;
+	query_send();
+	query_held = 0;
+	clock_now += 3000;
+	p2p_lobby_refresh();
+	lobby_update(token, 3, 16);
+	clock_now += 3999;
+	lobby_update(token, 3, 16);
+	check(games(NULL) == 1, "a game whose host is silent is kept until 7 s after Refresh's query is sent");
+	clock_now += 1;
+	lobby_update(token, 3, 16);
+	check(games(NULL) == 0, "a game whose host is silent goes 7 s after Refresh's query is sent");
+	/* then a query goes out later, as when a broker connects */
+	hear(published, published_size, 0, NULL);
+	check(games(NULL) == 1, "the host's listing is taken again");
+	clock_now += 1000;
+	query_brokers = 0;
+	p2p_lobby_refresh();
+	lobby_update(token, 3, 16);
+	clock_now += 1000;
+	query_brokers = 1;
+	query_send();
+	clock_now += 10000;
+	lobby_update(token, 3, 16);
+	check(games(NULL) == 1, "Refresh with no broker drops nothing");
+	hear(published, published_size, 0, NULL);
+	check(games(NULL) == 1, "the host's listing is heard again");
+	clock_now += 10000;
+	lobby_update(token, 3, 16);
+	check(games(NULL) == 1, "without Refresh, a game whose host is silent is kept past 5 s");
+	clock_now += 79999;
+	lobby_update(token, 3, 16);
+	check(games(NULL) == 1, "without Refresh, a game whose host is silent is kept until 90 s");
+	clock_now += 1;
+	lobby_update(token, 3, 16);
+	check(games(NULL) == 0, "without Refresh, a game whose host is silent goes at 90 s");
+	/* a master server's game: heard on the master's round, not on Refresh's
+	query */
+	check(p2p_lobby_take_master_listing(published, published_size, "Publisher", "EU", 0, 1, NULL) &&
+		games(&listing) == 1 && listing.master, "the browser takes a master server's listing");
+	clock_now += 1000;
+	p2p_lobby_refresh();
+	lobby_update(token, 3, 16);
+	clock_now += 10000;
+	lobby_update(token, 3, 16);
+	check(games(NULL) == 1, "a game a master server lists is kept 10 s after Refresh's query");
+	/* the masters stop listing it; its host's slot still does */
+	for (count = 0; count < 4; count++)
+	{
+		clock_now += 30000;
+		hear(published, published_size, 0, NULL);
+	}
+	check(games(&listing) == 1 && !listing.master, "a game no master has listed for 90 s is the brokers' alone");
+	clock_now += 1000;
+	p2p_lobby_refresh();
+	lobby_update(token, 3, 16);
+	clock_now += 6999;
+	lobby_update(token, 3, 16);
+	check(games(NULL) == 1, "a game no master lists is kept until 7 s after Refresh's query");
+	clock_now += 1;
+	lobby_update(token, 3, 16);
+	check(games(NULL) == 0, "a game no master lists goes 7 s after Refresh's query");
 }
 
 /* the server browser: the games shown in the order's (reverse: the other
