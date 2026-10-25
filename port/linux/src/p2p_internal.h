@@ -176,8 +176,9 @@ void p2p_signal_lobby_topics(int listed, int browsing);
 on each broker that connects later; closing: a tombstone, after which the
 slot is cleared and nothing is published again */
 void p2p_signal_lobby_publish(const unsigned char *listing, int size, int closing);
-/* asks the hosts to publish again */
-void p2p_signal_lobby_query(void);
+/* asks the hosts to publish again: 0 if no broker carries the slots to ask
+through */
+int p2p_signal_lobby_query(void);
 /* the game is quitting: the tombstone published (p2p_signal_lobby_publish)
 and the slot cleared on every ready broker now, whatever their buckets, and
 the connections closed cleanly */
@@ -360,6 +361,8 @@ slot's retained copy, sent on subscribing */
 void p2p_lobby_slot_heard(const char *hash_text, const unsigned char *payload, int size, int retained);
 /* a query was heard */
 void p2p_lobby_query_heard(void);
+/* a query was published to a broker */
+void p2p_lobby_query_sent(void);
 /* a probe of a host (its identifier) ended: its ping in milliseconds, -1 if
 it was not reached; under p2p_lock */
 void p2p_lobby_probed(const unsigned char *identifier, int ping);

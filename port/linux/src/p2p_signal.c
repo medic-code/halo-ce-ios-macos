@@ -779,6 +779,8 @@ static void broker_update_lobby(struct broker *broker)
 		posix_random_bytes(nonce, sizeof(nonce));
 		broker_publish(broker, P2P_LOBBY_QUERY_TOPIC, nonce, sizeof(nonce));
 		broker->query_pending = 0;
+		if (broker->state == _broker_ready)
+			p2p_lobby_query_sent();
 	}
 }
 
@@ -2156,16 +2158,21 @@ void p2p_signal_lobby_publish(const unsigned char *listing, int size, int closin
 	}
 }
 
-void p2p_signal_lobby_query(void)
+int p2p_signal_lobby_query(void)
 {
+	int asked = 0;
 	int index;
 
 	for (index = 0; index < signalling.broker_count; index++)
 	{
 		if (signalling.brokers[index].topics[_topic_slots][0])
+		{
 			signalling.brokers[index].query_pending = 1;
+			asked = 1;
+		}
 		broker_update_lobby(&signalling.brokers[index]);
 	}
+	return asked;
 }
 
 void p2p_signal_lobby_quit(void)

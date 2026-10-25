@@ -71,7 +71,11 @@ void p2p_sign(const void *message, int size, unsigned char *signature)
 }
 void p2p_new_invite_if_listed(void) {}
 void p2p_signal_lobby_topics(int listed, int browsing) { (void)listed; (void)browsing; }
-void p2p_signal_lobby_query(void) {}
+int p2p_signal_lobby_query(void)
+{
+	p2p_lobby_query_sent();
+	return 1;
+}
 void p2p_signal_lobby_publish(const unsigned char *listing, int size, int closing)
 {
 	memcpy(published, listing, (size_t)size);
