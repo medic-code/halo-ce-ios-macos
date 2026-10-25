@@ -233,6 +233,9 @@ static struct
 	PROBE_HOLD from it for the queue) */
 	unsigned long browse_time;
 	int query_wanted;
+	int refresh_wanted;
+	/* when Refresh's query went out; 0 while no wait runs */
+	unsigned long refresh_time;
 	struct queued queue[MAXIMUM_QUEUED];
 	int queue_count;
 	struct game games[MAXIMUM_GAMES];
@@ -859,7 +862,9 @@ static void update_browsing(void)
 	if (lobby.query_wanted)
 	{
 		lobby.query_wanted = 0;
-		p2p_signal_lobby_query();
+		/* (nothing was asked, so no game may be dropped) */
+		if (!p2p_signal_lobby_query())
+			lobby.refresh_wanted = 0;
 	}
 	/* the queue, within the budget (one at least) */
 	while (lobby.queue_count && (p2p_now() == start || !elapsed(start, VERIFY_BUDGET)))
@@ -925,6 +930,13 @@ void p2p_lobby_probed(const unsigned char *identifier, int ping)
 				game->ping = ping;
 		}
 	}
+}
+
+void p2p_lobby_query_sent(void)
+{
+	if (lobby.refresh_wanted)
+		lobby.refresh_time = p2p_now() ? p2p_now() : 1;
+	lobby.refresh_wanted = 0;
 }
 
 /* ---------- the master servers' (master_list.c, server_master.c) */
@@ -1167,6 +1179,7 @@ void p2p_lobby_refresh(void)
 	if (lobby.browsing)
 	{
 		lobby.query_wanted = 1;
+		lobby.refresh_wanted = 1;
 		lobby.browse_time = p2p_now();
 	}
 	/* (the pings timed again, a probe under way included; a master
