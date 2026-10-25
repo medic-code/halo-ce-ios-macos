@@ -4339,6 +4339,62 @@ static short browser_chosen_row(void)
 		row < BROWSER_ROWS ? row : NONE;
 }
 
+/* ---- Social Games (the server browser's SOCIAL GAMES): the public game
+joined that fits the playlists chosen best */
+
+/* a game's ping must be under this when FILTERS' PING sets no limit */
+#define SOCIAL_GAMES_PING_LIMIT 200
+
+/* the playlists: the gametype engines (by a listing's engine_type, 1 to 5:
+CTF, Slayer, Oddball, King of the Hill, Race) and the kinds of game whose
+games fit */
+struct social_games_playlists
+{
+	boolean engines[6];
+	boolean team_games, free_for_all;
+};
+
+/* the game that fits the playlists best among those shown: one of a
+playlist's engine and kind, open with a place free, without a password,
+not failed, its ping known and under ping_limit; the most players first,
+then the lowest ping. NONE if none fits; how many fit, and how many would
+but have no ping yet */
+static short social_games_pick(struct p2p_listing const *games, short count,
+	struct social_games_playlists const *playlists, int ping_limit, short *fitting, short *untimed)
+{
+	short best = NONE;
+	short index;
+
+	*fitting = 0;
+	*untimed = 0;
+	for (index = 0; index < count; index++)
+	{
+		struct p2p_listing const *game = &games[index];
+
+		if (game->engine_type < 1 || game->engine_type >= NUMBEROF(playlists->engines) ||
+			!playlists->engines[game->engine_type] ||
+			!(game->has_teams ? playlists->team_games : playlists->free_for_all) || !game->open ||
+			game->player_count >= game->maximum_player_count || game->locked || game->failed)
+		{
+			continue;
+		}
+		if (game->ping < 0)
+		{
+			(*untimed)++;
+			continue;
+		}
+		if (game->ping >= ping_limit)
+			continue;
+		(*fitting)++;
+		if (best == NONE || game->player_count > games[best].player_count ||
+			(game->player_count == games[best].player_count && game->ping < games[best].ping))
+		{
+			best = index;
+		}
+	}
+	return best;
+}
+
 static void lobby_browser_begin(void)
 {
 	lobby_browser.count = 0;
