@@ -269,6 +269,9 @@ struct pc_menu_setting
 	long value_count;
 	char const *values[MAXIMUM_STRINGS];
 	short loaded_index;
+	/* the value shown when its screen gave way to one of its pages
+	("port settings keep"), else NONE */
+	short kept_index;
 };
 
 /* ---------- globals */
@@ -356,7 +359,7 @@ static char const *const port_function_names[] =
 	"direct ip connect go", "direct ip edit field", "network settings edit a port", "network settings defaults",
 	"load game menu delete request", "load game menu delete finish",
 	"initialize sp level list solo", "dispose sp level list", "solo level set map", "set difficulty",
-	"port settings save", "port settings defaults", "controls binding slot",
+	"port settings save", "port settings defaults", "port settings keep", "controls binding slot",
 	"color picker menu initialize", "color picker menu dispose", "color picker select color",
 	"player profile list initialize", "player profile list dispose", "request del player profile",
 	"final del player profile",
@@ -1104,6 +1107,7 @@ static void setting_add(struct halo_menu_widget const *source, long definition_i
 	setting->definition_index = definition_index;
 	setting->setting = source->setting;
 	setting->loaded_index = NONE;
+	setting->kept_index = NONE;
 	setting->value_count = spinner_split(source, TRUE, setting->values);
 }
 

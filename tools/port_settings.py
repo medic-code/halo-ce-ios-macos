@@ -547,7 +547,8 @@ def _setting_screen(folder: str, spec: dict) -> list:
             rows.append((row, platform, place + 1 + index))
         extra += _widget(row, [("width", 512), ("height", 28), ("flags", "pass_unhandled_to_focused_child"),
                                ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF"), ("platform", platform)],
-                         [f'<on event="a" open="{target}"/>', f'<on event="start" open="{target}"/>',
+                         [f'<on event="a" run="port settings keep" open="{target}"/>',
+                          f'<on event="start" run="port settings keep" open="{target}"/>',
                           '<on event="left_mouse" run="mouse emit accept event"/>',
                           f'<child widget="{base}/{key}_label"/>'])
         extra += _widget(f"{base}/{key}_label",
