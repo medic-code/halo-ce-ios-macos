@@ -16,7 +16,9 @@ calls them from PC_MENU_FUNCTION_BASE on):
   and the title of the mode "mp type set mode" did not choose (Internet or
   LAN); the server browser's FILTERS shows the filter panel, whose OK
   ("gamespy update filter settings") applies it, and B or CANCEL ("gamespy
-  back handler") hides it;
+  back handler") hides it; its SOCIAL GAMES opens Social Games' playlists,
+  whose SEARCH ("port social games search") has the browser join the
+  public game that fits them best, and B stops it;
 - its buttons' events: "mouse emit back event" and "mouse emit x event" push
   B and X (as the mouse does), "emit custom activation event" (an OK
   button) runs the screen's custom activation handler, "single prev cl item
@@ -2693,6 +2695,8 @@ Xbox's networking, run by the engine's port entry points
 longest password */
 #define PASSWORD_NAME "pc\\main_menu\\multiplayer_type_select\\join_game\\password\\password_screen"
 #define PASSWORD_LENGTH 32
+/* Social Games' screen, the playlists' (tools/port_settings.py) */
+#define SOCIAL_GAMES_NAME "pc\\main_menu\\multiplayer_type_select\\join_game\\social_games\\social_games_screen"
 /* the lobby's panel's lines (the gametype, the players, the countdown, the
 invite) */
 #define LOBBY_TEXT_LENGTH (ROW_TEXT_LENGTH * 4)
@@ -3889,6 +3893,7 @@ static void lobby_browser_begin(void);
 static void lobby_browser_update(struct widget_instance *list);
 static boolean lobby_browser_select(struct widget_instance *widget, short controller, short row,
 	boolean *widget_deleted);
+static boolean lobby_browser_join(struct p2p_listing const *game, short controller);
 
 /* "gamespy screen init": the mode's title and parts; the games' client */
 static boolean browser_initialize(struct widget_instance *screen, struct event_record *event,
@@ -3908,6 +3913,7 @@ static boolean browser_initialize(struct widget_instance *screen, struct event_r
 	visible_set(named(screen, "button_clipboard", 0), multiplayer.mode == _multiplayer_mode_direct_link);
 	visible_set(named(screen, "join_game_button_refresh", 0), multiplayer.mode == _multiplayer_mode_server_browser);
 	visible_set(named(screen, "join_game_button_filters", 0), multiplayer.mode == _multiplayer_mode_server_browser);
+	visible_set(named(screen, "button_social_games", 0), multiplayer.mode == _multiplayer_mode_server_browser);
 	{
 		struct widget_instance *list = named(screen, "join_game_items_list", 0);
 		struct widget_instance *child;
@@ -4168,6 +4174,12 @@ static void browser_filters_load(void)
 	}
 }
 
+/* PING's limit, in milliseconds (0: none) */
+static int browser_filter_ping_limit(void)
+{
+	return atoi(filter_pings[PIN(filter_values[_filter_ping], 0, NUMBEROF(filter_pings) - 2)]);
+}
+
 /* the internet play lobby's filter, from the rows' values */
 static void browser_filter_apply(void)
 {
@@ -4176,7 +4188,7 @@ static void browser_filter_apply(void)
 	csmemset(&filter, 0, sizeof(filter));
 	filter.hide_empty = !filter_values[_filter_empty];
 	filter.hide_full = !filter_values[_filter_full];
-	filter.ping_limit = atoi(filter_pings[PIN(filter_values[_filter_ping], 0, NUMBEROF(filter_pings) - 2)]);
+	filter.ping_limit = browser_filter_ping_limit();
 	filter.engine_type = filter_values[_filter_game_type];
 	filter.teams = filter_values[_filter_teams];
 	p2p_lobby_set_filter(&filter);
@@ -4395,6 +4407,53 @@ static short social_games_pick(struct p2p_listing const *games, short count,
 	return best;
 }
 
+/* the playlists' settings, by engine_type */
+static char const *const social_games_engine_settings[] =
+{
+	NULL, "network.social_ctf", "network.social_slayer", "network.social_oddball", "network.social_king",
+	"network.social_race",
+};
+
+static struct
+{
+	struct social_games_playlists playlists;
+	/* from SEARCH until a game is joined, B stops it or the browser closes;
+	the controller that asked */
+	boolean searching;
+	short controller;
+} social_games;
+
+/* the playlists, from their settings: whether a game can fit them (a
+gametype, and team games or free for all) */
+static boolean social_games_load(struct social_games_playlists *playlists)
+{
+	boolean engine = FALSE;
+	short index;
+
+	csmemset(playlists, 0, sizeof(*playlists));
+	for (index = 1; index < NUMBEROF(social_games_engine_settings); index++)
+	{
+		playlists->engines[index] = config_boolean(social_games_engine_settings[index]) != 0;
+		engine = engine || playlists->engines[index];
+	}
+	playlists->team_games = config_boolean("network.social_team_games") != 0;
+	playlists->free_for_all = config_boolean("network.social_free_for_all") != 0;
+	return engine && (playlists->team_games || playlists->free_for_all);
+}
+
+/* "port social games search" (SEARCH): the playlists written, and looked
+for as the browser comes back (lobby_browser_update); not if no game can
+fit them */
+static boolean social_games_search(struct widget_instance *widget, short controller)
+{
+	settings_each(screen_of(widget), setting_changed_save);
+	if (!social_games_load(&social_games.playlists))
+		return campaign_fail();
+	social_games.searching = TRUE;
+	social_games.controller = controller;
+	return TRUE;
+}
+
 static void lobby_browser_begin(void)
 {
 	lobby_browser.count = 0;
@@ -4416,6 +4475,7 @@ static void lobby_browser_begin(void)
 static void lobby_browser_end(void)
 {
 	lobby_browser.joining = lobby_browser.ready = FALSE;
+	social_games.searching = FALSE;
 	p2p_lobby_browse(FALSE);
 }
 
@@ -4542,6 +4602,8 @@ static void lobby_browser_update(struct widget_instance *list)
 	wchar_t text[ROW_TEXT_LENGTH * 2];
 	unsigned long now = system_milliseconds();
 	short chosen;
+	short social_pick = NONE;
+	short fitting = 0, untimed = 0;
 
 	lobby_browser.count = lobby_browser_installed_games(lobby_browser.games, lobby_browser_valid_games(
 		lobby_browser.games, (short)p2p_lobby_games(lobby_browser.games, LOBBY_BROWSER_GAMES)));
@@ -4652,6 +4714,21 @@ static void lobby_browser_update(struct widget_instance *list)
 			ui_play_audio_feedback_sound(SOUND_ERROR);
 		}
 	}
+	/* Social Games: the game that fits best joined, once the games that
+	would fit have been timed (or after a while) */
+	if (social_games.searching && !lobby_browser.joining)
+	{
+		int ping_limit = browser_filter_ping_limit();
+
+		social_pick = social_games_pick(lobby_browser.games, lobby_browser.count, &social_games.playlists,
+			ping_limit > 0 ? ping_limit : SOCIAL_GAMES_PING_LIMIT, &fitting, &untimed);
+		if (social_pick != NONE && (!untimed || now - lobby_browser.begin_time >= LOBBY_BROWSER_LOOK_TIME) &&
+			config_boolean("network.online") && !lobby_browser_join(&lobby_browser.games[social_pick],
+			social_games.controller))
+		{
+			p2p_lobby_mark_failed(lobby_browser.games[social_pick].identifier);
+		}
+	}
 	/* the line below the rows */
 	{
 		wchar_t name[P2P_LISTING_NAME_SIZE + 1];
@@ -4674,6 +4751,16 @@ static void lobby_browser_update(struct widget_instance *list)
 				L"Strict NAT, turn on UPnP: could not reach %s" :
 				L"Could not reach %s", name);
 		}
+		else if (social_games.searching && social_pick != NONE)
+		{
+			struct p2p_listing const *game = &lobby_browser.games[social_pick];
+
+			usnprintf(text, NUMBEROF(text) - 1, L"%d %s. Best: %d %s, %d ms", fitting,
+				fitting == 1 ? L"game fits" : L"games fit", game->player_count,
+				game->player_count == 1 ? L"player" : L"players", game->ping);
+		}
+		else if (social_games.searching)
+			usnprintf(text, NUMBEROF(text) - 1, L"No game fits. Looking...");
 		else if (now - lobby_browser.begin_time < LOBBY_BROWSER_REFRESH_TIME && browser_refreshing())
 			usnprintf(text, NUMBEROF(text) - 1, L"Refreshing...");
 		else if (!lobby_browser.count)
@@ -4771,6 +4858,10 @@ static boolean lobby_browser_select(struct widget_instance *widget, short contro
 		struct advertised_game *found = lobby_browser_joined_game();
 
 		lobby_browser.joining = lobby_browser.ready = FALSE;
+		/* (Social Games looks on past a game it reached that cannot be
+		joined) */
+		if (social_games.searching && (!found || (!found->open && !advertised_in_progress(found))))
+			p2p_lobby_mark_failed(lobby_browser.identifier);
 		if (!found)
 			return campaign_fail();
 		if (advertised_in_progress(found))
@@ -4803,6 +4894,14 @@ static boolean lobby_browser_select(struct widget_instance *widget, short contro
 			ui_play_audio_feedback_sound(SOUND_FORWARD);
 		}
 		return TRUE;
+	}
+	/* (Social Games' playlists: SEARCH looks for a game anew) */
+	if (strstr(widget->name, "button_social_games"))
+	{
+		if (lobby_browser.joining)
+			return TRUE;
+		social_games.searching = FALSE;
+		return ui_widget_port_open(widget, SOCIAL_GAMES_NAME, widget_deleted);
 	}
 	if (row == NONE && !strstr(widget->name, "button_join"))
 		return TRUE;
@@ -6748,6 +6847,14 @@ boolean pc_menu_event_function_invoke(
 			browser_filters_show(widget, FALSE);
 			ui_play_audio_feedback_sound(SOUND_BACK);
 		}
+		/* (B while Social Games looks: it stops, and its join, the browser
+		staying) */
+		else if (!strcmp(name, "gamespy back handler") && social_games.searching)
+		{
+			social_games.searching = FALSE;
+			lobby_browser.joining = lobby_browser.ready = FALSE;
+			ui_play_audio_feedback_sound(SOUND_BACK);
+		}
 		else if (!strcmp(name, "gamespy update filter settings"))
 		{
 			return browser_filters_save(widget);
@@ -6883,6 +6990,10 @@ boolean pc_menu_event_function_invoke(
 		else if (!strcmp(name, "port password back"))
 		{
 			return password_screen_back(widget, widget_deleted);
+		}
+		else if (!strcmp(name, "port social games search"))
+		{
+			return social_games_search(widget, controller);
 		}
 		else if (!strcmp(name, "ss copy invite"))
 		{

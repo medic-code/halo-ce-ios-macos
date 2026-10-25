@@ -489,7 +489,7 @@ def _placed(row: str, platform, members: list, places: dict) -> list:
 
 
 def _setting_screen(folder: str, spec: dict) -> list:
-    base = f"{PE}/{folder}"
+    base = folder if folder.startswith("main_menu/") else f"{PE}/{folder}"
     rows, extra = [], []
     place = -1
     # (platform_places: each platform's rows in places of their own, with
@@ -556,13 +556,20 @@ def _setting_screen(folder: str, spec: dict) -> list:
                           ("font", "ui\\large_ui"), ("color", "#FF2896FF"), ("text_x", 13), ("text_y", 4)], [])
     extra += _button(f"{base}/button_defaults", 3, ['<on event="a" run="port settings defaults"/>',
                                                     '<on event="start" run="port settings defaults"/>'])
-    extra += _button(f"{base}/button_ok", 1, ['<on event="a" run="port settings save" back="true"/>',
-                                              '<on event="start" run="port settings save" back="true"/>'])
+    # (OK, or a button of the screen's own words and function: "ok")
+    if "ok" in spec:
+        text, run = spec["ok"]
+        extra += _text_button(f"{base}/button_ok", text, [f'<on event="a" run="{run}" back="true"/>',
+                                                          f'<on event="start" run="{run}" back="true"/>'])
+    else:
+        extra += _button(f"{base}/button_ok", 1, ['<on event="a" run="port settings save" back="true"/>',
+                                                  '<on event="start" run="port settings save" back="true"/>'])
     extra += _strings(f"{base}/labels", [label for label, *_ in spec["rows"]] +
                       [label for label, *_ in spec.get("categories", ())])
     # (the help of the row whose label is string n is n + 1: the buttons' is 0)
     extra += _strings(f"{base}/help_strings",
-                      [""] + [help_text.replace("\n", "\\n") for _, _, _, help_text, *_ in spec["rows"]] +
+                      [spec.get("buttons_help", "").replace("\n", "\\n")] +
+                      [help_text.replace("\n", "\\n") for _, _, _, help_text, *_ in spec["rows"]] +
                       [help_text.replace("\n", "\\n") for _, _, help_text, *_ in spec.get("categories", ())])
     return _screen(folder, spec, rows, ["port settings help"], [], extra)
 
@@ -926,10 +933,13 @@ WIDGET_PATCHES = {
     # (Direct Link's clipboard button in the place of the PC version's
     # Refresh, and Refresh in Get List's: the Server Browser's only, which
     # asks the public games' hosts again; "swap" puts another widget in a
-    # child's place)
+    # child's place. The Server Browser's SOCIAL GAMES in the clipboard
+    # button's place too, which shows in Direct Link only: _social_games)
     f"{MT}/join_game/join_game_button_bar": {"swap": {
         f"{MT}/join_game/join_game_button_refresh": f"{MT}/join_game/button_clipboard",
         f"{MT}/join_game/join_game_button_update": f"{MT}/join_game/join_game_button_refresh",
+    }, "insert_before": {
+        f"{MT}/join_game/join_game_button_filters": [f'<child widget="{MT}/join_game/button_social_games" x="128" y="1"/>'],
     }},
 }
 
@@ -951,6 +961,7 @@ TITLES = {
     f"{MT}/join_game/header_server_browser": "SERVER BROWSER",
     f"{MT}/join_game/header_direct_link": "DIRECT LINK",
     f"{MT}/join_game/header_password": "PASSWORD",
+    f"{MT}/join_game/header_social_games": "SOCIAL GAMES",
     f"{MT}/lobby/header_lobby": "GAME LOBBY",
     f"{MT}/coop/header_player_2": "PLAYER 2 PROFILE",
     f"{MT}/lobby/header_add_player": "ADD PLAYER",
@@ -1077,10 +1088,11 @@ def _value_row(base: str, key: str, label_index: int, run: str) -> list:
 
 
 def _join_game_extras() -> list:
-    """the browser's added titles, Direct Link's clipboard button, and the
-    password screen"""
+    """the browser's added titles, Direct Link's clipboard button, the
+    password screen, and Social Games"""
     base = f"{MT}/join_game"
     lines = _password_screen()
+    lines += _social_games()
     lines += _header(f"{base}/header_server_browser", f"{base}/header_server_browser")
     lines += _header(f"{base}/header_direct_link", f"{base}/header_direct_link")
     lines += _widget(f"{base}/button_clipboard", [("type", "text"), ("width", 128), ("height", 24),
@@ -1090,6 +1102,39 @@ def _join_game_extras() -> list:
                      ['<on event="a" run="direct ip connect go"/>', '<on event="start" run="direct ip connect go"/>',
                       '<on event="left_mouse" run="mouse emit accept event"/>'])
     return lines
+
+
+# Social Games' playlists: the gametype engines and the kinds of game, each
+# YES or NO (menu_functions.c's Social Games)
+SOCIAL_GAMES = {
+    "screen": "social_games_screen",
+    "header": ("header_social_games", f"{MT}/join_game/header_social_games"),
+    "spacing": 30,
+    "ok": ("SEARCH", "port social games search"),
+    "buttons_help": "Choose a gametype, and team games or free for all.\nSEARCH joins the public game that fits best.",
+    "rows": [
+        ("SLAYER:", "network.social_slayer", YES_NO,
+         "Slayer games, and OpenCE's gametypes on Slayer:\nSWAT, Infection and Gun Game.", None),
+        ("CTF:", "network.social_ctf", YES_NO, "Capture the Flag games.", None),
+        ("KING OF THE HILL:", "network.social_king", YES_NO, "King of the Hill games.", None),
+        ("ODDBALL:", "network.social_oddball", YES_NO, "Oddball games.", None),
+        ("RACE:", "network.social_race", YES_NO, "Race games.", None),
+        ("TEAM GAMES:", "network.social_team_games", YES_NO, "Games of teams, of the gametypes chosen.", None),
+        ("FREE FOR ALL:", "network.social_free_for_all", YES_NO,
+         "Games where everyone plays alone, of the\ngametypes chosen.", None),
+    ],
+}
+
+
+def _social_games() -> list:
+    """the server browser's SOCIAL GAMES (in the place of Direct Link's
+    clipboard button: WIDGET_PATCHES) and its screen, the playlists'; its
+    SEARCH writes them, and the browser, back again, joins the public game
+    that fits them best (menu_functions.c's Social Games)"""
+    lines = _text_button(f"{MT}/join_game/button_social_games", "SOCIAL GAMES",
+                         ['<on event="a" run="gamespy select button"/>',
+                          '<on event="start" run="gamespy select button"/>'])
+    return lines + _setting_screen(f"{MT}/join_game/social_games", SOCIAL_GAMES)
 
 
 def _password_screen() -> list:

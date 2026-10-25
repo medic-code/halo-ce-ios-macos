@@ -992,6 +992,22 @@ every game, the line below the games says how many. OK writes the filters
 to `config.toml` (`network.browser_*`), so they last from one run to the
 next.
 
+SOCIAL GAMES, below the games, joins a game without browsing. Its screen
+lists the playlists, each YES or NO: SLAYER, CTF, KING OF THE HILL,
+ODDBALL and RACE (an OpenCE gametype counts as its engine's), and TEAM
+GAMES and FREE FOR ALL. SEARCH keeps them (`network.social_*`) and goes
+back to the browser, which joins a game of a gametype chosen and a kind
+chosen, of the games that FILTERS shows. The game must be open, have a
+place free, have no password and have a ping under FILTERS' PING (under
+200 ms with no PING). The game with the most players is joined, and of
+those the one with the lowest ping. The browser waits up to six seconds
+for the hosts of games that could fit to be timed. The join is the same as
+a game's A press, so map sharing and the lobby are the same. While no game
+fits, the line below the games says "No game fits. Looking...", and the
+browser keeps looking as games are listed and timed. B stops the search,
+and a second B leaves the browser. SEARCH needs a gametype, and TEAM GAMES
+or FREE FOR ALL.
+
 In the Server Browser, as in Custom Edition's, a click selects a game
 (outlined in yellow), and a click on the selected game, a double click, A,
 Enter or JOIN joins it. The game joins the invite of the game, as for a
