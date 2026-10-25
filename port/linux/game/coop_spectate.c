@@ -27,9 +27,11 @@ It also draws the line telling players about the vote to skip a cutscene
 #include "units/units.h"
 
 #include "coop_spectate.h"
+#include "halo_keyboard.h"
 #include "network_coop.h"
 
 #include <math.h>
+#include <stdio.h>
 
 /* ---------- constants */
 
@@ -109,6 +111,25 @@ static boolean next_pressed(short controller_index)
 	pressed = down && !held[controller_index];
 	held[controller_index] = down;
 	return pressed;
+}
+
+/* the button that switches teammate and votes, as a local player's line
+names it: A, or for the keyboard's player (halo_keyboard_prompts) jump's
+key, in capitals */
+static void next_button_name(
+	short local_player_index,
+	wchar_t *name,
+	short length)
+{
+	char key[32];
+	short index;
+
+	snprintf(key, sizeof(key), "%s", "A");
+	if (halo_keyboard_prompts(local_player_index) != HALO_KEYBOARD_PROMPTS_NONE)
+		halo_keyboard_action_key(HALO_KEYBOARD_JUMP, key, sizeof(key));
+	for (index = 0; key[index] && index < length - 1; index++)
+		name[index] = (wchar_t)(unsigned char)(key[index] >= 'a' && key[index] <= 'z' ? key[index] - 32 : key[index]);
+	name[index] = 0;
 }
 
 /* whether the unit rides in a vehicle it isn't driving */
@@ -247,6 +268,7 @@ void coop_spectate_draw(
 {
 	long watched = coop_spectate_watched[local_player_index];
 	wchar_t text[96];
+	wchar_t button[32];
 	wchar_t const *hint;
 
 	/* nobody to watch yet (still joining): network_coop.c shows the host's
@@ -261,7 +283,9 @@ void coop_spectate_draw(
 		hint = L"You come back beside them once it is safe";
 	else
 		hint = L"You join them when they're on foot";
-	usnprintf(text, NUMBEROF(text) - 1, L"SPECTATING %.12s   (A: NEXT)\r\n%s", player_get(watched)->name, hint);
+	next_button_name(local_player_index, button, NUMBEROF(button));
+	usnprintf(text, NUMBEROF(text) - 1, L"SPECTATING %.12s   (%s: NEXT)\r\n%s", player_get(watched)->name, button,
+		hint);
 	text[NUMBEROF(text) - 1] = 0;
 	draw_bottom_text(text);
 }
@@ -272,6 +296,7 @@ void coop_skip_vote_draw(
 	short votes, voters;
 	boolean voted;
 	wchar_t text[96];
+	wchar_t button[32];
 
 	/* once, for the first local player */
 	if (local_player_index != local_player_get_next(NONE) || !network_coop_skip_vote_status(&votes, &voters, &voted))
@@ -279,7 +304,10 @@ void coop_skip_vote_draw(
 	if (voted)
 		usnprintf(text, NUMBEROF(text) - 1, L"VOTED TO SKIP   %d OF %d", votes, voters);
 	else
-		usnprintf(text, NUMBEROF(text) - 1, L"PRESS SPACE OR A TO VOTE TO SKIP   %d OF %d", votes, voters);
+	{
+		next_button_name(local_player_index, button, NUMBEROF(button));
+		usnprintf(text, NUMBEROF(text) - 1, L"PRESS %s TO VOTE TO SKIP   %d OF %d", button, votes, voters);
+	}
 	text[NUMBEROF(text) - 1] = 0;
 	draw_bottom_text(text);
 }
