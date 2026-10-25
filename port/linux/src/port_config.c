@@ -526,6 +526,25 @@ static const struct config_setting config_settings[] =
 	{ "network.browser_show_missing_maps", _config_boolean, "true", "HALO_NET_BROWSER_SHOW_MISSING_MAPS",
 		_environment_value, _platform_all,
 		"False hides the server browser's games on maps this machine has not got." },
+	{ "network.social_slayer", _config_boolean, "true", "HALO_NET_SOCIAL_SLAYER", _environment_value, _platform_all,
+		"Social Games' playlists (the server browser's SOCIAL GAMES; its SEARCH\n"
+		"writes these): false leaves out the Slayer games (and OpenCE's on\n"
+		"Slayer). Social Games joins a game of a gametype kept, team games or\n"
+		"free for all as kept." },
+	{ "network.social_ctf", _config_boolean, "true", "HALO_NET_SOCIAL_CTF", _environment_value, _platform_all,
+		"False leaves Capture the Flag out of Social Games." },
+	{ "network.social_king", _config_boolean, "true", "HALO_NET_SOCIAL_KING", _environment_value, _platform_all,
+		"False leaves King of the Hill out of Social Games." },
+	{ "network.social_oddball", _config_boolean, "true", "HALO_NET_SOCIAL_ODDBALL", _environment_value, _platform_all,
+		"False leaves Oddball out of Social Games." },
+	{ "network.social_race", _config_boolean, "true", "HALO_NET_SOCIAL_RACE", _environment_value, _platform_all,
+		"False leaves Race out of Social Games." },
+	{ "network.social_team_games", _config_boolean, "true", "HALO_NET_SOCIAL_TEAM_GAMES", _environment_value,
+		_platform_all,
+		"False leaves the team games out of Social Games." },
+	{ "network.social_free_for_all", _config_boolean, "true", "HALO_NET_SOCIAL_FREE_FOR_ALL", _environment_value,
+		_platform_all,
+		"False leaves the free-for-all games out of Social Games." },
 	{ "network.voice_lobby", _config_boolean, "true", "HALO_NET_VOICE_LOBBY", _environment_value, _platform_all,
 		"Hosting: voice chat in the lobby, before and after a game, where every\n"
 		"player hears every other." },

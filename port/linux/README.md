@@ -525,6 +525,13 @@ the setting for one start of the game. It has priority over the file.
 | `network.browser_game_type` | `"any"` | `HALO_NET_BROWSER_GAME_TYPE` | GAME TYPE. `"ctf"`, `"slayer"`, `"oddball"`, `"king"` or `"race"`: only the games of that game engine show. `"any"`: every game. |
 | `network.browser_teamplay` | `"any"` | `HALO_NET_BROWSER_TEAMPLAY` | TEAMPLAY OPTIONS. `"free_for_all"` or `"teams"`: only those games show (no co-op game). `"any"`: every game. |
 | `network.browser_show_missing_maps` | `true` | `HALO_NET_BROWSER_SHOW_MISSING_MAPS` | SHOW MISSING MAPS. `false`: the games on maps that you do not have are hidden. |
+| `network.social_slayer` | `true` | `HALO_NET_SOCIAL_SLAYER` | Social Games' SLAYER (the server browser's SOCIAL GAMES). `false`: Social Games does not join Slayer games (or OpenCE's on Slayer). SEARCH writes its choices here. Refer to "Server browser". |
+| `network.social_ctf` | `true` | `HALO_NET_SOCIAL_CTF` | CTF. `false`: no Capture the Flag games. |
+| `network.social_king` | `true` | `HALO_NET_SOCIAL_KING` | KING OF THE HILL. `false`: no King of the Hill games. |
+| `network.social_oddball` | `true` | `HALO_NET_SOCIAL_ODDBALL` | ODDBALL. `false`: no Oddball games. |
+| `network.social_race` | `true` | `HALO_NET_SOCIAL_RACE` | RACE. `false`: no Race games. |
+| `network.social_team_games` | `true` | `HALO_NET_SOCIAL_TEAM_GAMES` | TEAM GAMES. `false`: no team games. |
+| `network.social_free_for_all` | `true` | `HALO_NET_SOCIAL_FREE_FOR_ALL` | FREE FOR ALL. `false`: no free-for-all games. |
 | `network.voice_lobby` | `true` | `HALO_NET_VOICE_LOBBY` | When you host: `true`, all players hear all players in the lobby, before and after a game. |
 | `network.voice_mode` | `"team_global_enemy_proximity"` | `HALO_NET_VOICE_MODE` | When you host: who hears whom during a game. `"off"`; `"team_proximity"` (teammates who are near); `"team_enemy_proximity"` (all players who are near); `"team_global"` (all teammates); `"team_global_enemy_proximity"` (all teammates, and enemies who are near). Refer to "Voice chat". |
 | `network.voice_kbps` | `24` | `HALO_NET_VOICE_KBPS` | When you host: the voice quality in the lobby and in a game, in kilobits per second, `8` to `64`. |
