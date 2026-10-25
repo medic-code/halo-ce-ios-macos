@@ -190,8 +190,10 @@ widgets, `initialize sp level list solo`, `solo level set map` and `set
 difficulty` are the port's, as the Xbox's take the Xbox's widgets. The
 settings screens': `port settings save` (OK) writes the settings changed
 (config.toml's, or `profile.<field>`: the profile being edited) and applies
-them, `port settings defaults` shows the defaults, `port settings help` the
-help of the row chosen; Controls Setup's `controls ...` bind the keyboard
+them, `port settings defaults` shows the defaults, `port settings keep` (on
+a row that opens one of the screen's pages) keeps the values changed for
+the screen's OK or Cancel on the way back, `port settings help` the help
+of the row chosen; Controls Setup's `controls ...` bind the keyboard
 and mouse's controls (Enter takes the next key or button pressed; left and
 right choose which of two; Escape cancels, Delete clears); Change Color's
 `color picker ...` (the Xbox's names) set the profile's colour. The others

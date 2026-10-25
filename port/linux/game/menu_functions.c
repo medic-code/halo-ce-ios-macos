@@ -27,7 +27,9 @@ calls them from PC_MENU_FUNCTION_BASE on):
 - the settings screens' (tools/port_settings.py): "port settings save"
   (OK) writes those changed and applies the window's (the rest follow
   config.toml themselves), "port settings defaults" shows the defaults,
-  "port settings help" the help of the row chosen (and Video Setup's
+  "port settings keep" (before one of the screen's pages opens in its
+  place) keeps the values changed for the screen made again on the way
+  back, "port settings help" the help of the row chosen (and Video Setup's
   Resolution or Window Size, for the display mode shown);
 - Controls Setup's: the keyboard and mouse's controls, two bindings each,
   shown a group at a time ("controls update menu"); "controls begin
@@ -116,6 +118,7 @@ unsigned long system_milliseconds(void);
 boolean ui_widget_port_dispatch_event(struct widget_instance *widget, short event_type, short controller_index,
 	boolean *deleted);
 void ui_widget_port_go_back(struct widget_instance *widget);
+boolean ui_widget_port_going_back(void);
 short ui_widget_port_list_index(struct widget_instance *list_widget);
 boolean ui_widget_port_saved_game(char const **map_name, short *level, short *difficulty);
 char const *ui_widget_event_handler_function_name(long function_index);
@@ -220,6 +223,7 @@ struct pc_menu_setting
 	long value_count;
 	char const *values[MAXIMUM_STRINGS];
 	short loaded_index;
+	short kept_index;
 };
 
 struct pc_menu_setting *pc_menu_setting_get(long definition_index);
@@ -412,6 +416,13 @@ static boolean setting_load(struct widget_instance *widget)
 	setting->loaded_index = setting_value_index(setting, current);
 	if (setting->loaded_index < (short)widget->parameters.list.number_of_items)
 		widget->parameters.list.selected_index = setting->loaded_index;
+	/* (the value changed before one of the screen's pages opened, which
+	deleted the screen: shown when the screen is gone back to, once, not when
+	it is opened afresh after the menus closed on the page) */
+	if (setting->kept_index != NONE && setting->kept_index < (short)widget->parameters.list.number_of_items &&
+		ui_widget_port_going_back())
+		widget->parameters.list.selected_index = setting->kept_index;
+	setting->kept_index = NONE;
 	return TRUE;
 }
 
@@ -1472,6 +1483,18 @@ static boolean setting_changed_save(struct widget_instance *spinner, struct pc_m
 	}
 	platform_log("menus: %s = %s", setting->setting, setting->values[index]);
 	setting->loaded_index = index;
+	return TRUE;
+}
+
+/* "port settings keep" (a row that opens one of the screen's pages, in its
+place): the values changed and not yet saved, which setting_load shows
+when the screen is made again on the way back, for its OK to save or its
+Cancel to drop */
+static boolean setting_keep(struct widget_instance *spinner, struct pc_menu_setting *setting)
+{
+	short index = spinner->parameters.list.selected_index;
+
+	setting->kept_index = index >= 0 && index < setting->value_count && index != setting->loaded_index ? index : NONE;
 	return TRUE;
 }
 
@@ -6446,6 +6469,10 @@ boolean pc_menu_event_function_invoke(
 		else if (!strcmp(name, "port settings defaults"))
 		{
 			settings_each(screen_of(widget), setting_default_show);
+		}
+		else if (!strcmp(name, "port settings keep"))
+		{
+			settings_each(screen_of(widget), setting_keep);
 		}
 		else if (!strcmp(name, "port mods init") || !strcmp(name, "port mods close"))
 		{
