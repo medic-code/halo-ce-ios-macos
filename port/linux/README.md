@@ -965,6 +965,19 @@ by it: PLAYERS the most first, PING the lowest first (games with no ping
 last), SERVER NAME A to Z. Selecting it again sorts them the other way; the
 arrow over the title shows which. The order lasts until the game quits.
 
+FILTERS, below the games, opens Halo PC's filters. Each row hides games:
+SHOW EMPTY SERVERS and SHOW FULL SERVERS (NO hides the games with no
+players, or with every place taken), PING (a game whose ping is that or
+more; a game with no ping yet stays), GAME TYPE (the game engine: an OpenCE
+gametype shows under its engine's), TEAMPLAY OPTIONS (FREE-FOR-ALL or
+TEAMPLAY games only; neither shows co-op games) and SHOW MISSING MAPS (NO
+hides a game on a map this machine has not got, which map sharing would
+download on joining). OK applies them; B or CANCEL closes the filters
+unchanged. The browser does not time the hosts of the games the filters
+hide, except those PING or SHOW MISSING MAPS hides. When the filters hide
+every game, the line below the games says how many. The filters last until
+the game quits.
+
 In the Server Browser, as in Custom Edition's, a click selects a game
 (outlined in yellow), and a click on the selected game, a double click, A,
 Enter or JOIN joins it. The game joins the invite of the game, as for a
