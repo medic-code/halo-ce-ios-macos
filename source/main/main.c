@@ -381,6 +381,7 @@ symbols in this file:
 #include "networking/network_server_manager.h" /* port: a co-op game's level won */
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "network_voice.h" /* port: port/linux/game/network_voice.c */
+#include "talking_timer.h" /* port: port/linux/game/talking_timer.c */
 #include "network_chat.h" /* port: port/linux/game/network_chat.c */
 #include "network_aim_assist.h" /* port: port/linux/game/network_aim_assist.c */
 #include "network_shield_effects.h" /* port: port/linux/game/network_shield_effects.c */
@@ -3569,6 +3570,8 @@ static boolean main_loop_iteration(
 			server_update(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
 			/* port: voice chat, in the lobby and in game (port/linux/game/network_voice.c) */
 			network_voice_update();
+			/* port: the talking timer (port/linux/game/talking_timer.c) */
+			talking_timer_update();
 			/* port: apply and replicate the host's mouse aim-assist policy. */
 			network_aim_assist_update();
 			/* port: the host's shield effects, for every machine (port/linux/game/network_shield_effects.c) */
