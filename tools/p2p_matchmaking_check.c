@@ -188,7 +188,6 @@ static struct mm_unit unit(int machine, int can_host)
 	p2p_ed25519_public(seed, result.key, NULL);
 	p2p_ed25519_to_x25519(result.key, x25519);
 	p2p_key_hash(x25519, result.key_hash);
-	result.players = 1;
 	result.can_host = can_host;
 	return result;
 }
@@ -227,8 +226,8 @@ static void check_pool(void)
 		"E4: the same host on every machine");
 	CHECK(mm_pool(units, 3, 4, pool) == 0, "3 of 4: no pool");
 	for (index = 0; index < MM_MAXIMUM_UNITS; index++)
-		every[index].players = 2;
-	every[MM_MAXIMUM_UNITS].players = every[MM_MAXIMUM_UNITS].can_host = 1;
+		every[index].failed = 1;
+	every[MM_MAXIMUM_UNITS].can_host = 1;
 	CHECK(mm_pool(every, MM_MAXIMUM_UNITS + 1, 1, pool) == 1 && pool[0] == MM_MAXIMUM_UNITS,
 		"this machine and a full peers table: every unit is walked");
 	/* four strict, then one that can host with the highest key hash: it can take only the last place */
@@ -275,8 +274,10 @@ static struct machine machines[8];
 static int machine_count;
 static unsigned long now_ms, now_unix;
 static int drop_percent;
+static int sweep_seed = 1, sweep_drop;
 static int cancel_on_join, cancel_sent, never_joins = -1;
 static int fail_join = -1, hosted_while_joining, joins_taken;
+static int ignore_first_host, ignore_only = -1, ignored = -1, fail_first_host, failed_host = -1;
 static int capture_from = -1, captured_count;
 static struct mm_out captured[256], quit_out[MM_MAXIMUM_OUT];
 
@@ -381,6 +382,23 @@ static void game_side(int index)
 
 	memset(token, index + 1, sizeof(token));
 	machine->search.decision.kind = P2P_MM_DECIDE_NONE;
+	if (machine->in >= 0 && (machines[machine->in].quit || !machines[machine->in].hosting))
+	{
+		machine->in = -1;
+		mm_game_lost(&machine->search, now_ms);
+	}
+	if (decision.kind == P2P_MM_DECIDE_HOST && ignore_first_host && ignored < 0 &&
+		(ignore_only < 0 || ignore_only == index))
+	{
+		ignored = index;
+		return;
+	}
+	if (decision.kind == P2P_MM_DECIDE_HOST && fail_first_host && failed_host < 0)
+	{
+		failed_host = index;
+		publish(index, quit_out, mm_cancel(&machine->search, quit_out, MM_MAXIMUM_OUT));
+		return;
+	}
 	if (decision.kind == P2P_MM_DECIDE_HOST)
 	{
 		machine->hosting = 1;
@@ -390,6 +408,7 @@ static void game_side(int index)
 	else if (decision.kind == P2P_MM_DECIDE_JOIN)
 	{
 		joins_taken++;
+		machine->hosting = 0;
 		if (fail_join == index)
 		{
 			mm_hosted(&machine->search, token, 1, 4, 0, now_ms);
@@ -453,12 +472,15 @@ static void world(int count)
 	machine_count = count;
 	for (count = 0; count < 8; count++)
 		machines[count].in = -1;
+	ignore_first_host = fail_first_host = 0;
+	ignored = failed_host = ignore_only = -1;
 	now_ms = 1000;
 	now_unix = 1800000000UL;
 	drop_percent = flight_count = captured_count = cancel_on_join = cancel_sent = 0;
 	never_joins = capture_from = fail_join = -1;
 	hosted_while_joining = joins_taken = 0;
-	srand(1);
+	drop_percent = sweep_drop;
+	srand(sweep_seed);
 }
 
 static void start_searching(int index, unsigned playlists, int size, int can_host)
@@ -850,15 +872,255 @@ static void check_failed_join(void)
 		subscribed(&machines[0].search, ctf), "after a failed join both queues are searched again");
 }
 
-int main(void)
+static void hear_game(int host, int players, int held, unsigned long sequence, unsigned char *key_hash)
 {
-	check_pool();
-	check_election();
-	check_records();
-	check_hosting();
-	check_playlists();
-	check_topics();
-	check_topic_moves();
+	struct mm_record record = searching(host, sequence), read_back;
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE], token[P2P_TOKEN_SIZE];
+
+	seed_of(host, seed);
+	memset(token, host, sizeof(token));
+	record.kind = MM_KIND_HOSTING;
+	record.players = players;
+	record.most_players = 4;
+	memcpy(record.token, token, P2P_TOKEN_SIZE);
+	if (held)
+	{
+		record.held = record.pool_count = 1;
+		memcpy(record.pool[0], machines[0].search.key_hash, P2P_KEY_HASH_SIZE);
+		mm_seal_token(seed, machines[0].search.key, token, record.sealed[0]);
+	}
+	if (mm_record_read(bytes, mm_record_write(&record, seed, bytes, sizeof(bytes)), &read_back))
+	{
+		mm_heard(&machines[0].search, &read_back, now_ms);
+		memcpy(key_hash, read_back.key_hash, P2P_KEY_HASH_SIZE);
+	}
+}
+
+static void check_invited_twice(void)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	unsigned char thin[P2P_KEY_HASH_SIZE], fuller[P2P_KEY_HASH_SIZE];
+	char text[2 * P2P_KEY_HASH_SIZE + 1];
+
+	case_name = "e10_invited_twice";
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	hear_game(300, 1, 1, 1, thin);
+	hear_game(301, 3, 1, 1, fuller);
+	mm_step(&machines[0].search, now_ms, out, MM_MAXIMUM_OUT);
+	p2p_hex(fuller, P2P_KEY_HASH_SIZE, text);
+	CHECK(machines[0].search.decision.kind == P2P_MM_DECIDE_JOIN &&
+		!strncmp(machines[0].search.decision.invite + strlen("halo://join/"), text, strlen(text)),
+		"E10: invited by two hosts, it joins the one with more players");
+}
+
+static void check_passed_over_hosts(void)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	unsigned char host[P2P_KEY_HASH_SIZE];
+	char text[2 * P2P_KEY_HASH_SIZE + 1];
+	int index;
+
+	case_name = "passed_over_hosts";
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	hear_game(300, 1, 0, 1, host);
+	for (index = 0; index < MM_MAXIMUM_UNITS; index++)
+		machines[0].search.peers[index].failed = machines[0].search.peers[index].used ? MM_FAILED_PASSED_OVER : MM_FAILED_NONE;
+	hear_game(300, 1, 0, 2, host);
+	mm_step(&machines[0].search, now_ms, out, MM_MAXIMUM_OUT);
+	p2p_hex(host, P2P_KEY_HASH_SIZE, text);
+	CHECK(machines[0].search.decision.kind == P2P_MM_DECIDE_JOIN &&
+		!strncmp(machines[0].search.decision.invite + strlen("halo://join/"), text, strlen(text)),
+		"a host passed over, then heard hosting, is joined");
+}
+
+static void check_host_quits_lobby(void)
+{
+	unsigned long starts[8];
+	int index, host, kept = 1;
+
+	case_name = "e11_host_quits";
+	world(5);
+	for (index = 0; index < 4; index++)
+	{
+		start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+		starts[index] = machines[index].search.started;
+	}
+	run(17.0);
+	host = find_host();
+	CHECK(host >= 0, "a host");
+	if (host < 0)
+		return;
+	machines[host].quit = 1;
+	run(1.0);
+	for (index = 0; index < 4; index++)
+		if (index != host)
+			kept &= machines[index].search.state == P2P_MM_QUEUED && machines[index].search.started == starts[index];
+	CHECK(kept, "E11: back in the queue with their original starts");
+	start_searching(4, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(30.0);
+	CHECK(host_count() == 1 && machines[find_host()].players == 4, "E11: they elect again with the next searcher");
+}
+
+static void check_never_hosts(void)
+{
+	int index;
+
+	case_name = "e12_never_hosts";
+	world(5);
+	ignore_first_host = 1;
+	for (index = 0; index < 5; index++)
+		start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(20.0);
+	if (!sweep_drop)
+		CHECK(ignored >= 0 && host_count() == 0, "the elected host never hosted");
+	run(sweep_drop ? 55.0 : 25.0);
+	CHECK(ignored >= 0 && !machines[ignored].hosting, "E12: the elected host never hosts");
+	if (!sweep_drop)
+		CHECK(host_count() == 1, "E12: passed over after 20 s; another hosts");
+	for (index = 0; index < 5; index++)
+		CHECK(!machines[index].hosting || machines[index].players == machines[index].most,
+			"E12: machine %d's game is full: one game per pool", index);
+	for (index = 0; index < 5; index++)
+		CHECK(index == ignored || machines[index].in >= 0 || machines[index].hosting,
+			"E12: machine %d has a game once the host is passed over: no seat held for it", index);
+}
+
+static void check_return(void)
+{
+	unsigned long returned;
+	int index, host, restarted = 1;
+
+	case_name = "e39_return";
+	world(4);
+	for (index = 0; index < 4; index++)
+		start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(100.0);
+	host = find_host();
+	CHECK(host >= 0 && machines[host].players == 4, "a full match");
+	if (host < 0)
+		return;
+	machines[host].quit = 1;
+	run(0.2);
+	returned = now_ms;
+	for (index = 0; index < 4; index++)
+		if (index != host)
+			restarted &= machines[index].search.marks_from >= returned - 200;
+	CHECK(restarted, "E39: marks restart from the return");
+	run(125.0);
+	CHECK(host_count() == 0, "E39: a player short, no lone host: %d", host_count());
+	for (index = 0; index < 4; index++)
+		CHECK(index == host || machines[index].search.state == P2P_MM_QUEUED,
+			"E39: machine %d searches on", index);
+}
+
+static void lobby_left_open(int index)
+{
+	struct mm_search *search = &machines[index].search;
+
+	search->decision.kind = search->decided = P2P_MM_DECIDE_HOST;
+	search->decision.playlist = search->hosting_playlist = P2P_MM_SLAYER;
+	search->decision.size = search->hosting_size = search->choice.size;
+	search->pool_count = 0;
+	search->state = P2P_MM_FOUND;
+}
+
+static void check_two_lone_hosts(void)
+{
+	case_name = "e40_two_lone_hosts";
+	world(2);
+	drop_percent = 100;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	start_searching(1, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(120.5);
+	CHECK(host_count() == 0, "E40: unheard, neither hosts alone: %d hosts", host_count());
+	lobby_left_open(0);
+	lobby_left_open(1);
+	run(0.5);
+	CHECK(host_count() == 2, "E40: two lobbies, each left alone: %d hosts", host_count());
+	drop_percent = sweep_drop;
+	run(25.0);
+	CHECK(host_count() == 1 && (machines[0].in >= 0 || machines[1].in >= 0),
+		"E40: the higher key hash hands over and joins the other's game");
+}
+
+static void check_host_failed(void)
+{
+	int index;
+
+	case_name = "host_failed";
+	world(5);
+	fail_first_host = 1;
+	for (index = 0; index < 5; index++)
+		start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	while (failed_host < 0 && now_ms < 30000)
+		run(0.1);
+	CHECK(failed_host >= 0 && (sweep_drop || host_count() == 0), "the elected host failed");
+	run(sweep_drop ? 40.0 : 8.0);
+	CHECK(host_count() == 1 && failed_host >= 0 && !machines[failed_host].hosting, "host_failed: elected again within 8 s, not 20");
+	for (index = 0; index < 5; index++)
+		CHECK(index == failed_host || machines[index].in >= 0 || machines[index].hosting,
+			"host_failed: machine %d is in the one game", index);
+}
+
+static int elects_second(int first, int second)
+{
+	struct mm_unit units[2];
+	int pool[2] = { 0, 1 };
+
+	units[0] = unit(100 + first, 1);
+	units[1] = unit(100 + second, 1);
+	return mm_elect(units, pool, 2) == 1;
+}
+
+static void check_two_queues(void)
+{
+	int slayer, ctf;
+
+	case_name = "two_queues";
+	world(8);
+	for (slayer = 1; slayer < 8 && !elects_second(0, slayer); slayer++)
+		;
+	for (ctf = 1; ctf < 8 && (ctf == slayer || elects_second(0, ctf)); ctf++)
+		;
+	CHECK(slayer < 8 && ctf < 8, "machines for the two pools");
+	if (slayer == 8 || ctf == 8)
+		return;
+	ignore_first_host = 1;
+	ignore_only = slayer;
+	start_searching(0, 1u << P2P_MM_SLAYER | 1u << P2P_MM_CTF, P2P_MM_1V1, 1);
+	start_searching(slayer, 1u << P2P_MM_SLAYER, P2P_MM_1V1, 1);
+	start_searching(ctf, 1u << P2P_MM_CTF, P2P_MM_1V1, 1);
+	run(25.0);
+	if (!sweep_drop)
+		CHECK(ignored == slayer && host_count() == 0, "the Slayer host never hosts; the CTF pool waits for machine 0");
+	run(sweep_drop ? 60.0 : 30.0);
+	CHECK(host_count() >= 1 && ignored >= 0 && !machines[ignored].hosting, "the CTF pool passes machine 0 over after 20 s");
+	CHECK(machines[0].hosting && machines[ctf].in == 0,
+		"machine 0 and the CTF machine end in one game: the CTF pool re-elects machine 0");
+}
+
+static void check_pool_never_hosts(void)
+{
+	int index;
+
+	case_name = "pool_never_hosts";
+	world(4);
+	ignore_first_host = 1;
+	for (index = 0; index < 4; index++)
+		start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(150.0);
+	CHECK(ignored >= 0, "a host was elected");
+	if (!sweep_drop)
+		for (index = 0; index < 4; index++)
+			CHECK(index == ignored || (machines[index].in < 0 && !machines[index].hosting &&
+				machines[index].search.state == P2P_MM_QUEUED),
+				"machine %d, a player short once the host is passed over, searches on", index);
+}
+
+static void check_worlds(void)
+{
 	check_four();
 	check_two_playlists();
 	check_ffa_leaves_ctf();
@@ -876,6 +1138,40 @@ int main(void)
 	check_restart();
 	check_left_queue();
 	check_failed_join();
+}
+
+static void check_faults(void)
+{
+	check_invited_twice();
+	check_passed_over_hosts();
+	check_host_quits_lobby();
+	check_never_hosts();
+	check_return();
+	check_two_lone_hosts();
+	check_host_failed();
+	check_two_queues();
+	check_pool_never_hosts();
+}
+
+/* under loss two machines can elect themselves at once, so the lossy runs check only the end state */
+int main(int argc, char **argv)
+{
+	(void)argv;
+	check_pool();
+	check_election();
+	check_records();
+	check_hosting();
+	check_playlists();
+	check_topics();
+	check_topic_moves();
+	check_worlds();
+	check_faults();
+	if (argc > 1)
+	{
+		sweep_drop = 10;
+		for (sweep_seed = 2; sweep_seed <= 31; sweep_seed++)
+			check_faults();
+	}
 	printf(failures ? "FAILED %d\n" : "PASS\n", failures);
 	return failures != 0;
 }

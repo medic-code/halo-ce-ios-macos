@@ -380,7 +380,7 @@ MATCHMAKING_SOURCES = ["port/linux/src/p2p_crypto.c", "port/third_party/monocyph
                        "port/third_party/monocypher/monocypher-ed25519.c"]
 
 
-def matchmaking_check(tmp_path, fault=None):
+def matchmaking_check(tmp_path, fault=None, *arguments):
     source = Path("port/linux/src/p2p_matchmaking.c").read_text()
     if fault:
         assert source.count(fault[0]) == 1, fault[0]
@@ -393,7 +393,7 @@ def matchmaking_check(tmp_path, fault=None):
                             "tools/p2p_matchmaking_check.c", str(copy), *MATCHMAKING_SOURCES],
                            capture_output=True, text=True)
     assert built.returncode == 0, built.stderr[-4000:]
-    return subprocess.run([str(program)], capture_output=True, text=True, timeout=120).stdout
+    return subprocess.run([str(program), *arguments], capture_output=True, text=True, timeout=300).stdout
 
 
 @linux_host_only
