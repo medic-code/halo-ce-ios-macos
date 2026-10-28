@@ -201,6 +201,19 @@ int p2p_joined_listing_masters(unsigned char (*key_ids)[P2P_LISTING_MASTER_KEY_I
 /* a copy of the public games found, in the order shown (the most players
 first; then those not failed, the open ones, by name); returns their count */
 int p2p_lobby_games(struct p2p_listing *games, int maximum_count);
+
+enum
+{
+	P2P_LOBBY_PICK_PING = 200,
+};
+/* engines: a bit per engine_type, not per playlist */
+struct p2p_lobby_wanted
+{
+	unsigned engines;
+	int players;
+	int teams;
+};
+int p2p_lobby_pick(const struct p2p_listing *games, int count, const struct p2p_lobby_wanted *wanted);
 /* the master servers' (port/linux/src/master_list.c, server_master.c): a
 fresh signed listing of the game this machine hosts for the internet, as
 the brokers get it (0 if it hosts none, or none public); a master's entry's
@@ -429,6 +442,7 @@ struct p2p_mm_decision
 {
 	int kind;
 	int playlist, size;
+	int public_game;
 	char invite[P2P_LISTING_INVITE_SIZE];
 };
 
