@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from tools import linux_build, linux_link_check, linux_msvc_semantics
+from tools.harness import function, read
 
 # for tests that compile for the Linux target (and run what they build)
 linux_host_only = pytest.mark.skipif(not sys.platform.startswith("linux"),
@@ -387,10 +388,12 @@ def matchmaking_check(tmp_path, fault=None, *arguments):
         source = source.replace(*fault)
     copy = tmp_path / "p2p_matchmaking.c"
     copy.write_text(source)
+    lobby = read("port/linux/src/p2p_lobby.c")
+    (tmp_path / "lobby_pick.inc").write_text("\n".join(function(lobby, name) for name in
+                                                      ("pick_fits", "p2p_lobby_pick", "p2p_lobby_pick_unpinged")))
     program = tmp_path / "p2p_matchmaking_check"
-    built = subprocess.run(["clang", *platform_flags(), "-Iport/linux/src", "-O1", "-no-pie",
-                            "-Wl,--unresolved-symbols=ignore-all", "-o", str(program),
-                            "tools/p2p_matchmaking_check.c", str(copy), *MATCHMAKING_SOURCES],
+    built = subprocess.run(["clang", *platform_flags(), "-Iport/linux/src", f"-I{tmp_path}", "-O1", "-no-pie",
+                            "-Wl,--unresolved-symbols=ignore-all", "-o", str(program), "tools/p2p_matchmaking_check.c", str(copy), *MATCHMAKING_SOURCES],
                            capture_output=True, text=True)
     assert built.returncode == 0, built.stderr[-4000:]
     return subprocess.run([str(program), *arguments], capture_output=True, text=True, timeout=300).stdout
@@ -424,6 +427,11 @@ def test_p2p_matchmaking(tmp_path):
     (("now - search->pool_since >= MM_SETTLE", "0"), "e4_four"),
     (("record->sequence <= peer->record.sequence", "0"), "e43_replay"),
     (("if (!mm_playlist_has_size(1u << playlist, size))", "if (0)"), "e63_ffa_leaves_ctf"),
+    (("if (!mm_playlist_has_size(1u << playlist, queue_size))", "if (0)"), "e63_ffa_wanted"),
+    (("if (!looked && search->decision.kind == P2P_MM_DECIDE_NONE)\n\t\t\tcount = pick_game(", "if (0)\n\t\t\tcount = pick_game("), "look"),
+    (("count = lobby_games_unlocked(games, MAXIMUM_GAMES);", "count = 0;"), "look"),
+    (("lobby_mark_failed_unlocked(mm.search.picked);", "(void)0;"), "step1_failed"),
+    (("chosen != held_chosen ? chosen :", "0 ? 0 :"), "widened_pick"),
     (("search->sequence = sequence;", "search->sequence = 0;"), "restart"),
     (("!in_queue(search, peer->playlist, peer->size) ||\n", ""), "left_queue"),
     (("set_queues(search);\n\tsearch->state = P2P_MM_QUEUED;\n\tsearch->marks_from",
@@ -443,7 +451,7 @@ def test_p2p_matchmaking(tmp_path):
     (("peer->record.can_host && !peer->failed &&\n\t\t\tmemcmp", "memcmp"), "strict_lowest"),
     (("!search->pool_count && now - search->marks_from >= MM_HOST", "now - search->marks_from >= MM_HOST"),
      "pool_forming"),
-    (("if (search->host_now && search->can_host > 0)\n\t\t\tcount = host_open(search, 1, out, out_size);\n\t\tif (search->decision.kind == P2P_MM_DECIDE_NONE)\n\t\t\tcount = join(search, now, out, out_size);\n",
+    (("if (search->host_now && search->can_host > 0)\n\t\t\tcount = host_open(search, 1, out, out_size);\n\t\tif (!looked && search->decision.kind == P2P_MM_DECIDE_NONE)\n\t\t\tcount = pick_game(search, now, out, out_size);\n\t\tif (search->decision.kind == P2P_MM_DECIDE_NONE)\n\t\t\tcount = join(search, now, out, out_size);\n",
       "count = join(search, now, out, out_size);\n\t\tif (search->decision.kind == P2P_MM_DECIDE_NONE && search->host_now && search->can_host > 0)\n\t\t\tcount = host_open(search, 1, out, out_size);\n"),
      "host_now_first"),
     (("now - search->joining_since >= MM_HOST_WAIT", "0"), "e12_never_hosts"),
