@@ -81,6 +81,8 @@ enum
 	MM_SETTLE = 4000,
 	MM_HOLD = 20000,
 	MM_HOST_WAIT = 20000,
+	MM_WIDEN = 45000,
+	MM_HOST = 120000,
 	MM_EXPIRY_INTERVALS = 3,
 	MM_RUNNING_INTERVAL = 25000,
 	MM_LOOK_TIME = 6000,
@@ -121,6 +123,7 @@ struct mm_search
 	unsigned long marks_from;
 	/* 1, 0 (strict router) or -1 (STUN has not answered yet) */
 	int can_host;
+	int widened, host_now;
 	unsigned long sequence;
 	int queue_count;
 	int queues[P2P_MM_MAXIMUM_TOPICS][2];
@@ -149,6 +152,8 @@ int mm_step(struct mm_search *search, unsigned long now, struct mm_out *out, int
 void mm_hosted(struct mm_search *search, const unsigned char *token, int players, int most_players, int under_way,
 	unsigned long now);
 void mm_joined(struct mm_search *search, int ok, unsigned long now);
+void mm_widen_now(struct mm_search *search);
+void mm_host_now(struct mm_search *search);
 int mm_cancel(struct mm_search *search, struct mm_out *out, int out_size);
 
 #endif

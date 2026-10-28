@@ -293,20 +293,24 @@ int mm_counted(const struct mm_peer *peer)
 	return peer->refreshes >= MM_REFRESHES_COUNTED;
 }
 
-/* the queues of the chosen playlists at the chosen size */
 static void set_queues(struct mm_search *search)
 {
-	int playlist;
+	int playlist, size;
 
 	search->queue_count = search->next_queue = 0;
 	for (playlist = 0; playlist < NUMBER_OF_P2P_MM_PLAYLISTS; playlist++)
 	{
 		if (!(search->choice.playlists & 1u << playlist))
 			continue;
-		if (!mm_playlist_has_size(1u << playlist, search->choice.size))
-			continue;
-		search->queues[search->queue_count][0] = playlist;
-		search->queues[search->queue_count++][1] = search->choice.size;
+		for (size = 0; size < NUMBER_OF_P2P_MM_SMALL_SIZES; size++)
+		{
+			if (!search->widened && size != search->choice.size)
+				continue;
+			if (!mm_playlist_has_size(1u << playlist, size))
+				continue;
+			search->queues[search->queue_count][0] = playlist;
+			search->queues[search->queue_count++][1] = size;
+		}
 	}
 }
 
@@ -502,6 +506,16 @@ static int make_units(const struct mm_search *search, int playlist, int size, st
 	return count;
 }
 
+static int decide_host(struct mm_search *search, int playlist, int size, struct mm_out *out, int out_size)
+{
+	search->decision.kind = P2P_MM_DECIDE_HOST;
+	search->decision.playlist = search->hosting_playlist = playlist;
+	search->decision.size = search->hosting_size = size;
+	search->state = P2P_MM_FOUND;
+	search->decided = P2P_MM_DECIDE_HOST;
+	return cancel_except(search, playlist, size, out, out_size);
+}
+
 static int settle(struct mm_search *search, unsigned long now, struct mm_out *out, int out_size)
 {
 	struct mm_unit units[MM_MAXIMUM_UNITS + 1];
@@ -542,12 +556,7 @@ static int settle(struct mm_search *search, unsigned long now, struct mm_out *ou
 		host = mm_elect(units, pool, taken);
 		if (host == 0)
 		{
-			search->decision.kind = P2P_MM_DECIDE_HOST;
-			search->decision.playlist = search->hosting_playlist = search->pool_playlist;
-			search->decision.size = search->hosting_size = search->pool_size;
-			search->state = P2P_MM_FOUND;
-			search->decided = P2P_MM_DECIDE_HOST;
-			return cancel_except(search, search->pool_playlist, search->pool_size, out, out_size);
+			return decide_host(search, search->pool_playlist, search->pool_size, out, out_size);
 		}
 		if (host > 0 && memcmp(search->joining, units[host].key_hash, P2P_KEY_HASH_SIZE))
 		{
@@ -555,6 +564,77 @@ static int settle(struct mm_search *search, unsigned long now, struct mm_out *ou
 			search->joining_since = now;
 		}
 	}
+	return 0;
+}
+
+static int searchers_heard(const struct mm_search *search, int playlist, int size, int *lower)
+{
+	int index, count = 0;
+
+	*lower = 0;
+	for (index = 0; index < MM_MAXIMUM_UNITS; index++)
+	{
+		const struct mm_peer *peer = &search->peers[index];
+
+		if (!peer->used || peer->playlist != playlist || peer->size != size ||
+			peer->record.kind != MM_KIND_SEARCHING || !mm_counted(peer))
+		{
+			continue;
+		}
+		count++;
+		*lower |= peer->record.can_host && !peer->failed &&
+			memcmp(peer->record.key_hash, search->key_hash, P2P_KEY_HASH_SIZE) < 0;
+	}
+	return count;
+}
+
+static int host_open(struct mm_search *search, int forced, struct mm_out *out, int out_size)
+{
+	int playlist, best = -1, most = -1, count, lower, best_lower = 0;
+
+	for (playlist = 0; playlist < NUMBER_OF_P2P_MM_PLAYLISTS; playlist++)
+	{
+		if (!(search->choice.playlists & 1u << playlist) || !mm_playlist_has_size(1u << playlist, search->choice.size))
+			continue;
+		count = searchers_heard(search, playlist, search->choice.size, &lower);
+		if (count > most)
+		{
+			best = playlist;
+			most = count;
+			best_lower = lower;
+		}
+	}
+	if (best < 0 || (best_lower && !forced))
+		return 0;
+	search->host_now = 0;
+	search->pool_count = 0;
+	return decide_host(search, best, search->choice.size, out, out_size);
+}
+
+static void widen(struct mm_search *search)
+{
+	search->widened = 1;
+	set_queues(search);
+}
+
+void mm_widen_now(struct mm_search *search)
+{
+	if (search->state == P2P_MM_QUEUED && !search->widened)
+		widen(search);
+}
+
+void mm_host_now(struct mm_search *search)
+{
+	if (search->state == P2P_MM_QUEUED)
+		search->host_now = 1;
+}
+
+static int marks(struct mm_search *search, unsigned long now, struct mm_out *out, int out_size)
+{
+	if (!search->widened && now - search->marks_from >= MM_WIDEN)
+		widen(search);
+	if (search->can_host > 0 && !search->pool_count && now - search->marks_from >= MM_HOST)
+		return host_open(search, 0, out, out_size);
 	return 0;
 }
 
@@ -648,7 +728,7 @@ void mm_hosted(struct mm_search *search, const unsigned char *token, int players
 		if (search->decided != P2P_MM_DECIDE_HOST)
 			return;
 		search->state = P2P_MM_HOSTING;
-		search->held_until = now + MM_HOLD;
+		search->held_until = now + (search->pool_count ? MM_HOLD : 0);
 		search->next_hosting_record = now;
 		memcpy(search->token, token, P2P_TOKEN_SIZE);
 	}
@@ -706,9 +786,14 @@ int mm_step(struct mm_search *search, unsigned long now, struct mm_out *out, int
 	}
 	if (search->state == P2P_MM_QUEUED)
 	{
-		count = join(search, now, out, out_size);
+		if (search->host_now && search->can_host > 0)
+			count = host_open(search, 1, out, out_size);
+		if (search->decision.kind == P2P_MM_DECIDE_NONE)
+			count = join(search, now, out, out_size);
 		if (search->decision.kind == P2P_MM_DECIDE_NONE)
 			count = settle(search, now, out, out_size);
+		if (search->decision.kind == P2P_MM_DECIDE_NONE)
+			count = marks(search, now, out, out_size);
 	}
 	if (search->queue_count && (long)(now - search->next_record) >= 0 && count < out_size)
 	{
