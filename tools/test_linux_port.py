@@ -415,6 +415,23 @@ def test_p2p_matchmaking(tmp_path):
     (("if (topic[0] && !strcmp(topics[index], topic))", "if (0)"), "topic moves"),
     (("queues <= 12", "queues <= 25"), "topics"),
     (("HALO_PORT_NETWORK_VERSION, playlist_names", "38, playlist_names"), "topics"),
+    (("peer->refreshes >= MM_REFRESHES_COUNTED", "peer->refreshes >= 1"), "e14_two_refreshes"),
+    (("peer->refreshes = -1;\n\t\tpeer->playlist", "peer->playlist"), "e14_two_refreshes"),
+    (("MM_KIND_CANCEL)\n\t\tpeer->refreshes = -1;", "MM_KIND_CANCEL)\n\t\tpeer->refreshes = 0;"), "e14_after_cancel"),
+    (("record.can_host = search->can_host > 0;", "record.can_host = search->can_host != 0;"), "e48_stun_unknown"),
+    (("MM_EXPIRY_INTERVALS * peer->record.interval * 100", "100000"), "e19_lost_cancel"),
+    (("if (record->kind == MM_KIND_CANCEL)", "if (0)"), "quit"),
+    (("now - search->pool_since >= MM_SETTLE", "0"), "e4_four"),
+    (("record->sequence <= peer->record.sequence", "0"), "e43_replay"),
+    (("if (!mm_playlist_has_size(1u << playlist, search->choice.size))", "if (0)"), "e63_ffa_leaves_ctf"),
+    (("search->sequence = sequence;", "search->sequence = 0;"), "restart"),
+    (("!in_queue(search, peer->playlist, peer->size) ||\n", ""), "left_queue"),
+    (("set_queues(search);\n\tsearch->state = P2P_MM_QUEUED;\n\tsearch->marks_from",
+      "search->state = P2P_MM_QUEUED;\n\tsearch->marks_from"), "failed_join"),
+    (("if (search->decided != P2P_MM_DECIDE_HOST)", "if (0)"), "failed_join"),
+    (("if (mm_counted(peer))\n\t\t\tcontinue;", "if (0)\n\t\t\tcontinue;"), "full_table"),
+    (("return memcmp(units[a].key_hash, units[b].key_hash, P2P_KEY_HASH_SIZE) < 0;", "return 1;"),
+     "e37_late_listener"),
 ])
 def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
     output = matchmaking_check(tmp_path, fault)
