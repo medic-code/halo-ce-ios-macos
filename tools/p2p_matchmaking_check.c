@@ -704,7 +704,6 @@ static void check_two_refreshes(void)
 	CHECK(peer_count(&machines[1].search) == 1, "E14: counted on its second refresh");
 }
 
-/* a minute's listening and 5 s of it hold a searcher at the same place in the queue */
 static void check_late_listener(void)
 {
 	int index;
@@ -713,10 +712,10 @@ static void check_late_listener(void)
 	world(6);
 	for (index = 0; index < 5; index++)
 		start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_3V3, 1);
-	run(55.0);
+	run(25.0);
 	CHECK(host_count() == 0 && machines[0].search.pool_count == 0, "E37: five searchers are no pool of six");
 	start_searching(5, 1u << P2P_MM_SLAYER, P2P_MM_3V3, 1);
-	run(20.0);
+	run(15.0);
 	CHECK(same_pool(&machines[0].search, &machines[5].search), "E37: the same pool, in the same order");
 	CHECK(host_count() == 1, "E37: one host: %d", host_count());
 }
@@ -849,6 +848,207 @@ static void check_failed_join(void)
 		subscribed(&machines[0].search, ctf), "after a failed join both queues are searched again");
 }
 
+static int host_record_held(const struct mm_search *search)
+{
+	return search->state == P2P_MM_HOSTING && search->held_until && (long)(now_ms - search->held_until) < 0;
+}
+
+static int no_big_queue(const struct mm_search *search)
+{
+	int index;
+
+	for (index = 0; index < search->queue_count; index++)
+		if (search->queues[index][1] >= NUMBER_OF_P2P_MM_SMALL_SIZES)
+			return 0;
+	return 1;
+}
+
+static void check_alone(void)
+{
+	case_name = "e5_alone";
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(44.5);
+	CHECK(!machines[0].search.widened, "not widened before 0:45");
+	run(1.0);
+	CHECK(machines[0].search.widened && machines[0].search.queue_count == NUMBER_OF_P2P_MM_SMALL_SIZES,
+		"E5: widened at 0:45 to every small size: %d queues", machines[0].search.queue_count);
+	CHECK(no_big_queue(&machines[0].search), "E34: widening takes no big size");
+	run(73.0);
+	CHECK(!machines[0].hosting, "not hosting before 2:00");
+	run(2.0);
+	CHECK(machines[0].hosting && machines[0].search.hosting_size == P2P_MM_2V2,
+		"E5: hosts an open SLAYER 2V2 at 2:00");
+	CHECK(!host_record_held(&machines[0].search), "E5: open, not held");
+}
+
+static void check_widen_now(void)
+{
+	int index;
+
+	case_name = "e6_widen_now";
+	world(8);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	for (index = 1; index < 8; index++)
+		start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_4V4, 1);
+	run(10.0);
+	CHECK(!machines[0].search.widened, "E6: still narrow at 10 s");
+	mm_widen_now(&machines[0].search);
+	run(25.0);
+	CHECK(machines[0].in >= 0 || machines[0].hosting, "E6: joins the 4v4 pool");
+}
+
+static void check_host_now(void)
+{
+	case_name = "e7_host_now";
+	world(2);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	start_searching(1, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(20.0);
+	mm_host_now(&machines[0].search);
+	run(10.0);
+	CHECK(machines[0].hosting && machines[1].in == 0, "E7: hosts at once; the other joins");
+}
+
+static void check_strict(void)
+{
+	case_name = "e13_strict";
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 0);
+	mm_host_now(&machines[0].search);
+	run(125.0);
+	CHECK(!machines[0].hosting && machines[0].search.state == P2P_MM_QUEUED,
+		"E13: HOST NOW and 2:00 do nothing for a strict router; it keeps searching");
+}
+
+static void check_full_match(void)
+{
+	int index, joins;
+
+	case_name = "e8_full";
+	world(5);
+	for (index = 0; index < 4; index++)
+		start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(30.0);
+	CHECK(find_host() >= 0 && machines[find_host()].players == 4, "a full match");
+	joins = joins_taken;
+	start_searching(4, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(46.0);
+	CHECK(machines[4].in < 0 && joins_taken == joins, "E8: does not join the 4/4 game");
+	CHECK(machines[4].search.widened, "E8: widened at its 0:45");
+	run(75.0);
+	CHECK(machines[4].hosting, "E8: hosts its own at 2:00");
+}
+
+static void check_widened_retry(void)
+{
+	int index;
+
+	case_name = "widened_retry";
+	world(4);
+	fail_join = 0;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 0);
+	mm_widen_now(&machines[0].search);
+	for (index = 1; index < 4; index++)
+		start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(25.0);
+	CHECK(joins_taken > 0, "the failing machine was sent to a game");
+	CHECK(machines[0].search.state == P2P_MM_QUEUED && machines[0].search.widened &&
+		machines[0].search.queue_count == NUMBER_OF_P2P_MM_SMALL_SIZES,
+		"after a failed join a widened search stands in every small size: %d", machines[0].search.queue_count);
+}
+
+static int lowest_key_hash(int count)
+{
+	int index, low = 0;
+
+	world(count);
+	for (index = 0; index < count; index++)
+		start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	for (index = 1; index < count; index++)
+		if (memcmp(machines[index].search.key_hash, machines[low].search.key_hash, P2P_KEY_HASH_SIZE) < 0)
+			low = index;
+	return low;
+}
+
+static struct mm_record heard_as(struct mm_search *search, int machine, unsigned long sequence, int can_host)
+{
+	struct mm_record record = searching(machine, sequence), read_back;
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+
+	seed_of(machine, seed);
+	record.can_host = can_host;
+	mm_record_read(bytes, mm_record_write(&record, seed, bytes, sizeof(bytes)), &read_back);
+	if (search)
+		mm_heard(search, &read_back, now_ms);
+	return read_back;
+}
+
+static void check_strict_lowest(void)
+{
+	int strict = 300, sequence;
+
+	case_name = "strict_lowest";
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	while (strict < 400 &&
+		memcmp(heard_as(NULL, strict, 1, 0).key_hash, machines[0].search.key_hash, P2P_KEY_HASH_SIZE) >= 0)
+		strict++;
+	for (sequence = 1; sequence < 45; sequence++)
+	{
+		heard_as(&machines[0].search, strict, sequence, 0);
+		run(3.0);
+	}
+	CHECK(machines[0].hosting, "a strict router with the lowest key hash does not stop a capable searcher hosting at 2:00");
+}
+
+static void check_pool_forming(void)
+{
+	int low = lowest_key_hash(4), index;
+
+	case_name = "pool_forming";
+	world(4);
+	start_searching(low, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(111.0);
+	for (index = 0; index < 4; index++)
+		if (index != low)
+			start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(9.5);
+	CHECK(host_count() == 0 && machines[low].search.pool_count > 0, "a pool settling at 2:00 opens no game");
+	run(10.0);
+	CHECK(host_count() == 1, "the pool's host hosts one game: %d", host_count());
+}
+
+static void check_host_now_before_join(void)
+{
+	case_name = "host_now_first";
+	world(2);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, -1);
+	start_searching(1, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	mm_host_now(&machines[0].search);
+	run(5.0);
+	CHECK(!machines[0].hosting, "HOST NOW waits while STUN is unanswered");
+	machines[0].search.can_host = 1;
+	run(1.0);
+	CHECK(machines[0].hosting, "HOST NOW pressed before STUN answered is served once it does");
+	world(2);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	start_searching(1, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(10.0);
+	mm_host_now(&machines[1].search);
+	run(4.0);
+	CHECK(machines[1].hosting && machines[0].in == 1, "the other searcher joins the game opened");
+	world(2);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	start_searching(1, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(10.0);
+	mm_host_now(&machines[1].search);
+	run(0.2);
+	mm_host_now(&machines[0].search);
+	run(0.1);
+	CHECK(machines[0].hosting && machines[0].in < 0, "HOST NOW is served before a game is joined");
+}
+
 int main(void)
 {
 	check_pool();
@@ -875,6 +1075,15 @@ int main(void)
 	check_restart();
 	check_left_queue();
 	check_failed_join();
+	check_alone();
+	check_widen_now();
+	check_host_now();
+	check_strict();
+	check_full_match();
+	check_widened_retry();
+	check_strict_lowest();
+	check_pool_forming();
+	check_host_now_before_join();
 	printf(failures ? "FAILED %d\n" : "PASS\n", failures);
 	return failures != 0;
 }
