@@ -456,6 +456,11 @@ def test_p2p_matchmaking(tmp_path):
     (("if (candidate->failed)", "if (0)"), "e12_never_hosts"),
     (("if (candidate->failed)", "if (0)"), "two_queues"),
     (("peer->failed == MM_FAILED_PASSED_OVER)\n\t\tpeer->failed = MM_FAILED_NONE;", "peer->failed == MM_FAILED_PASSED_OVER)\n\t\tpeer->failed = MM_FAILED_PASSED_OVER;"), "passed_over_hosts"),
+    (("elapsed_ms(started) >= VERIFY_BUDGET", "0"), "verify_budget"),
+    (("p2p_signing_seed(),", "p2p_signing_key(),"), "run_key"),
+    (("mm.search.state != P2P_MM_OFF || mm.in_game", "mm.search.state != P2P_MM_OFF"), "joined_then_lost"),
+    (("publish_out(out, mm_step(&mm.search, now, out, MM_MAXIMUM_OUT));\n\t\tsync_topics();", "sync_topics();"),
+     "joined_then_lost"),
 ])
 def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
     output = matchmaking_check(tmp_path, fault)
