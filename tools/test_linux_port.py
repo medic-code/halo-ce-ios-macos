@@ -380,7 +380,7 @@ MATCHMAKING_SOURCES = ["port/linux/src/p2p_crypto.c", "port/third_party/monocyph
                        "port/third_party/monocypher/monocypher-ed25519.c"]
 
 
-def matchmaking_check(tmp_path, fault=None):
+def matchmaking_check(tmp_path, fault=None, *arguments):
     source = Path("port/linux/src/p2p_matchmaking.c").read_text()
     if fault:
         assert source.count(fault[0]) == 1, fault[0]
@@ -393,12 +393,12 @@ def matchmaking_check(tmp_path, fault=None):
                             "tools/p2p_matchmaking_check.c", str(copy), *MATCHMAKING_SOURCES],
                            capture_output=True, text=True)
     assert built.returncode == 0, built.stderr[-4000:]
-    return subprocess.run([str(program)], capture_output=True, text=True, timeout=120).stdout
+    return subprocess.run([str(program), *arguments], capture_output=True, text=True, timeout=300).stdout
 
 
 @linux_host_only
 def test_p2p_matchmaking(tmp_path):
-    output = matchmaking_check(tmp_path)
+    output = matchmaking_check(tmp_path, None, "sweep")
     assert output.strip().endswith("PASS"), output
 
 
@@ -408,7 +408,7 @@ def test_p2p_matchmaking(tmp_path):
     (("bytes[2] != MM_FORMAT)", "0)"), "records"),
     (("if (!record->held)\n\t\t{\n\t\t\tmemcpy(bytes + at, record->token",
       "if (1)\n\t\t{\n\t\t\tmemcpy(bytes + at, record->token"), "hosting"),
-    (("if (!can_host && !has_host && taken + candidate->players == players)", "if (0)"), "pool"),
+    (("if (!can_host && !has_host && taken + 1 == players)", "if (0)"), "pool"),
     (("return memcmp(units[a].key_hash, units[b].key_hash, P2P_KEY_HASH_SIZE) < 0;", "return 1;"), "pool"),
     (("memcpy(material + at, units[unit].key, P2P_KEY_SIZE);\n\t\tp2p_sha256(material, at + P2P_KEY_SIZE",
       "memcpy(material, units[unit].key, P2P_KEY_SIZE);\n\t\tp2p_sha256(material, P2P_KEY_SIZE"), "election"),
@@ -446,6 +446,16 @@ def test_p2p_matchmaking(tmp_path):
     (("if (search->host_now && search->can_host > 0)\n\t\t\tcount = host_open(search, 1, out, out_size);\n\t\tif (search->decision.kind == P2P_MM_DECIDE_NONE)\n\t\t\tcount = join(search, now, out, out_size);\n",
       "count = join(search, now, out, out_size);\n\t\tif (search->decision.kind == P2P_MM_DECIDE_NONE && search->host_now && search->can_host > 0)\n\t\t\tcount = host_open(search, 1, out, out_size);\n"),
      "host_now_first"),
+    (("now - search->joining_since >= MM_HOST_WAIT", "0"), "e12_never_hosts"),
+    (("now - search->joining_since >= MM_HOST_WAIT", "0"), "two_queues"),
+    (("now - search->joining_since >= MM_HOST_WAIT", "0"), "pool_never_hosts"),
+    (("memcmp(search->key_hash, other->key_hash, P2P_KEY_HASH_SIZE) > 0", "0"), "e40_two_lone_hosts"),
+    (("now, kept_start);", "now, 0);"), "e11_host_quits"),
+    (("search->state = P2P_MM_OFF;\n\treturn count;", "return 0;"), "host_failed"),
+    (("peer->record.players > best->record.players ||", "0 ||"), "e10_invited_twice"),
+    (("if (candidate->failed)", "if (0)"), "e12_never_hosts"),
+    (("if (candidate->failed)", "if (0)"), "two_queues"),
+    (("peer->failed == MM_FAILED_PASSED_OVER)\n\t\tpeer->failed = MM_FAILED_NONE;", "peer->failed == MM_FAILED_PASSED_OVER)\n\t\tpeer->failed = MM_FAILED_PASSED_OVER;"), "passed_over_hosts"),
 ])
 def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
     output = matchmaking_check(tmp_path, fault)
