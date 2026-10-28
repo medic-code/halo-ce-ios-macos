@@ -8,6 +8,8 @@
 #include <string.h>
 #include <time.h>
 
+void platform_log(const char *format, ...);
+
 static const char record_label[] = "hceu-mm-1";
 
 static const char *const playlist_names[NUMBER_OF_P2P_MM_PLAYLISTS] = { "slayer", "ctf", "king", "oddball", "race" };
@@ -1029,6 +1031,17 @@ static int record_stale(const struct queued *queued)
 	return 0;
 }
 
+static const char *short_hash(const unsigned char *key_hash, char *text)
+{
+	p2p_hex(key_hash, 4, text);
+	return text;
+}
+
+static unsigned long search_seconds(void)
+{
+	return (unsigned long)time(NULL) - mm.search.started;
+}
+
 static void publish_out(const struct mm_out *out, int count)
 {
 	int index;
@@ -1088,8 +1101,22 @@ static void sync_topics(void)
 
 	if (count == mm.subscribed_count && !memcmp(mm.subscribed, mm.search.queues, sizeof(int) * 2 * (size_t)count))
 		return;
-	for (index = 0; index < count; index++)
-		mm_topic(mm.search.queues[index][0], mm.search.queues[index][1], topics[index], P2P_MM_TOPIC_SIZE);
+	{
+		char line[P2P_MM_MAXIMUM_TOPICS * (P2P_MM_TOPIC_SIZE + 1)];
+		int length = 0;
+
+		line[0] = 0;
+		for (index = 0; index < count; index++)
+		{
+			mm_topic(mm.search.queues[index][0], mm.search.queues[index][1], topics[index], P2P_MM_TOPIC_SIZE);
+			length += snprintf(line + length, sizeof(line) - (size_t)length, " %s", topics[index]);
+		}
+		if (count)
+			platform_log("matchmaking: in %d queue%s, %lu s into the search:%s", count, count == 1 ? "" : "s",
+				search_seconds(), line);
+		else
+			platform_log("matchmaking: in no queue");
+	}
 	memcpy(mm.subscribed, mm.search.queues, sizeof(int) * 2 * (size_t)count);
 	mm.subscribed_count = count;
 	p2p_signal_mm_topics(topics, count);
@@ -1122,6 +1149,32 @@ void p2p_mm_update(unsigned long now, int can_host, const unsigned char *token)
 	mm.notice = notice_after(mm.notice, mm.search.state);
 	if (mm.search.decision.kind != P2P_MM_DECIDE_NONE)
 	{
+		const struct p2p_mm_decision *decision = &mm.search.decision;
+		char hash[9];
+
+		if (decision->kind == P2P_MM_DECIDE_HOST)
+		{
+			char pool[MM_MAXIMUM_POOL * 9 + 1];
+			int member, length = 0;
+
+			pool[0] = 0;
+			for (member = 0; member < mm.search.pool_count; member++)
+				length += snprintf(pool + length, sizeof(pool) - (size_t)length, " %s",
+					short_hash(mm.search.pool[member], hash));
+			platform_log("matchmaking: decided: host %s %s, %lu s into the search (pool of %d:%s)",
+				playlist_names[decision->playlist], size_names[decision->size], search_seconds(),
+				mm.search.pool_count, pool);
+		}
+		else
+		{
+			static const unsigned char none[P2P_KEY_HASH_SIZE];
+			char host[16] = "a public";
+
+			if (memcmp(mm.search.joining, none, sizeof(none)))
+				snprintf(host, sizeof(host), "%s's", short_hash(mm.search.joining, hash));
+			platform_log("matchmaking: decided: join %s %s %s game, %lu s into the search", host,
+				playlist_names[decision->playlist], size_names[decision->size], search_seconds());
+		}
 		mm.pending = mm.search.decision;
 		mm.search.decision.kind = P2P_MM_DECIDE_NONE;
 	}
@@ -1164,6 +1217,11 @@ void p2p_mm_search(const struct p2p_mm_choice *choice)
 	mm.in_game = 0;
 	mm_start(&mm.search, p2p_signing_seed(), choice, p2p_now(), (unsigned long)time(NULL));
 	mm.notice = P2P_MM_NOTICE_NONE;
+	{
+		char hash[9];
+
+		platform_log("matchmaking: searching as %s", short_hash(mm.search.key_hash, hash));
+	}
 	hold_browser();
 	pthread_mutex_unlock(&p2p_lock);
 	p2p_lobby_browse(1);
@@ -1191,7 +1249,10 @@ void p2p_mm_cancel(void)
 
 	pthread_mutex_lock(&p2p_lock);
 	if (mm.search.state != P2P_MM_OFF)
+	{
 		cancel_search();
+		platform_log("matchmaking: search cancelled");
+	}
 	mm.in_game = 0;
 	mm.notice = P2P_MM_NOTICE_NONE;
 	was = take_browser();
@@ -1223,6 +1284,7 @@ void p2p_mm_joined(int ok)
 		mm.search.picked_set = 0;
 		mm_joined(&mm.search, ok, p2p_now());
 		mm.in_game = ok;
+		platform_log("matchmaking: %s", ok ? "joined the game" : "could not join the game: back in the queue");
 		if (!ok)
 			mm.notice = P2P_MM_NOTICE_HOST_UNREACHED;
 		else
@@ -1241,6 +1303,8 @@ void p2p_mm_game_lost(void)
 	if (mm.search.state != P2P_MM_OFF || mm.in_game)
 	{
 		mm_game_lost(&mm.search, p2p_now());
+		platform_log("matchmaking: the game's host is gone: back in the queue, %lu s into the search",
+			search_seconds());
 		mm.in_game = 0;
 		mm.notice = P2P_MM_NOTICE_HOST_LEFT;
 		hold_browser();
