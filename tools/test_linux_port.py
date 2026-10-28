@@ -412,6 +412,9 @@ def test_p2p_matchmaking(tmp_path):
     (("return memcmp(units[a].key_hash, units[b].key_hash, P2P_KEY_HASH_SIZE) < 0;", "return 1;"), "pool"),
     (("memcpy(material + at, units[unit].key, P2P_KEY_SIZE);\n\t\tp2p_sha256(material, at + P2P_KEY_SIZE",
       "memcpy(material, units[unit].key, P2P_KEY_SIZE);\n\t\tp2p_sha256(material, P2P_KEY_SIZE"), "election"),
+    (("if (topic[0] && !strcmp(topics[index], topic))", "if (0)"), "topic moves"),
+    (("queues <= 12", "queues <= 25"), "topics"),
+    (("HALO_PORT_NETWORK_VERSION, playlist_names", "38, playlist_names"), "topics"),
 ])
 def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
     output = matchmaking_check(tmp_path, fault)
