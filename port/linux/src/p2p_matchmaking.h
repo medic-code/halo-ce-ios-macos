@@ -141,8 +141,12 @@ struct mm_search
 	unsigned long joining_since;
 	struct p2p_mm_decision decision;
 	int decided;
+	int games_checked;
+	unsigned char picked[P2P_IDENTIFIER_SIZE];
+	int picked_set;
 };
 
+void mm_wanted(const struct mm_search *search, int queue, struct p2p_lobby_wanted *wanted);
 int mm_counted(const struct mm_peer *peer);
 
 void mm_start(struct mm_search *search, const unsigned char *seed, const struct p2p_mm_choice *choice,
