@@ -12,13 +12,13 @@ void platform_log(const char *format, ...);
 
 static const char record_label[] = "hceu-mm-1";
 
-static const char *const playlist_names[NUMBER_OF_P2P_MM_PLAYLISTS] = { "slayer", "ctf", "king", "oddball", "race" };
-static const char *const size_names[NUMBER_OF_P2P_MM_SIZES] = { "1v1", "2v2", "3v3", "4v4", "ffa6" };
+const char *const p2p_mm_playlist_names[NUMBER_OF_P2P_MM_PLAYLISTS] = { "slayer", "ctf", "king", "oddball", "race" };
+const char *const p2p_mm_size_names[NUMBER_OF_P2P_MM_SIZES] = { "1v1", "2v2", "3v3", "4v4", "ffa6" };
 
 void mm_topic(int playlist, int size, char *topic, int topic_size)
 {
-	snprintf(topic, (size_t)topic_size, "hceu/3/mm/%d/%s/%s", HALO_PORT_NETWORK_VERSION, playlist_names[playlist],
-		size_names[size]);
+	snprintf(topic, (size_t)topic_size, "hceu/3/mm/%d/%s/%s", HALO_PORT_NETWORK_VERSION, p2p_mm_playlist_names[playlist],
+		p2p_mm_size_names[size]);
 }
 
 int mm_topic_listed(const char *const *topics, int count, const char *topic)
@@ -1163,7 +1163,7 @@ void p2p_mm_update(unsigned long now, int can_host, const unsigned char *token)
 				length += snprintf(pool + length, sizeof(pool) - (size_t)length, " %s",
 					short_hash(mm.search.pool[member], hash));
 			platform_log("matchmaking: decided: host %s %s, %lu s into the search (pool of %d:%s)",
-				playlist_names[decision->playlist], size_names[decision->size], search_seconds(),
+				p2p_mm_playlist_names[decision->playlist], p2p_mm_size_names[decision->size], search_seconds(),
 				mm.search.pool_count, pool);
 		}
 		else
@@ -1174,7 +1174,7 @@ void p2p_mm_update(unsigned long now, int can_host, const unsigned char *token)
 			if (memcmp(mm.search.joining, none, sizeof(none)))
 				snprintf(host, sizeof(host), "%s's", short_hash(mm.search.joining, hash));
 			platform_log("matchmaking: decided: join %s %s %s game, %lu s into the search", host,
-				playlist_names[decision->playlist], size_names[decision->size], search_seconds());
+				p2p_mm_playlist_names[decision->playlist], p2p_mm_size_names[decision->size], search_seconds());
 		}
 		mm.pending = mm.search.decision;
 		mm.search.decision.kind = P2P_MM_DECIDE_NONE;
