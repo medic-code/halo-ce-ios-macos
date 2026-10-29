@@ -621,6 +621,8 @@ the setting for one start of the game. It has priority over the file.
 | `network.browser_maps` | `"yes"` | `HALO_NET_BROWSER_MAPS` | `"yes"`: the server browser lists the games on maps this computer does not have. `"no"`: it does not. `"downloadable"`: only those of a Custom Edition map that the host shares. |
 | `network.browser_gametype` | `"any"` | `HALO_NET_BROWSER_GAMETYPE` | The server browser lists the games of one kind only: `"any"`, `"ctf"`, `"slayer"`, `"oddball"`, `"king"` or `"race"` (the Filters screen). |
 | `network.browser_sort` | `"servers"` | `HALO_NET_BROWSER_SORT` | The server browser's order. `"servers"`: dedicated servers first, then by players. `"players"`, `"name"`, `"map"`, `"type"` or `"locked"` (games with a password first). A `-` before one reverses it (`"-players"`). A column's title sorts by it, and again the other way. |
+| `network.matchmaking_playlists` | `"slayer"` | `HALO_NET_MATCHMAKING_PLAYLISTS` | MATCHMAKING's playlists, comma-separated: `"slayer"`, `"ctf"`, `"king"`, `"oddball"`, `"race"`. |
+| `network.matchmaking_size` | `"2v2"` | `HALO_NET_MATCHMAKING_SIZE` | MATCHMAKING's game size: `"1v1"`, `"2v2"`, `"3v3"`, `"4v4"` or `"ffa6"`. |
 | `server.enabled` | `false` | `HALO_SERVER` | `true`: run as a dedicated server, as `halo --server` does. Refer to "Dedicated server". The `server.*` settings are written to `config.toml` only by a dedicated server. |
 | `server.name` | `"OpenCE Server"` | `HALO_SERVER_NAME` | The game's name in the lobby and the server browser: 15 characters of printable ASCII. |
 | `server.max_players` | `16` | `HALO_SERVER_MAX_PLAYERS` | The most players (2 to 127). |
@@ -1254,6 +1256,15 @@ same broker to see each other's games. The game uses
 MQTT 5 if the broker has it, else MQTT 3.1.1. A broker that does not keep
 retained messages, or does not let clients subscribe with wildcards, carries
 only invites, not listings.
+
+### MATCHMAKING
+
+MATCHMAKING finds a game for a player who chooses playlists
+(`network.matchmaking_playlists`) and a size (`network.matchmaking_size`):
+1V1, 2V2, 3V3, 4V4 or FFA 6. The game searches the queues of those playlists
+at that size. After 0:45 without a game, the search widens to every small
+size. After 2:00 without one, the player hosts a game and waits for others.
+A matchmade small game is not listed in the Server Browser.
 
 ### Map sharing
 
