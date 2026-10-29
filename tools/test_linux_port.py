@@ -560,6 +560,13 @@ def test_config_has_each_section_once(tmp_path):
     assert run("get", "display.vsync")[0] == "false"
     assert run("get", "game.console_log")[0] == "all"
 
+    assert run("get", "network.matchmaking_playlists")[0] == "slayer"
+    assert run("get", "network.matchmaking_size")[0] == "2v2"
+    run("write", "network.matchmaking_playlists", "slayer,ctf")
+    run("write", "network.matchmaking_size", "ffa6")
+    assert run("get", "network.matchmaking_playlists")[0] == "slayer,ctf"
+    assert run("get", "network.matchmaking_size")[0] == "ffa6"
+
 
 # ---------- system link's stand-in machines (tools/system_link_bots.py)
 
