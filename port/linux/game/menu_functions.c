@@ -5522,6 +5522,208 @@ static boolean password_screen_edit(struct widget_instance *row, boolean *widget
 	return TRUE;
 }
 
+enum
+{
+	MATCHMAKING_SEARCH,
+	MATCHMAKING_NO_PLAYLIST,
+	MATCHMAKING_ONE_PLAYER,
+};
+
+/* indices into port_settings.py's MATCHMAKING_HELP: keep the order */
+enum
+{
+	_matchmaking_help_size,
+	_matchmaking_help_no_ffa = _matchmaking_help_size + NUMBER_OF_P2P_MM_SIZES,
+	_matchmaking_help_playlist,
+	_matchmaking_help_search = _matchmaking_help_playlist + NUMBER_OF_P2P_MM_PLAYLISTS,
+	_matchmaking_help_none = _matchmaking_help_search + MATCHMAKING_ONE_PLAYER + 1,
+};
+
+static struct
+{
+	unsigned playlists;
+	short size;
+	short refusal;
+	struct widget_instance *focused;
+	boolean loaded;
+} matchmaking_screen;
+
+static short matchmaking_size_after(unsigned playlists, short size)
+{
+	return mm_playlist_has_size(playlists, size) ? size : P2P_MM_2V2;
+}
+
+static short matchmaking_search_allowed(unsigned playlists, short local_players)
+{
+	if (!playlists)
+		return MATCHMAKING_NO_PLAYLIST;
+	if (local_players > 1)
+		return MATCHMAKING_ONE_PLAYER;
+	return MATCHMAKING_SEARCH;
+}
+
+static unsigned matchmaking_playlists_read(char const *text)
+{
+	unsigned playlists = 0;
+	short index;
+
+	while (*text)
+	{
+		size_t length = strcspn(text, ",");
+
+		for (index = 0; index < NUMBER_OF_P2P_MM_PLAYLISTS; index++)
+		{
+			if (strlen(p2p_mm_playlist_names[index]) == length && !strncmp(text, p2p_mm_playlist_names[index], length))
+				playlists |= 1u << index;
+		}
+		text += length + (text[length] == ',');
+	}
+	return playlists;
+}
+
+static struct widget_instance *matchmaking_playlist_spinner(struct widget_instance *widget, short index)
+{
+	char row[16];
+
+	snprintf(row, sizeof(row), "op_playlist_%d", index);
+	return named(named(screen_of(widget), row, 0), "playlist_spinner", 0);
+}
+
+static void matchmaking_screen_show(struct widget_instance *widget, unsigned playlists, short size)
+{
+	struct widget_instance *spinner = named(screen_of(widget), "size_spinner", 0);
+	short index;
+
+	if (spinner)
+		spinner->parameters.list.selected_index = size;
+	for (index = 0; index < NUMBER_OF_P2P_MM_PLAYLISTS; index++)
+	{
+		spinner = matchmaking_playlist_spinner(widget, index);
+		if (spinner)
+			spinner->parameters.list.selected_index = (playlists >> index) & 1;
+	}
+}
+
+static boolean matchmaking_screen_load(struct widget_instance *widget, boolean defaults)
+{
+	char text[64] = "", size_text[16] = "";
+	unsigned playlists;
+	short size = 0;
+
+	setting_text("network.matchmaking_playlists", text, sizeof(text), defaults);
+	setting_text("network.matchmaking_size", size_text, sizeof(size_text), defaults);
+	playlists = matchmaking_playlists_read(text);
+	while (size < NUMBER_OF_P2P_MM_SIZES && strcmp(size_text, p2p_mm_size_names[size]))
+		size++;
+	size = matchmaking_size_after(playlists, size < NUMBER_OF_P2P_MM_SIZES ? size : P2P_MM_2V2);
+	matchmaking_screen_show(widget, playlists, size);
+	if (!defaults)
+	{
+		matchmaking_screen.playlists = playlists;
+		matchmaking_screen.size = size;
+	}
+	matchmaking_screen.refusal = MATCHMAKING_SEARCH;
+	matchmaking_screen.loaded = TRUE;
+	return TRUE;
+}
+
+/* the spinners are not under the list yet at "port matchmaking init", so the rows load at the first update */
+static void matchmaking_screen_update(struct widget_instance *list)
+{
+	struct widget_instance *spinner = named(list, "size_spinner", 0);
+	struct widget_instance *description = list->parameters.list.extended_description;
+	struct widget_instance *focused = list;
+	unsigned playlists = 0;
+	short index, shown, size, help;
+
+	if (!spinner)
+		return;
+	if (!matchmaking_screen.loaded)
+		matchmaking_screen_load(list, FALSE);
+	for (index = 0; index < NUMBER_OF_P2P_MM_PLAYLISTS; index++)
+	{
+		struct widget_instance *playlist = matchmaking_playlist_spinner(list, index);
+
+		if (playlist && playlist->parameters.list.selected_index)
+			playlists |= 1u << index;
+	}
+	shown = (short)PIN(spinner->parameters.list.selected_index, 0, NUMBER_OF_P2P_MM_SIZES - 1);
+	size = mm_playlist_has_size(playlists, shown) ? shown :
+		matchmaking_size_after(playlists, matchmaking_screen.size);
+	if (list->focused_child != spinner->parent)
+		spinner->parameters.list.selected_index = shown = size;
+	spinner->alpha_modifier = mm_playlist_has_size(playlists, shown) ? 1.0f : TAB_UNFOCUSED_ALPHA;
+	while (focused->focused_child)
+		focused = focused->focused_child;
+	if (focused != matchmaking_screen.focused || playlists != matchmaking_screen.playlists ||
+		size != matchmaking_screen.size)
+	{
+		matchmaking_screen.refusal = MATCHMAKING_SEARCH;
+	}
+	if (playlists != matchmaking_screen.playlists || size != matchmaking_screen.size)
+	{
+		char text[64] = "";
+
+		for (index = 0; index < NUMBER_OF_P2P_MM_PLAYLISTS; index++)
+		{
+			if ((playlists >> index) & 1)
+			{
+				strcat(text, text[0] ? "," : "");
+				strcat(text, p2p_mm_playlist_names[index]);
+			}
+		}
+		config_write("network.matchmaking_playlists", text);
+		config_write("network.matchmaking_size", p2p_mm_size_names[size]);
+	}
+	matchmaking_screen.playlists = playlists;
+	matchmaking_screen.size = size;
+	matchmaking_screen.focused = focused;
+	index = list->focused_child ? sibling_index(list->focused_child) : NONE;
+	if (matchmaking_screen.refusal != MATCHMAKING_SEARCH)
+		help = (short)(_matchmaking_help_search + matchmaking_screen.refusal);
+	else if (index == 0)
+		help = (short)(mm_playlist_has_size(playlists, shown) ? _matchmaking_help_size + shown :
+			_matchmaking_help_no_ffa);
+	else if (index > 0 && index <= NUMBER_OF_P2P_MM_PLAYLISTS)
+		help = (short)(_matchmaking_help_playlist + index - 1);
+	else if (!strcmp(focused->name, "button_search"))
+		help = _matchmaking_help_search;
+	else
+		help = _matchmaking_help_none;
+	if (description)
+		description->parameters.text_box.string_list_index = help;
+}
+
+/* "port matchmaking search" (SEARCH): the search begins, else the error
+sound and the line that refuses it */
+static boolean matchmaking_screen_search(void)
+{
+	struct p2p_mm_choice choice;
+	short controller, local_players = 0;
+
+	for (controller = 0; controller < MAXIMUM_LOCAL_PLAYERS; controller++)
+		local_players += player_ui_local_player_wants_to_play_multiplayer(controller) ? 1 : 0;
+	matchmaking_screen.refusal = matchmaking_search_allowed(matchmaking_screen.playlists, local_players);
+	if (matchmaking_screen.refusal != MATCHMAKING_SEARCH)
+	{
+		ui_play_audio_feedback_sound(SOUND_ERROR);
+		return TRUE;
+	}
+	choice.playlists = matchmaking_screen.playlists;
+	choice.size = matchmaking_screen.size;
+	p2p_mm_search(&choice);
+	ui_play_audio_feedback_sound(SOUND_FORWARD);
+	return TRUE;
+}
+
+static boolean matchmaking_screen_back(struct widget_instance *widget, boolean *widget_deleted)
+{
+	p2p_mm_cancel();
+	ui_widget_port_go_back(widget);
+	*widget_deleted = TRUE;
+	return TRUE;
+}
+
 /* "gamespy screen update": the games' rows (name, map, gametype, players),
 the one chosen's line, the counts over the titles (the PC version's: its
 players, page, servers) */
@@ -7952,6 +8154,22 @@ boolean pc_menu_event_function_invoke(
 		{
 			return password_screen_back(widget, widget_deleted);
 		}
+		else if (!strcmp(name, "port matchmaking init"))
+		{
+			matchmaking_screen.loaded = FALSE;
+		}
+		else if (!strcmp(name, "port matchmaking defaults"))
+		{
+			return matchmaking_screen_load(widget, TRUE);
+		}
+		else if (!strcmp(name, "port matchmaking search"))
+		{
+			return matchmaking_screen_search();
+		}
+		else if (!strcmp(name, "port matchmaking back"))
+		{
+			return matchmaking_screen_back(widget, widget_deleted);
+		}
 		else if (!strcmp(name, "ss copy invite"))
 		{
 			return invite_copy();
@@ -8204,6 +8422,8 @@ void pc_menu_game_data_function_invoke(
 		server_settings_update(widget);
 	else if (!strcmp(name, "port password update"))
 		password_screen_update(widget);
+	else if (!strcmp(name, "port matchmaking update"))
+		matchmaking_screen_update(widget);
 	else if (!strcmp(name, "gamespy screen update"))
 		browser_update(widget);
 	else if (!strcmp(name, "gt edit list update"))
