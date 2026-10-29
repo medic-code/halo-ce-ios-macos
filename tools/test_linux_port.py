@@ -417,7 +417,7 @@ def test_p2p_matchmaking(tmp_path):
       "memcpy(material, units[unit].key, P2P_KEY_SIZE);\n\t\tp2p_sha256(material, P2P_KEY_SIZE"), "election"),
     (("if (topic[0] && !strcmp(topics[index], topic))", "if (0)"), "topic moves"),
     (("queues <= 12", "queues <= 25"), "topics"),
-    (("HALO_PORT_NETWORK_VERSION, playlist_names", "38, playlist_names"), "topics"),
+    (("HALO_PORT_NETWORK_VERSION, p2p_mm_playlist_names", "38, p2p_mm_playlist_names"), "topics"),
     (("peer->refreshes >= MM_REFRESHES_COUNTED", "peer->refreshes >= 1"), "e14_two_refreshes"),
     (("peer->refreshes = -1;\n\t\tpeer->playlist", "peer->playlist"), "e14_two_refreshes"),
     (("MM_KIND_CANCEL)\n\t\tpeer->refreshes = -1;", "MM_KIND_CANCEL)\n\t\tpeer->refreshes = 0;"), "e14_after_cancel"),
