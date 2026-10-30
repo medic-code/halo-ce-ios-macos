@@ -5792,6 +5792,17 @@ static void matchmaking_lines(const struct p2p_mm_status *status, wchar_t *title
 	title[size - 1] = count[size - 1] = help[size - 1] = notice[size - 1] = 0;
 }
 
+/* seconds: as a countdown message rounds them down, NONE when none runs */
+static void matchmaking_lobby_line(short seconds, wchar_t *line, short size)
+{
+	if (seconds >= 0)
+		usnprintf(line, size - 1, L"Game starts in %d", seconds + 1);
+	else
+		usnprintf(line, size - 1, L"Waiting for players");
+	line[size - 1] = 0;
+}
+
+#define MATCHMAKING_TEXT_LENGTH 96
 /* "gamespy screen update": the games' rows (name, map, gametype, players),
 the one chosen's line, the counts over the titles (the PC version's: its
 players, page, servers) */
@@ -6135,7 +6146,7 @@ and a screen a press opens is the presser's: another controller's press asks
 player 1's Y instead (FALSE: nothing opens for it) */
 static boolean lobby_add_player(short controller)
 {
-	if (lobby_local_player_count() >= MAXIMUM_LOCAL_PLAYERS)
+	if (matchmaking_game_locked() || lobby_local_player_count() >= MAXIMUM_LOCAL_PLAYERS)
 		return campaign_fail();
 	if (controller > 0)
 	{
@@ -6155,6 +6166,9 @@ static boolean lobby_join_start(struct widget_instance *widget, short controller
 	struct network_game *game = client ? network_game_client_get_game(client) : NULL;
 	short state_data;
 
+	/* (else a START by habit is the focused LEAVE's, the only button shown) */
+	if (matchmaking_game_locked())
+		return campaign_fail();
 	if (lobby_controller_playing(controller))
 	{
 		ui_widget_port_dispatch_event(focused_leaf(widget), BUTTON_START, controller, widget_deleted);
@@ -6254,7 +6268,7 @@ static void lobby_join_help(struct widget_instance *list)
 	{
 		text = L"New player: press START.";
 	}
-	else if (lobby_local_player_count() < MAXIMUM_LOCAL_PLAYERS)
+	else if (!matchmaking_game_locked() && lobby_local_player_count() < MAXIMUM_LOCAL_PLAYERS)
 	{
 		for (controller = 0; controller < MAXIMUM_LOCAL_PLAYERS; controller++)
 		{
@@ -6435,6 +6449,8 @@ static void lobby_update(struct widget_instance *list)
 	lobby_join_help(list);
 	map_vote_lobby_check();
 	visible_set(named(list, "lobby_button_team", 0), game && game->variant.universal_variant.teams && !matchmaking_game_locked());
+	visible_set(named(list, "lobby_button_start", 0), !matchmaking_game_locked());
+	visible_set(named(list, "lobby_button_add", 0), !matchmaking_game_locked());
 	/* (the buttons' focus, off Switch Team when it is hidden) */
 	focus_off_hidden(named(list, "lobby_button_bar", 0));
 	visible_set(named(description, "lobby_right_item", 0), game != NULL && state >= _client_state_pregame);
@@ -6454,6 +6470,7 @@ static void lobby_update(struct widget_instance *list)
 		players while its director holds the countdown) */
 		boolean dedicated = lobby_joined_dedicated && !global_network_game_server_get();
 		wchar_t name[NUMBEROF(game->name) + ROW_TEXT_LENGTH];
+		struct p2p_mm_status search;
 
 		name[0] = 0;
 		if (dedicated)
@@ -6469,16 +6486,38 @@ static void lobby_update(struct widget_instance *list)
 		}
 		ustrncpy(gametype, game->variant.human_readable_game_description, NUMBEROF(gametype) - 1);
 		gametype[NUMBEROF(gametype) - 1] = 0;
-		usnprintf(text, NUMBEROF(text) - 1, L"%s%s\r\n%s\r\n%d of %d players\r\n\r\n%s", name, gametype,
-			kind ? kind : engine_names[PIN(game->variant.game_engine_index, 0, 5)], lobby_player_count,
-			game->maximum_players,
-			seconds > 0 ? L"Starting in:" : game->machine_count < 2 || dedicated ? L"Waiting for players" : L"");
-		text[NUMBEROF(text) - 1] = 0;
-		if (seconds > 0)
+		if (!kind)
+			kind = engine_names[PIN(game->variant.game_engine_index, 0, 5)];
+		if (matchmaking_game_locked())
 		{
-			size_t length = ustrlen(text);
+			wchar_t line[MATCHMAKING_TEXT_LENGTH];
 
-			usnprintf(text + length, NUMBEROF(text) - 1 - length, L" %d", seconds);
+			matchmaking_lobby_line(seconds, line, NUMBEROF(line));
+			usnprintf(text, NUMBEROF(text) - 1, L"%s\r\n%s\r\n\r\n%s", gametype, kind, line);
+			text[NUMBEROF(text) - 1] = 0;
+		}
+		else
+		{
+			usnprintf(text, NUMBEROF(text) - 1, L"%s%s\r\n%s\r\n%d of %d players\r\n\r\n%s", name, gametype, kind,
+				lobby_player_count, game->maximum_players,
+				seconds > 0 ? L"Starting in:" : game->machine_count < 2 || dedicated ? L"Waiting for players" : L"");
+			text[NUMBEROF(text) - 1] = 0;
+			if (seconds > 0)
+			{
+				size_t length = ustrlen(text);
+
+				usnprintf(text + length, NUMBEROF(text) - 1 - length, L" %d", seconds);
+			}
+		}
+		p2p_mm_get_status(&search);
+		if (search.state == P2P_MM_HOSTING && seconds < 0)
+		{
+			wchar_t title[MATCHMAKING_TEXT_LENGTH], count[MATCHMAKING_TEXT_LENGTH], help[MATCHMAKING_TEXT_LENGTH];
+			wchar_t notice[MATCHMAKING_TEXT_LENGTH];
+
+			matchmaking_lines(&search, title, count, help, notice, MATCHMAKING_TEXT_LENGTH);
+			text_append(text, NUMBEROF(text), L"\r\n\r\n");
+			text_append(text, NUMBEROF(text), help);
 		}
 		if (global_network_game_server_get() && p2p_invite_link(link, sizeof(link)))
 		{

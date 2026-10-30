@@ -100,6 +100,17 @@ int main(int argc, char **argv)
 		matchmaking_lines(&status, title, count, help, notice, 64);
 		CHECK(!wcscmp(help, L"Searchers join you."), "this machine hosts: %ls", help);
 	}
+	CASE("lobby")
+	{
+		wchar_t line[32];
+
+		matchmaking_lobby_line(4, line, 32);
+		CHECK(!wcscmp(line, L"Game starts in 5"), "the first message: %ls", line);
+		matchmaking_lobby_line(0, line, 32);
+		CHECK(!wcscmp(line, L"Game starts in 1"), "the last message: %ls", line);
+		matchmaking_lobby_line(-1, line, 32);
+		CHECK(!wcscmp(line, L"Waiting for players"), "no countdown, no number: %ls", line);
+	}
 	CASE("notices")
 	{
 		status = queued(1);
