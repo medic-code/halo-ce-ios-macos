@@ -403,6 +403,7 @@ static char const *const port_function_names[] =
 	"port map vote open", "port map vote choose",
 	"port controller clear", "port controller cancel",
 	"port matchmaking init", "port matchmaking defaults", "port matchmaking search", "port matchmaking back",
+	"port matchmaking widen", "port matchmaking host", "port matchmaking search back",
 };
 
 /* the PC version's game data functions that the Xbox's have not, from
@@ -435,8 +436,7 @@ static char const *const port_game_data_input_names[] =
 	"port map vote update",
 	/* (HDR Calibration's patterns, drawn by the renderer) */
 	"port hdr calibration",
-	/* (Multiplayer's MATCHMAKING) */
-	"port matchmaking update",
+	"port matchmaking update", "port matchmaking search update",
 };
 
 static struct

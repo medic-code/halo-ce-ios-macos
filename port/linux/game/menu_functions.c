@@ -5694,8 +5694,7 @@ static void matchmaking_screen_update(struct widget_instance *list)
 		description->parameters.text_box.string_list_index = help;
 }
 
-/* "port matchmaking search" (SEARCH): the search begins, else the error
-sound and the line that refuses it */
+/* a join refuses this profile, and each refused join marks a good host failed */
 static boolean matchmaking_screen_search(void)
 {
 	struct p2p_mm_choice choice;
@@ -5705,10 +5704,7 @@ static boolean matchmaking_screen_search(void)
 		local_players += player_ui_local_player_wants_to_play_multiplayer(controller) ? 1 : 0;
 	matchmaking_screen.refusal = matchmaking_search_allowed(matchmaking_screen.playlists, local_players);
 	if (matchmaking_screen.refusal != MATCHMAKING_SEARCH)
-	{
-		ui_play_audio_feedback_sound(SOUND_ERROR);
-		return TRUE;
-	}
+		return campaign_fail();
 	choice.playlists = matchmaking_screen.playlists;
 	choice.size = matchmaking_screen.size;
 	p2p_mm_search(&choice);
@@ -5803,6 +5799,78 @@ static void matchmaking_lobby_line(short seconds, wchar_t *line, short size)
 }
 
 #define MATCHMAKING_TEXT_LENGTH 96
+static void matchmaking_search_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *bar = named(list, "search_button_bar", 0);
+	struct widget_instance *widget;
+	struct p2p_mm_status status;
+	wchar_t title[MATCHMAKING_TEXT_LENGTH], count[MATCHMAKING_TEXT_LENGTH], help[MATCHMAKING_TEXT_LENGTH];
+	wchar_t notice[MATCHMAKING_TEXT_LENGTH], text[MATCHMAKING_TEXT_LENGTH];
+	short index;
+
+	p2p_mm_get_status(&status);
+	matchmaking_lines(&status, title, count, help, notice, MATCHMAKING_TEXT_LENGTH);
+	text_set_length(named(screen, "search_title", 0), title, MATCHMAKING_TEXT_LENGTH);
+	text_set_length(named(screen, "search_count", 0), count, MATCHMAKING_TEXT_LENGTH);
+	text_set_length(named(screen, "search_help", 0), help, MATCHMAKING_TEXT_LENGTH);
+	text_set_length(named(screen, "search_notice", 0), notice, MATCHMAKING_TEXT_LENGTH);
+	usnprintf(text, MATCHMAKING_TEXT_LENGTH - 1, L"%d:%02d", status.seconds / 60, status.seconds % 60);
+	text_set_length(named(screen, "search_clock", 0), status.state != P2P_MM_OFF ? text : L"", MATCHMAKING_TEXT_LENGTH);
+	text[0] = 0;
+	for (index = 0; index < NUMBER_OF_P2P_MM_PLAYLISTS; index++)
+	{
+		if ((matchmaking_screen.playlists >> index) & 1)
+		{
+			text_append(text, NUMBEROF(text), text[0] ? TICKER_SEPARATOR : L"");
+			text_append(text, NUMBEROF(text), matchmaking_playlist_words[index]);
+		}
+	}
+	text_append(text, NUMBEROF(text), TICKER_SEPARATOR);
+	text_append(text, NUMBEROF(text), status.widened ? L"ANY SIZE" : matchmaking_size_words[matchmaking_screen.size]);
+	text_set_length(named(screen, "search_card_text", 0), text, MATCHMAKING_TEXT_LENGTH);
+	visible_set(named(bar, "search_button_widen", 0), status.state == P2P_MM_QUEUED && !status.widened);
+	visible_set(named(bar, "search_button_host", 0), status.state == P2P_MM_QUEUED);
+	if ((widget = named(bar, "search_button_host", 0)) != NULL)
+		widget->alpha_modifier = status.can_host <= 0 ? TAB_UNFOCUSED_ALPHA : 1.0f;
+	focus_off_hidden(bar);
+}
+
+static boolean matchmaking_widen(void)
+{
+	p2p_mm_widen_now();
+	ui_play_audio_feedback_sound(SOUND_FORWARD);
+	return TRUE;
+}
+
+static boolean matchmaking_host(void)
+{
+	struct p2p_mm_status status;
+
+	p2p_mm_get_status(&status);
+	if (status.can_host <= 0)
+		return campaign_fail();
+	p2p_mm_host_now();
+	ui_play_audio_feedback_sound(SOUND_FORWARD);
+	return TRUE;
+}
+
+static boolean matchmaking_search_back(struct widget_instance *widget, boolean *widget_deleted)
+{
+	struct p2p_mm_status status;
+
+	p2p_mm_get_status(&status);
+	if (status.state != P2P_MM_OFF)
+	{
+		p2p_mm_cancel();
+		ui_play_audio_feedback_sound(SOUND_BACK);
+		return TRUE;
+	}
+	ui_widget_port_go_back(widget);
+	*widget_deleted = TRUE;
+	return TRUE;
+}
+
 /* "gamespy screen update": the games' rows (name, map, gametype, players),
 the one chosen's line, the counts over the titles (the PC version's: its
 players, page, servers) */
@@ -8277,6 +8345,18 @@ boolean pc_menu_event_function_invoke(
 		{
 			return matchmaking_screen_back(widget, widget_deleted);
 		}
+		else if (!strcmp(name, "port matchmaking widen"))
+		{
+			return matchmaking_widen();
+		}
+		else if (!strcmp(name, "port matchmaking host"))
+		{
+			return matchmaking_host();
+		}
+		else if (!strcmp(name, "port matchmaking search back"))
+		{
+			return matchmaking_search_back(widget, widget_deleted);
+		}
 		else if (!strcmp(name, "ss copy invite"))
 		{
 			return invite_copy();
@@ -8531,6 +8611,8 @@ void pc_menu_game_data_function_invoke(
 		password_screen_update(widget);
 	else if (!strcmp(name, "port matchmaking update"))
 		matchmaking_screen_update(widget);
+	else if (!strcmp(name, "port matchmaking search update"))
+		matchmaking_search_update(widget);
 	else if (!strcmp(name, "gamespy screen update"))
 		browser_update(widget);
 	else if (!strcmp(name, "gt edit list update"))
