@@ -2162,8 +2162,99 @@ def _matchmaking() -> list:
 MATCHMAKING_GOLD = "#e6c66e"
 
 
+# SEARCH_LINK_DOTS and SEARCH_SLOT_SPINNER_FRAMES must equal menu_functions.c's
+SEARCH_STEP_SIZE = 24
+SEARCH_LINK_SIZE = (46, 4)
+SEARCH_LINK_DOTS = 12
+SEARCH_SLOT_SIZE = (265, 18)
+SEARCH_SLOT_SPINNER_FRAMES = 8
+
+
+def search_step_frames() -> list:
+    """frames: ahead, passed, current (menu_functions.c's _search_step_*)"""
+    size = SEARCH_STEP_SIZE
+    frames = []
+    for stroke, width, fill in (("#2896ff", 1.5, "#0a1e38"), ("#2896ff", 1.5, "#1a4478"), ("#cfe6ff", 2, "#123a66")):
+        frames.append((f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" '
+                       f'viewBox="0 0 {size} {size}">\n'
+                       f'  <circle cx="{size / 2}" cy="{size / 2}" r="{size / 2 - 1.5}" fill="{fill}" '
+                       f'fill-opacity="0.8" stroke="{stroke}" stroke-width="{width}"/>\n</svg>\n', size, size))
+    return frames
+
+
+def search_link_frames() -> list:
+    width, height = SEARCH_LINK_SIZE
+    pitch = width / SEARCH_LINK_DOTS
+    frames = []
+    for filled in range(SEARCH_LINK_DOTS + 1):
+        dots = "".join(f'  <circle cx="{pitch * (index + 0.5):g}" cy="{height / 2:g}" r="0.9" '
+                       + (f'fill="{MATCHMAKING_GOLD}"/>\n' if index < filled else 'fill="#2896ff" fill-opacity="0.45"/>\n')
+                       for index in range(SEARCH_LINK_DOTS))
+        frames.append((f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+                       f'viewBox="0 0 {width} {height}">\n{dots}</svg>\n', width, height))
+    return frames
+
+
+def search_slot_frames() -> list:
+    """frames: you, matched, then looking with its spinner (menu_functions.c's _search_slot_*)"""
+    width, height = SEARCH_SLOT_SIZE
+
+    def slot(mark):
+        return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+                f'viewBox="0 0 {width} {height}">\n{mark}</svg>\n', width, height)
+
+    frames = [slot(f'  <rect x="6" y="4" width="10" height="10" fill="{MATCHMAKING_GOLD}"/>\n'),
+              slot('  <rect x="6" y="4" width="10" height="10" fill="#2896ff"/>\n')]
+    for turn in range(SEARCH_SLOT_SPINNER_FRAMES):
+        spinner = ('  <circle cx="11" cy="9" r="4.5" fill="none" stroke="#2896ff" stroke-opacity="0.3" '
+                   'stroke-width="1.6"/>\n'
+                   f'  <path d="M11,4.5 A4.5,4.5 0 0 1 15.5,9" fill="none" stroke="#2896ff" stroke-width="1.6" '
+                   f'transform="rotate({turn * 360 // SEARCH_SLOT_SPINNER_FRAMES} 11 9)"/>\n')
+        frames.append(slot(spinner))
+    return frames
+
+
+def _search_tracker(base: str) -> tuple:
+    steps = [35 + 80 * index for index in range(4)]
+    children = [*(f'<child widget="{base}/search_step" x="{x}" y="160"/>' for x in steps),
+                *(f'<child widget="{base}/search_link" x="{x + SEARCH_STEP_SIZE + 4}" y="170"/>' for x in steps[:3]),
+                f'<child widget="{base}/search_step_3_label" x="{steps[2] - 23}" y="188"/>',
+                f'<child widget="{base}/search_step_3_widened" x="{steps[2] - 23}" y="188"/>',
+                f'<child widget="{base}/search_step_4_label" x="{steps[3] - 23}" y="188"/>',
+                f'<child widget="{base}/search_slot_you" x="340" y="112"/>',
+                *(f'<child widget="{base}/search_slot" x="340" y="{112 + 21 * index}"/>' for index in range(1, 8))]
+    lines = []
+    lines += _widget(f"{base}/search_step", [("width", SEARCH_STEP_SIZE), ("height", SEARCH_STEP_SIZE),
+                                             ("bitmap", f"{base}/search_step")],
+                     [f'<child widget="{base}/search_step_number"/>'])
+    lines += _widget(f"{base}/search_step_number", [("type", "text"), ("controller", 1), ("width", SEARCH_STEP_SIZE),
+                                                    ("height", SEARCH_STEP_SIZE), ("font", "ui\\large_ui"),
+                                                    ("color", "#FF2896FF"), ("align", "center"), ("text_y", 2)], [])
+    lines += _widget(f"{base}/search_link", [("width", SEARCH_LINK_SIZE[0]), ("height", SEARCH_LINK_SIZE[1]),
+                                             ("bitmap", f"{base}/search_link")], [])
+    for key, text, color in (("step_3_label", "0:45\\nANY SIZE", "#FF5B7A9E"),
+                             ("step_3_widened", "WIDENED", f"#FF{MATCHMAKING_GOLD[1:].upper()}"),
+                             ("step_4_label", "2:00\\nHOST", "#FF5B7A9E")):
+        lines += _widget(f"{base}/search_{key}", [("type", "text"), ("controller", 1), ("width", 70), ("height", 36),
+                                                  ("text", text), ("font", "ui\\small_ui"), ("color", color),
+                                                  ("align", "center")], [])
+    # menu_functions.c's profile_name_show fills current_profile_name
+    lines += _widget(f"{base}/search_slot_you", [("width", SEARCH_SLOT_SIZE[0]), ("height", SEARCH_SLOT_SIZE[1]),
+                                                 ("bitmap", f"{base}/search_slot")],
+                     [f'<child widget="{base}/current_profile_name" x="24"/>'])
+    lines += _widget(f"{base}/search_slot", [("width", SEARCH_SLOT_SIZE[0]), ("height", SEARCH_SLOT_SIZE[1]),
+                                             ("bitmap", f"{base}/search_slot")],
+                     [f'<child widget="{base}/search_slot_name" x="24"/>'])
+    for key in ("current_profile_name", "search_slot_name"):
+        lines += _widget(f"{base}/{key}", [("type", "text"), ("controller", 1), ("width", SEARCH_SLOT_SIZE[0] - 24),
+                                           ("height", SEARCH_SLOT_SIZE[1]), ("font", "ui\\small_ui"),
+                                           ("color", "#FFFFFFFF"), ("text_y", 1)], [])
+    return children, lines
+
+
 def _matchmaking_search(base: str) -> list:
     screen = f"{base}/search_screen"
+    tracker, tracker_widgets = _search_tracker(base)
     texts = [("notice", 35, 74, 570, 16, "ui\\small_ui", f"#FF{MATCHMAKING_GOLD[1:].upper()}", None),
              ("title", 35, 92, 230, 20, "ui\\large_ui", "#FF2896FF", None),
              ("clock", 230, 92, 70, 20, "ui\\large_ui", f"#FF{MATCHMAKING_GOLD[1:].upper()}", "right"),
@@ -2175,12 +2266,14 @@ def _matchmaking_search(base: str) -> list:
                      '<on event="back" run="port matchmaking search back"/>',
                      f'<child widget="{base}/header_matchmaking"/>',
                      *(f'<child widget="{base}/search_{key}"/>' for key, *_ in texts),
+                     *tracker,
                      f'<child widget="{base}/search_card_text" x="35" y="370"/>',
                      f'<child widget="{base}/search_list"/>'])
     for key, left, top, width, height, font, color, align in texts:
         lines += _widget(f"{base}/search_{key}", [("type", "text"), ("controller", 1), ("left", left), ("top", top),
                                                   ("width", width), ("height", height), ("font", font),
                                                   ("color", color), ("align", align)], [])
+    lines += tracker_widgets
     lines += _widget(f"{base}/search_card_text", [("type", "text"), ("controller", 1), ("width", 265), ("height", 24),
                                                   ("font", "ui\\small_ui"),
                                                   ("color", "#FFFFFFFF"), ("text_x", 10), ("text_y", 4)], [])
