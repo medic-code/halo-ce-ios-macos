@@ -470,9 +470,14 @@ struct p2p_mm_status
 	/* counts include this machine */
 	int playlist, size, count, needed, all_sizes_count;
 	int games_checked;
+	/* FOUND and HOSTING only; ping -1: not timed */
+	int hosts, players, most_players, ping;
 	int notice;
 };
 enum { P2P_MM_NOTICE_NONE, P2P_MM_NOTICE_HOST_LEFT, P2P_MM_NOTICE_HOST_UNREACHED };
+/* the search's marks, from SEARCH or the return to the queue, and step 1's
+wait */
+enum { P2P_MM_LOOK_SECONDS = 6, P2P_MM_WIDEN_SECONDS = 45, P2P_MM_HOST_SECONDS = 120 };
 void p2p_mm_get_status(struct p2p_mm_status *status);
 
 #endif

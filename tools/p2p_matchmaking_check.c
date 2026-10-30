@@ -925,6 +925,10 @@ static void check_four(void)
 	for (index = 0; host >= 0 && index < 4; index++)
 		in_host += machines[index].in == host;
 	CHECK(host >= 0 && in_host == 3 && machines[host].players == 4, "E4: three join by invite: %d", in_host);
+	for (index = 0; host >= 0 && index < 4; index++)
+		CHECK(index == host || (machines[index].search.joining_players == 4 &&
+			machines[index].search.joining_most_players == 4), "E4: MATCH FOUND counts the pool, the host included: %d of %d",
+			machines[index].search.joining_players, machines[index].search.joining_most_players);
 	if (host >= 0)
 	{
 		struct mm_out out[MM_MAXIMUM_OUT];
@@ -1019,6 +1023,8 @@ static void check_never_joins(void)
 	start_searching(4, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
 	run(10.0);
 	CHECK(host >= 0 && machines[4].in == host && machines[host].players == 4, "E41: the next searcher fills it");
+	CHECK(machines[4].search.joining_players == 4, "E41: its MATCH FOUND counts the lobby and itself: %d",
+		machines[4].search.joining_players);
 }
 
 static void check_stun_unknown(void)

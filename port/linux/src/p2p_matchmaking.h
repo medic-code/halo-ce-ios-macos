@@ -80,11 +80,11 @@ enum
 	MM_SETTLE = 4000,
 	MM_HOLD = 20000,
 	MM_HOST_WAIT = 20000,
-	MM_WIDEN = 45000,
-	MM_HOST = 120000,
+	MM_WIDEN = P2P_MM_WIDEN_SECONDS * 1000,
+	MM_HOST = P2P_MM_HOST_SECONDS * 1000,
 	MM_EXPIRY_INTERVALS = 3,
 	MM_RUNNING_INTERVAL = 25000,
-	MM_LOOK_TIME = 6000,
+	MM_LOOK_TIME = P2P_MM_LOOK_SECONDS * 1000,
 	MM_JOIN_BACKOFF = 30000,
 	MM_MAXIMUM_OUT = 32,
 };
@@ -141,6 +141,7 @@ struct mm_search
 	unsigned long held_until, next_hosting_record;
 	unsigned char joining[P2P_KEY_HASH_SIZE];
 	unsigned long joining_since;
+	int joining_players, joining_most_players, joining_ping;
 	struct p2p_mm_decision decision;
 	int decided;
 	int games_checked;
