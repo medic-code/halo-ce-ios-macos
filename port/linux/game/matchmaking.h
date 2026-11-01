@@ -7,5 +7,7 @@
 
 void matchmaking_update(float seconds);
 boolean matchmaking_game_locked(void);
+boolean matchmaking_can_start_now(void);
+void matchmaking_start_now(void);
 
 #endif

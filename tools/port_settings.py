@@ -1868,6 +1868,7 @@ def _lobby() -> list:
                      # it traps none)
                      [f'<child widget="{base}/lobby_button_team" x="120" y="1"/>',
                       f'<child widget="{base}/lobby_button_start" x="250" y="1"/>',
+                      f'<child widget="{base}/lobby_button_host_start" x="250" y="1"/>',
                       f'<child widget="{base}/lobby_button_add" x="380" y="1"/>',
                       f'<child widget="{base}/lobby_button_leave" x="510" y="1"/>'])
     for key, caption, handlers in (
@@ -1876,6 +1877,7 @@ def _lobby() -> list:
         ("team", "SWITCH TEAM", ['<on event="a" run="swap player team"/>', '<on event="start" run="swap player team"/>']),
         ("start", "START NOW", ['<on event="a" run="net game speed start"/>',
                                 '<on event="start" run="net game speed start"/>']),
+        ("host_start", "START NOW", ['<on event="a" run="port matchmaking start now"/>']),
         ("leave", "LEAVE", ['<on event="a" run="mouse emit back event"/>',
                             '<on event="start" run="mouse emit back event"/>'])):
         lines += _widget(f"{base}/lobby_button_{key}", [("type", "text"), ("width", 128), ("height", 24),
