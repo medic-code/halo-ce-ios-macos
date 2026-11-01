@@ -69,7 +69,7 @@ static struct
 	float seconds;
 	short playlist, size;
 	char map[64];
-	boolean map_set, player_added;
+	boolean map_set, player_added, start_now;
 	boolean public_game;
 	boolean reopen;
 	byte host[6];
@@ -80,8 +80,10 @@ boolean matchmaking_game_locked(void)
 	return matchmaking.role != _matchmaking_idle && !matchmaking.public_game;
 }
 
-static void matchmaking_start_countdown(struct network_game_server *server, short players, short most_players)
+static void matchmaking_start_countdown(struct network_game_server *server, short players, short most_players, boolean start_now)
 {
+	if (start_now)
+		return;
 	if (players < most_players)
 		network_game_server_port_countdown_stop(server);
 	else if (network_game_server_port_ok_to_countdown(server) && !network_game_server_port_countdown_paused(server))
@@ -145,7 +147,7 @@ static void matchmaking_begin_host(struct p2p_mm_decision const *decision)
 	matchmaking.role = _matchmaking_hosting;
 	matchmaking.public_game = FALSE;
 	matchmaking.seconds = 0.0f;
-	matchmaking.map_set = matchmaking.player_added = FALSE;
+	matchmaking.map_set = matchmaking.player_added = matchmaking.start_now = FALSE;
 }
 
 static boolean matchmaking_host_gave_up(float seconds, short players)
@@ -208,8 +210,25 @@ static void matchmaking_update_host(float seconds)
 		matchmaking.reopen = TRUE;
 		return;
 	}
-	if (state == SERVER_PREGAME && matchmaking.player_added)
-		matchmaking_start_countdown(server, game->player_count, game->maximum_players);
+	if (state != SERVER_PREGAME)
+		matchmaking.start_now = matchmaking.map_set = FALSE;
+	else if (matchmaking.player_added)
+		matchmaking_start_countdown(server, game->player_count, game->maximum_players, matchmaking.start_now);
+}
+
+boolean matchmaking_can_start_now(void)
+{
+	struct network_game_server *server = global_network_game_server_get();
+	struct network_game *game = server ? network_game_server_get_game(server) : NULL;
+
+	return game && matchmaking.role == _matchmaking_hosting && matchmaking.player_added && !matchmaking.start_now &&
+		network_game_server_get_state(server, NULL) == SERVER_PREGAME && game->player_count < game->maximum_players;
+}
+
+void matchmaking_start_now(void)
+{
+	matchmaking.start_now = TRUE;
+	network_game_client_request_immediate_start();
 }
 
 static void matchmaking_begin_join(struct p2p_mm_decision const *decision)

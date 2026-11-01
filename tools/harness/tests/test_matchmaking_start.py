@@ -9,11 +9,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, function, mutated, read, run  # noqa: E402
 
-CASES = ["full_starts", "leave_stops", "not_ready"]
+CASES = ["full_starts", "leave_stops", "start_now_holds", "not_ready"]
 
 NEGATIVE_CONTROLS = {
     "short-lobby-counts": (("players < most_players", "players < most_players - 1"), "leave_stops"),
     "five-seconds-shortened": (("4999", "499"), "full_starts"),
+    "start-now-stopped": (("if (start_now)", "if (0)"), "start_now_holds"),
     "pause-ignored": ((" && !network_game_server_port_countdown_paused(server)", ""), "not_ready"),
 }
 

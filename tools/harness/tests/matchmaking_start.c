@@ -38,26 +38,33 @@ int main(int argc, char **argv)
 	ok = TRUE;
 	CASE("full_starts")
 	{
-		matchmaking_start_countdown(server, 4, 4);
+		matchmaking_start_countdown(server, 4, 4, FALSE);
 		CHECK(begun == 4999, "the countdown began with %ld ms", begun);
 		CHECK(!stopped, "a full lobby stopped the countdown");
 		return 0;
 	}
 	CASE("leave_stops")
 	{
-		matchmaking_start_countdown(server, 3, 4);
+		matchmaking_start_countdown(server, 3, 4, FALSE);
 		CHECK(stopped == 1, "a player leaving stopped %d countdowns", stopped);
 		CHECK(!begun, "three of four counted down: %ld ms", begun);
+		return 0;
+	}
+	CASE("start_now_holds")
+	{
+		matchmaking_start_countdown(server, 3, 4, TRUE);
+		CHECK(!stopped, "a countdown the host started was stopped");
+		CHECK(!begun, "a five-second countdown replaced it: %ld ms", begun);
 		return 0;
 	}
 	CASE("not_ready")
 	{
 		ok = FALSE;
-		matchmaking_start_countdown(server, 4, 4);
+		matchmaking_start_countdown(server, 4, 4, FALSE);
 		CHECK(!begun, "a countdown the server would refuse began: %ld ms", begun);
 		ok = TRUE;
 		paused = TRUE;
-		matchmaking_start_countdown(server, 4, 4);
+		matchmaking_start_countdown(server, 4, 4, FALSE);
 		CHECK(!begun, "a paused lobby began counting: %ld ms", begun);
 		CHECK(!stopped, "a paused lobby was stopped");
 		return 0;

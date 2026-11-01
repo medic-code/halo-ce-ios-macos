@@ -6207,9 +6207,12 @@ static struct widget_instance *focused_leaf(struct widget_instance *widget)
 time: the lobby opening) */
 extern void halo_virtual_gamepads_start(void);
 
+static boolean lobby_first_focus;
+
 /* "port lobby open" (the lobby made, or come back to): no player being added */
 static boolean lobby_join_reset(void)
 {
+	lobby_first_focus = TRUE;
 	halo_virtual_gamepads_start();
 	lobby_join.adding = FALSE;
 	lobby_join.controller = NONE;
@@ -6242,7 +6245,7 @@ static boolean lobby_join_start(struct widget_instance *widget, short controller
 	struct network_game *game = client ? network_game_client_get_game(client) : NULL;
 	short state_data;
 
-	/* (else a START by habit is the focused LEAVE's, the only button shown) */
+	/* (else a START by habit is the focused button's) */
 	if (matchmaking_game_locked())
 		return campaign_fail();
 	if (lobby_controller_playing(controller))
@@ -6490,7 +6493,10 @@ static void map_vote_lobby_check(void);
 /* "port lobby update" */
 static void lobby_update(struct widget_instance *list)
 {
+	static boolean start_now_shown;
 	struct widget_instance *description = list->parameters.list.extended_description;
+	struct widget_instance *bar = named(list, "lobby_button_bar", 0);
+	boolean start_now = matchmaking_can_start_now();
 	void *client = global_network_game_client_get();
 	struct network_game *game = client ? network_game_client_get_game(client) : NULL;
 	short state_data, state = client ? network_game_client_get_state(client, &state_data) : NONE;
@@ -6526,9 +6532,28 @@ static void lobby_update(struct widget_instance *list)
 	map_vote_lobby_check();
 	visible_set(named(list, "lobby_button_team", 0), game && game->variant.universal_variant.teams && !matchmaking_game_locked());
 	visible_set(named(list, "lobby_button_start", 0), !matchmaking_game_locked());
+	visible_set(named(list, "lobby_button_host_start", 0), start_now);
 	visible_set(named(list, "lobby_button_add", 0), !matchmaking_game_locked());
-	/* (the buttons' focus, off Switch Team when it is hidden) */
-	focus_off_hidden(named(list, "lobby_button_bar", 0));
+	/* (the buttons' focus, off Switch Team when it is hidden; to the first
+	shown as START NOW appears, the lobby being open by then) */
+	if (bar && start_now && !start_now_shown)
+	{
+		bar->focused_child = bar->child;
+		/* (a first focus on the rows leaves A there, off the button drawn focused) */
+		if (lobby_first_focus)
+		{
+			lobby_first_focus = FALSE;
+			focus_row(list, NONE);
+		}
+	}
+	start_now_shown = start_now;
+	/* (a joiner's rows do nothing, and the bar draws LEAVE focused) */
+	if (bar && lobby_first_focus && matchmaking_game_locked() && !global_network_game_server_get())
+	{
+		lobby_first_focus = FALSE;
+		focus_row(list, NONE);
+	}
+	focus_off_hidden(bar);
 	visible_set(named(description, "lobby_right_item", 0), game != NULL && state >= _client_state_pregame);
 	if (!game || state < _client_state_pregame)
 	{
@@ -8352,6 +8377,10 @@ boolean pc_menu_event_function_invoke(
 		else if (!strcmp(name, "port matchmaking back"))
 		{
 			return matchmaking_screen_back(widget, widget_deleted);
+		}
+		else if (!strcmp(name, "port matchmaking start now"))
+		{
+			matchmaking_start_now();
 		}
 		else if (!strcmp(name, "port matchmaking widen"))
 		{
