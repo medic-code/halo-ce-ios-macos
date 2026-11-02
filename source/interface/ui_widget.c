@@ -680,6 +680,7 @@ struct widget_instance;
 #include "text/text_group.h"
 #include "text/unicode.h"
 #include "ui_widget.h"
+#include "matchmaking.h" /* port: port/linux/game/matchmaking.c */
 /* port: port/linux/game/menu_functions.c: a text's colour in place of its
 own (the server browser's pings) */
 boolean pc_menu_text_color(struct widget_instance *widget, real_argb_color *color);
@@ -4761,7 +4762,8 @@ void network_game_reset_to_pregame_ui(
 	}
 	else
 	{
-		if (global_network_game_server_get())
+		/* port: a matchmade game's host picks no map: its lobby, whose countdown runs */
+		if (global_network_game_server_get() && !matchmaking_game_locked())
 		{
 			network_game_server_pause_countdown(global_network_game_server_get(), TRUE);
 			/* port: with the PC version's menus, theirs (port/linux/game/menu_tags.c) */
