@@ -1712,6 +1712,9 @@ void p2p_mm_game_lost(void)
 	int restarted = 0, size = 0;
 
 	pthread_mutex_lock(&p2p_lock);
+	/* a member that stayed behind when the leader left has no search to go back to */
+	if (p2p_party_is_member() && !mm.search.party.following)
+		mm.search.in_game = 0;
 	if (mm.search.state != P2P_MM_OFF || mm.search.in_game)
 	{
 		p2p_lobby_masters_forget();

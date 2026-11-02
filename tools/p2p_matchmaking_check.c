@@ -3245,6 +3245,34 @@ static void check_e77_friend_joins_search(void)
 	CHECK(!parties[0].notice, "and it never had the search: %d", parties[0].notice);
 }
 
+static void check_member_stays_in_game(void)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	int index;
+
+	case_name = "member_stays_in_game";
+	party_world(2, 3);
+	list_game(2, 2, 8);
+	party_start(2, P2P_MM_4V4, 3);
+	for (index = 0; index < 20 && machines[1].in < 0; index++)
+		run(1);
+	CHECK(machines[0].in == 2 && machines[1].in == 2, "both are in the game");
+	publish(0, out, mm_cancel(&machines[0].search, out, MM_MAXIMUM_OUT));
+	machines[0].in = -1;
+	machines[2].players--;
+	run(4);
+	CHECK(machines[1].search.in_game && machines[1].in == 2, "the member stays in the game");
+	parties[0].notice = P2P_PARTY_NOTICE_NONE;
+	party_start(2, P2P_MM_4V4, 3);
+	run(4);
+	CHECK(party_size() == 1 && parties[0].notice == P2P_PARTY_NOTICE_LEFT_SEARCH,
+		"and is not counted in the leader's next search: %d, notice %d", party_size(), parties[0].notice);
+	CHECK(machines[1].search.state == P2P_MM_OFF, "nor follows it: state %d", machines[1].search.state);
+	run(25);
+	CHECK(parties[0].notice != P2P_PARTY_NOTICE_COULD_NOT_JOIN, "the leader does not wait for it: %d", parties[0].notice);
+	listing_count = 0;
+}
+
 static void check_party_journeys(void)
 {
 	check_e24_leader_cancels();
@@ -3257,6 +3285,7 @@ static void check_party_journeys(void)
 	check_e75_member_keeps_hosting();
 	check_e76_party_stays_together();
 	check_e77_friend_joins_search();
+	check_member_stays_in_game();
 	check_e25_follow_big();
 	check_e29_cannot_follow();
 }
