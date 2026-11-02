@@ -63,6 +63,7 @@ only look up and create stand-ins.
 #include "server_master.h"
 #include "port_config.h"
 #include "p2p_internal.h"
+#include "p2p_matchmaking.h"
 #include "player_link.h"
 #include "log_address.h"
 #include "ikcp.h"
@@ -3605,7 +3606,7 @@ static int command_line_invite(char *text, int size)
 	{
 		unsigned char hash[P2P_KEY_HASH_SIZE], token[P2P_TOKEN_SIZE];
 
-		if (parse_invite(text, hash, token) || p2p_party_link_held(text))
+		if (parse_invite(text, hash, token) || mm_party_link_held(text))
 			return 1;
 	}
 	return 0;

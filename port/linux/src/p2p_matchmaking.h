@@ -221,6 +221,8 @@ struct mm_party_record
 	unsigned char seal[P2P_SHA256_SIZE];
 };
 
+void mm_put_long(unsigned char *bytes, unsigned long value);
+unsigned long mm_get_long(const unsigned char *bytes);
 void mm_party_make(struct mm_party *party, const unsigned char *seed, const unsigned char *secret, unsigned long now);
 int mm_party_link_held(const char *text);
 int mm_party_can_join(const struct mm_party *party, const unsigned char *seed, const char *text);
