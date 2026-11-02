@@ -308,26 +308,48 @@ static void indices_in_order(const struct mm_unit *units, const int *indices, in
 	}
 }
 
-int mm_pool(const struct mm_unit *units, int count, int players, int *pool)
+static int teams_split(const struct mm_unit *units, const int *pool, int count, int team)
 {
-	int all[MM_MAXIMUM_UNITS + 1], order[MM_MAXIMUM_UNITS + 1], index, taken = 0, has_host = 0;
+	unsigned long sums = 1;
+	int index, total = 0, sum;
+
+	for (index = 0; index < count; index++)
+	{
+		sums |= sums << units[pool[index]].players;
+		total += units[pool[index]].players;
+	}
+	for (sum = total - team; sum <= team; sum++)
+		if (sum >= 0 && sums >> sum & 1)
+			return 1;
+	return 0;
+}
+
+int mm_pool(const struct mm_unit *units, int count, int players, int teamed, int *pool)
+{
+	int all[MM_MAXIMUM_UNITS + 1], order[MM_MAXIMUM_UNITS + 1], index, taken = 0, filled = 0, has_host = 0;
 
 	for (index = 0; index < count; index++)
 		all[index] = index;
 	indices_in_order(units, all, count, order);
-	for (index = 0; index < count && taken < players; index++)
+	for (index = 0; index < count && filled < players; index++)
 	{
 		const struct mm_unit *candidate = &units[order[index]];
 		int can_host = candidate->can_host;
 
 		if (candidate->failed)
 			continue;
-		if (!can_host && !has_host && taken + 1 == players)
+		if (filled + candidate->players > players)
 			continue;
-		pool[taken++] = order[index];
+		if (!can_host && !has_host && filled + candidate->players == players)
+			continue;
+		pool[taken] = order[index];
+		if (teamed && !teams_split(units, pool, taken + 1, players / 2))
+			continue;
+		taken++;
+		filled += candidate->players;
 		has_host |= can_host;
 	}
-	return taken == players && has_host ? taken : 0;
+	return filled == players && has_host ? taken : 0;
 }
 
 int mm_elect(const struct mm_unit *units, const int *pool, int pool_count)
@@ -621,6 +643,7 @@ static int make_units(const struct mm_search *search, int playlist, int size, st
 	memcpy(units[0].key_hash, search->key_hash, P2P_KEY_HASH_SIZE);
 	units[0].can_host = search->can_host > 0;
 	units[0].failed = 0;
+	units[0].players = 1;
 	for (index = 0; index < MM_MAXIMUM_UNITS; index++)
 	{
 		const struct mm_peer *peer = &search->peers[index];
@@ -634,6 +657,7 @@ static int make_units(const struct mm_search *search, int playlist, int size, st
 		memcpy(units[count].key_hash, peer->record.key_hash, P2P_KEY_HASH_SIZE);
 		units[count].can_host = peer->record.can_host;
 		units[count].failed = peer->failed != MM_FAILED_NONE;
+		units[count].players = peer->record.party;
 		count++;
 	}
 	return count;
@@ -675,7 +699,7 @@ static int settle(struct mm_search *search, unsigned long now, struct mm_out *ou
 	for (queue = 0; queue < search->queue_count && !taken; queue++)
 	{
 		taken = mm_pool(units, make_units(search, search->queues[queue][0], search->queues[queue][1], units),
-			p2p_mm_size_players(search->queues[queue][1]), pool);
+			p2p_mm_size_players(search->queues[queue][1]), search->queues[queue][1] != P2P_MM_FFA_6, pool);
 		for (member = 0; member < taken && pool[member] != 0; member++)
 			;
 		if (member == taken)

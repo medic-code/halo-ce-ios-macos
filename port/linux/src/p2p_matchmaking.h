@@ -81,9 +81,10 @@ struct mm_unit
 	unsigned char key_hash[P2P_KEY_HASH_SIZE];
 	int can_host;
 	int failed;
+	int players;
 };
 
-int mm_pool(const struct mm_unit *units, int count, int players, int *pool);
+int mm_pool(const struct mm_unit *units, int count, int players, int teamed, int *pool);
 int mm_elect(const struct mm_unit *units, const int *pool, int pool_count);
 
 enum
