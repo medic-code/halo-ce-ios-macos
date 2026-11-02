@@ -280,6 +280,30 @@ static void check_joined_then_lost(void)
 	p2p_mm_joined(0);
 	p2p_mm_get_status(&status);
 	CHECK(status.state == P2P_MM_QUEUED && status.notice == P2P_MM_NOTICE_HOST_UNREACHED, "a failed join requeues: %d", status.state);
+	{
+		struct mm_record other = searching(21, 1);
+		unsigned char other_seed[P2P_SEED_SIZE];
+
+		other.kind = MM_KIND_HOSTING;
+		other.players = 1;
+		other.most_players = 4;
+		seed_of(21, other_seed);
+		size = mm_record_write(&other, other_seed, bytes, sizeof(bytes));
+		pthread_mutex_lock(&p2p_lock);
+		p2p_mm_heard(bytes, size);
+		clock_now += MM_JOIN_BACKOFF - 1000;
+		p2p_mm_update(clock_now, 1, NULL);
+		pthread_mutex_unlock(&p2p_lock);
+		CHECK(p2p_mm_take_decision(&decision) == P2P_MM_DECIDE_NONE, "a second open game waits out the back-off");
+		other.sequence = 2;
+		size = mm_record_write(&other, other_seed, bytes, sizeof(bytes));
+		pthread_mutex_lock(&p2p_lock);
+		p2p_mm_heard(bytes, size);
+		clock_now += 1000;
+		p2p_mm_update(clock_now, 1, NULL);
+		pthread_mutex_unlock(&p2p_lock);
+		CHECK(p2p_mm_take_decision(&decision) == P2P_MM_DECIDE_JOIN, "the open game is joined after the back-off");
+	}
 	p2p_mm_game_lost();
 	p2p_mm_cancel();
 	p2p_mm_search(&choice);
