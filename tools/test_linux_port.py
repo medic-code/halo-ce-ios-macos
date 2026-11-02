@@ -456,6 +456,8 @@ def test_p2p_matchmaking(tmp_path):
     (("if (topic[0] && !strcmp(topics[index], topic))", "if (0)"), "topic moves"),
     (("queues <= 12", "queues <= 25"), "topics"),
     (("HALO_PORT_NETWORK_VERSION, p2p_mm_playlist_names", "38, p2p_mm_playlist_names"), "topics"),
+    (("\"hceu/3/party/%d/%s\", HALO_PORT_NETWORK_VERSION", "\"hceu/3/party/%d/%s\", 38"), "party topic"),
+    (("p2p_hex(digest, 16, text)", "p2p_hex(secret, 16, text)"), "party topic"),
     (("peer->refreshes >= MM_REFRESHES_COUNTED", "peer->refreshes >= 1"), "e14_two_refreshes"),
     (("peer->refreshes = -1;\n\t\tpeer->playlist", "peer->playlist"), "e14_two_refreshes"),
     (("MM_KIND_CANCEL)\n\t\tpeer->refreshes = -1;", "MM_KIND_CANCEL)\n\t\tpeer->refreshes = 0;"), "e14_after_cancel"),

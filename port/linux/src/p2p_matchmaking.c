@@ -28,6 +28,16 @@ void mm_topic(int playlist, int size, char *topic, int topic_size)
 		p2p_mm_size_names[size]);
 }
 
+void mm_party_topic(const unsigned char *secret, char *topic, int topic_size)
+{
+	unsigned char digest[P2P_SHA256_SIZE];
+	char text[2 * P2P_SHA256_SIZE + 1];
+
+	p2p_sha256(secret, P2P_PARTY_SECRET_SIZE, digest);
+	p2p_hex(digest, 16, text);
+	snprintf(topic, (size_t)topic_size, "hceu/3/party/%d/%s", HALO_PORT_NETWORK_VERSION, text);
+}
+
 int mm_topic_listed(const char *const *topics, int count, const char *topic)
 {
 	int index;
@@ -1253,6 +1263,12 @@ void p2p_mm_heard(const unsigned char *payload, int size)
 	}
 	memcpy(mm.queue[mm.queue_count].bytes, payload, (size_t)size);
 	mm.queue[mm.queue_count++].size = size;
+}
+
+void p2p_party_heard(const unsigned char *payload, int size)
+{
+	(void)payload;
+	(void)size;
 }
 
 int p2p_mm_verify_pass(unsigned long now)

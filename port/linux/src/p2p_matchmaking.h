@@ -60,6 +60,7 @@ struct mm_record
 };
 
 void mm_topic(int playlist, int size, char *topic, int topic_size);
+void mm_party_topic(const unsigned char *secret, char *topic, int topic_size);
 /* tenths of a second */
 int mm_interval(int queues);
 

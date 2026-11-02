@@ -376,11 +376,17 @@ enum
 {
 	P2P_MM_MAXIMUM_TOPICS = NUMBER_OF_P2P_MM_PLAYLISTS * NUMBER_OF_P2P_MM_SMALL_SIZES,
 	P2P_MM_TOPIC_SIZE = 48,
+	P2P_PARTY_SECRET_SIZE = 16,
+	P2P_PARTY_TOPIC_SIZE = 56,
 };
 /* replaces the topics subscribed before */
 void p2p_signal_mm_topics(const char topics[][P2P_MM_TOPIC_SIZE], int count);
 void p2p_signal_mm_publish(const char *topic, const unsigned char *payload, int size);
 void p2p_mm_heard(const unsigned char *payload, int size);
+/* replaces the topic subscribed before; "": none */
+void p2p_signal_party_topic(const char *topic);
+void p2p_signal_party_publish(const unsigned char *payload, int size);
+void p2p_party_heard(const unsigned char *payload, int size);
 int p2p_mm_active(void);
 /* call under p2p_lock */
 int p2p_mm_hosts_big_game(void);

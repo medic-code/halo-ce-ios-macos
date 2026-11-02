@@ -181,7 +181,8 @@ enum
 	_topic_query,
 	_topic_slots,
 	_topic_mm,
-	_topic_probe = _topic_mm + P2P_MM_MAXIMUM_TOPICS,
+	_topic_party = _topic_mm + P2P_MM_MAXIMUM_TOPICS,
+	_topic_probe,
 	/* the topics a broker is subscribed to */
 	NUMBER_OF_TOPICS = _topic_probe + P2P_MAXIMUM_PROBES,
 };
@@ -384,6 +385,7 @@ static struct
 
 	char mm_topics[P2P_MM_MAXIMUM_TOPICS][P2P_MM_TOPIC_SIZE];
 	int mm_topic_count;
+	char party_topic[P2P_PARTY_TOPIC_SIZE];
 } signalling;
 
 static int elapsed(unsigned long since, unsigned long time)
@@ -709,6 +711,7 @@ static void broker_sync_topics(struct broker *broker)
 	wanted[_topic_slots] = lobby && signalling.lobby_browsing ? P2P_LOBBY_SLOT_PREFIX "+" : "";
 	for (index = 0; index < P2P_MM_MAXIMUM_TOPICS; index++)
 		wanted[_topic_mm + index] = index < signalling.mm_topic_count ? signalling.mm_topics[index] : "";
+	wanted[_topic_party] = signalling.party_topic;
 	for (index = 0; index < P2P_MAXIMUM_PROBES; index++)
 		wanted[_topic_probe + index] = signalling.probes[index].join.active ? signalling.probes[index].topic : "";
 	for (index = 0; index < NUMBER_OF_TOPICS; index++)
@@ -1486,6 +1489,12 @@ static void publish_received(struct broker *broker, const char *topic, const uns
 			return;
 		}
 	}
+	if (signalling.party_topic[0] && !strcmp(topic, signalling.party_topic))
+	{
+		if (size <= MAXIMUM_PUBLISH_SIZE)
+			p2p_party_heard(payload, size);
+		return;
+	}
 	if (size > MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD)
 		return;
 	if (!strncmp(topic, P2P_LOBBY_SLOT_PREFIX, sizeof(P2P_LOBBY_SLOT_PREFIX) - 1))
@@ -2043,6 +2052,18 @@ void p2p_signal_mm_publish(const char *topic, const unsigned char *payload, int 
 {
 	if (size <= MAXIMUM_PUBLISH_SIZE)
 		publish_everywhere(topic, payload, size);
+}
+
+void p2p_signal_party_topic(const char *topic)
+{
+	snprintf(signalling.party_topic, sizeof(signalling.party_topic), "%s", topic);
+	sync_all_topics();
+}
+
+void p2p_signal_party_publish(const unsigned char *payload, int size)
+{
+	if (signalling.party_topic[0] && size <= MAXIMUM_PUBLISH_SIZE)
+		publish_everywhere(signalling.party_topic, payload, size);
 }
 
 void p2p_signal_host(const unsigned char *token)
