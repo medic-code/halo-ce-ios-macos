@@ -423,6 +423,7 @@ enum
 int p2p_mm_size_players(int size);
 /* CTF has no free-for-all variant; playlists has a bit per playlist */
 int mm_playlist_has_size(unsigned playlists, int size);
+int mm_party_size_allowed(int party, int size);
 
 /* on the wire (queue topics) and in config.toml */
 extern const char *const p2p_mm_playlist_names[NUMBER_OF_P2P_MM_PLAYLISTS];
@@ -483,6 +484,8 @@ enum { P2P_MM_NOTICE_NONE, P2P_MM_NOTICE_HOST_LEFT, P2P_MM_NOTICE_HOST_UNREACHED
 	P2P_MM_NOTICE_APART };
 enum { P2P_MM_LOOK_SECONDS = 6, P2P_MM_WIDEN_SECONDS = 45, P2P_MM_HOST_SECONDS = 120, P2P_MM_HOST_WAIT_SECONDS = 20 };
 void p2p_mm_get_status(struct p2p_mm_status *status);
+/* a party's leader's choice with no search running, for the members' screens */
+void p2p_mm_set_choice(const struct p2p_mm_choice *choice);
 void p2p_mm_host_gave_up(void);
 
 /* MATCHMAKING's party (p2p_party.c) */
