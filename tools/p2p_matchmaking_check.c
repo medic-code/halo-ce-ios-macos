@@ -1960,6 +1960,71 @@ static void check_e75_member_keeps_hosting(void)
 		member->state);
 }
 
+static void check_e76_party_stays_together(void)
+{
+	static const unsigned char no_game[P2P_KEY_HASH_SIZE];
+	int waited, joined;
+
+	case_name = "e76_party_stays_together";
+	member_world(2, 2, 6, P2P_MM_2V2);
+	fail_join = 0;
+	for (waited = 0; waited < 60 && !machines[1].hosting; waited++)
+		run(1);
+	for (joined = 0; joined < 5 && !(machines[2].in == 1 && machines[3].in == 1); joined++)
+		run(1);
+	for (waited = 2; waited < 4; waited++)
+	{
+		machines[waited].in = -1;
+		machines[waited].quit = 1;
+		machines[1].players--;
+	}
+	run(5 - joined);
+	CHECK(machines[1].hosting && machines[0].search.state == P2P_MM_QUEUED, "the leader cannot reach the member's game");
+	run(14);
+	CHECK(machines[1].hosting, "the member waits 20 s");
+	run(10);
+	CHECK(!machines[1].hosting, "then stops hosting");
+	CHECK(machines[1].search.state == P2P_MM_QUEUED && machines[1].search.party.following, "and searches with the party");
+	CHECK(machines[0].search.state == P2P_MM_QUEUED && party_size() == 2, "the party searches together: %d", party_size());
+	CHECK(!parties[0].notice && parties[1].role == MM_PARTY_MEMBER, "intact: notice %d", parties[0].notice);
+	fail_join = -1;
+	start_searching(4, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 0);
+	start_searching(5, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 0);
+	until_member_hosts(90);
+	CHECK(machines[1].hosting && machines[0].in == 1, "the game the member hosted is not failed: the leader joins its next");
+
+	member_world(2, 2, 4, P2P_MM_2V2);
+	fail_join = 0;
+	for (waited = 0; waited < 60 && !(machines[2].in == 1 && machines[3].in == 1); waited++)
+		run(1);
+	CHECK(machines[1].hosting, "the member hosts");
+	CHECK(machines[2].in == 1 && machines[3].in == 1, "the other players join: in %d %d", machines[2].in, machines[3].in);
+	run(40);
+	CHECK(machines[1].hosting && machines[1].players == 3 && machines[1].search.state == P2P_MM_HOSTING,
+		"the member hosts them on: state %d", machines[1].search.state);
+	for (waited = 2; waited < 4; waited++)
+	{
+		machines[waited].in = -1;
+		machines[waited].quit = 1;
+		machines[1].players--;
+	}
+	run(2);
+	CHECK(!machines[1].hosting, "and stops once they have gone");
+
+	member_world(3, 5, 8, P2P_MM_4V4);
+	fail_join = 2;
+	until_member_hosts(60);
+	CHECK(machines[1].hosting && machines[0].in == 1, "the leader joins its member's game");
+	run(30);
+	CHECK(parties[0].notice == P2P_PARTY_NOTICE_COULD_NOT_JOIN && !machines[1].hosting, "a member cannot: the party leaves");
+	CHECK(!memcmp(machines[0].search.failed_game, no_game, P2P_KEY_HASH_SIZE), "and the leader forgets the member's game");
+	fail_join = -1;
+	for (waited = 0; waited < 90 && !(machines[1].hosting && machines[0].in == 1 && machines[2].in == 1); waited++)
+		run(1);
+	CHECK(machines[1].hosting && machines[0].in == 1 && machines[2].in == 1,
+		"the member hosts again and the party joins: in %d %d", machines[0].in, machines[2].in);
+}
+
 static void check_party_journeys(void)
 {
 	check_e24_leader_cancels();
@@ -1970,6 +2035,7 @@ static void check_party_journeys(void)
 	check_e47_big_strict_leader();
 	check_e25_big_follow_count();
 	check_e75_member_keeps_hosting();
+	check_e76_party_stays_together();
 	check_e25_follow_big();
 	check_e29_cannot_follow();
 }
