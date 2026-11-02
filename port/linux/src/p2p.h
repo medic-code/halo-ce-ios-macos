@@ -478,7 +478,7 @@ struct p2p_mm_status
 	int hosts, players, most_players, ping;
 	int notice;
 };
-enum { P2P_MM_NOTICE_NONE, P2P_MM_NOTICE_HOST_LEFT, P2P_MM_NOTICE_HOST_UNREACHED, P2P_MM_NOTICE_HOST_FAILED };
+enum { P2P_MM_NOTICE_NONE, P2P_MM_NOTICE_HOST_LEFT, P2P_MM_NOTICE_HOST_UNREACHED, P2P_MM_NOTICE_HOST_FAILED, P2P_MM_NOTICE_TOO_BIG };
 enum { P2P_MM_LOOK_SECONDS = 6, P2P_MM_WIDEN_SECONDS = 45, P2P_MM_HOST_SECONDS = 120, P2P_MM_HOST_WAIT_SECONDS = 20 };
 void p2p_mm_get_status(struct p2p_mm_status *status);
 void p2p_mm_host_gave_up(void);
@@ -494,6 +494,7 @@ enum
 	P2P_PARTY_NOTICE_ENDED,
 	P2P_PARTY_NOTICE_REMOVED,
 	P2P_PARTY_NOTICE_FULL,
+	P2P_PARTY_NOTICE_TOO_BIG,
 };
 struct p2p_party_member
 {
