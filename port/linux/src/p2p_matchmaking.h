@@ -27,7 +27,8 @@ enum
 	MM_MAXIMUM_HOSTING_SIZE = MM_HEADER_SIZE + 3 + MM_MAXIMUM_POOL * (P2P_KEY_HASH_SIZE + MM_SEALED_TOKEN_SIZE) +
 		P2P_TOKEN_SIZE + P2P_SIGNATURE_SIZE,
 	MM_MEMBER_SIZE = P2P_KEY_SIZE + P2P_SIGNATURE_SIZE,
-	MM_MAXIMUM_PARTY_SIZE = MM_HEADER_SIZE + 1 + (MM_MAXIMUM_PARTY - 1) * MM_MEMBER_SIZE + P2P_SIGNATURE_SIZE,
+	MM_MAXIMUM_PARTY_SIZE = MM_HEADER_SIZE + 1 + P2P_KEY_HASH_SIZE + (MM_MAXIMUM_PARTY - 1) * MM_MEMBER_SIZE +
+		P2P_SIGNATURE_SIZE,
 	MM_SEALED_INVITE_SIZE = P2P_LINK_SIZE + P2P_SEAL_OVERHEAD,
 	MM_PARTY_SEARCH_SIZE = 7,
 	MM_MAXIMUM_LEADER_SIZE = 1 + P2P_KEY_SIZE + 4 + P2P_PARTY_NAME_SIZE + 1 + (MM_MAXIMUM_PARTY - 1) * P2P_KEY_HASH_SIZE +
@@ -61,6 +62,7 @@ struct mm_record
 	unsigned char sealed[MM_MAXIMUM_POOL][MM_SEALED_TOKEN_SIZE];
 	unsigned char token[P2P_TOKEN_SIZE];
 	int party;
+	unsigned char party_hash[P2P_KEY_HASH_SIZE];
 	unsigned char member_keys[MM_MAXIMUM_PARTY - 1][P2P_KEY_SIZE];
 	unsigned char member_signatures[MM_MAXIMUM_PARTY - 1][P2P_SIGNATURE_SIZE];
 };
@@ -75,8 +77,12 @@ int mm_topic_listed(const char *const *topics, int count, const char *topic);
 int mm_record_write(const struct mm_record *record, const unsigned char *seed, unsigned char *bytes, int size);
 /* checks the signatures: 1 only if whole, signed by its key, and by every member it names */
 int mm_record_read(const unsigned char *bytes, int size, struct mm_record *record);
-void mm_party_sign(const unsigned char *seed, const unsigned char *leader_key, unsigned char *signature);
-int mm_party_signed(const unsigned char *key, const unsigned char *leader_key, const unsigned char *signature);
+/* the hash a member's signature binds, so the signature dies with the link a removal replaces */
+void mm_party_hash(const unsigned char *seal, unsigned char *hash);
+void mm_party_sign(const unsigned char *seed, const unsigned char *leader_key, const unsigned char *party_hash,
+	unsigned char *signature);
+int mm_party_signed(const unsigned char *key, const unsigned char *leader_key, const unsigned char *party_hash,
+	const unsigned char *signature);
 int mm_party_size_allowed(int party, int size);
 int mm_seal_token(const unsigned char *seed, const unsigned char *member_key, const unsigned char *token,
 	unsigned char *sealed);
@@ -143,6 +149,7 @@ struct mm_search_party
 	int count;
 	unsigned char keys[MM_MAXIMUM_PARTY - 1][P2P_KEY_SIZE];
 	unsigned char signatures[MM_MAXIMUM_PARTY - 1][P2P_SIGNATURE_SIZE];
+	unsigned char party_hash[P2P_KEY_HASH_SIZE];
 	int member_hosts;
 	/* a member: the leader's search decides, and this machine publishes none of its own */
 	int following;
@@ -218,6 +225,13 @@ void mm_invite_text(const unsigned char *key_hash, const unsigned char *token, c
 
 enum { MM_PARTY_NONE, MM_PARTY_LEADER, MM_PARTY_MEMBER };
 
+/* a game a member reached; invite empty: none */
+struct mm_party_game
+{
+	int left, playlist, size, public_game;
+	char invite[P2P_LINK_SIZE];
+};
+
 struct mm_party_member
 {
 	unsigned char key[P2P_KEY_SIZE], hash[P2P_KEY_HASH_SIZE];
@@ -226,6 +240,7 @@ struct mm_party_member
 	unsigned char signature[P2P_SIGNATURE_SIZE];
 	int signature_heard;
 	int searching, in_game, can_host, left_number;
+	struct mm_party_game game;
 };
 
 struct mm_party_gone
@@ -266,6 +281,7 @@ struct mm_party
 	/* a member's: that first record was already searching, without it */
 	/* what this member's record tells the leader */
 	int in_game, can_host;
+	struct mm_party_game game;
 	/* the leader's: since when members have had to follow */
 	unsigned long follow_since;
 	int follow_done;

@@ -86,26 +86,37 @@ static int signed_message(const unsigned char *bytes, int size, unsigned char *m
 	return (int)(sizeof(record_label) - 1) + size;
 }
 
-static int party_message(const unsigned char *leader_key, unsigned char *message)
+static int party_message(const unsigned char *leader_key, const unsigned char *party_hash, unsigned char *message)
 {
 	memcpy(message, party_label, sizeof(party_label) - 1);
 	memcpy(message + sizeof(party_label) - 1, leader_key, P2P_KEY_SIZE);
-	return (int)(sizeof(party_label) - 1) + P2P_KEY_SIZE;
+	memcpy(message + sizeof(party_label) - 1 + P2P_KEY_SIZE, party_hash, P2P_KEY_HASH_SIZE);
+	return (int)(sizeof(party_label) - 1) + P2P_KEY_SIZE + P2P_KEY_HASH_SIZE;
 }
 
-void mm_party_sign(const unsigned char *seed, const unsigned char *leader_key, unsigned char *signature)
+void mm_party_hash(const unsigned char *seal, unsigned char *hash)
 {
-	unsigned char message[sizeof(party_label) + P2P_KEY_SIZE], key[P2P_KEY_SIZE];
+	unsigned char digest[P2P_SHA256_SIZE];
+
+	p2p_sha256(seal, P2P_SHA256_SIZE, digest);
+	memcpy(hash, digest, P2P_KEY_HASH_SIZE);
+}
+
+void mm_party_sign(const unsigned char *seed, const unsigned char *leader_key, const unsigned char *party_hash,
+	unsigned char *signature)
+{
+	unsigned char message[sizeof(party_label) + P2P_KEY_SIZE + P2P_KEY_HASH_SIZE], key[P2P_KEY_SIZE];
 
 	p2p_ed25519_public(seed, key, NULL);
-	p2p_ed25519_sign(seed, key, message, party_message(leader_key, message), signature);
+	p2p_ed25519_sign(seed, key, message, party_message(leader_key, party_hash, message), signature);
 }
 
-int mm_party_signed(const unsigned char *key, const unsigned char *leader_key, const unsigned char *signature)
+int mm_party_signed(const unsigned char *key, const unsigned char *leader_key, const unsigned char *party_hash,
+	const unsigned char *signature)
 {
-	unsigned char message[sizeof(party_label) + P2P_KEY_SIZE];
+	unsigned char message[sizeof(party_label) + P2P_KEY_SIZE + P2P_KEY_HASH_SIZE];
 
-	return p2p_ed25519_verify(key, message, party_message(leader_key, message), signature);
+	return p2p_ed25519_verify(key, message, party_message(leader_key, party_hash, message), signature);
 }
 
 /* key hashes, not keys: a key and its negative are different bytes with one X25519 form */
@@ -122,7 +133,8 @@ static int members_signed(const struct mm_record *record)
 		for (other = 0; other < member && memcmp(hashes[other], hashes[member], P2P_KEY_HASH_SIZE); other++)
 			;
 		if (other < member ||
-			!mm_party_signed(record->member_keys[member - 1], record->key, record->member_signatures[member - 1]))
+			!mm_party_signed(record->member_keys[member - 1], record->key, record->party_hash,
+				record->member_signatures[member - 1]))
 		{
 			return 0;
 		}
@@ -163,6 +175,8 @@ int mm_record_write(const struct mm_record *record, const unsigned char *seed, u
 	if (record->party > 1)
 	{
 		bytes[at++] = (unsigned char)record->party;
+		memcpy(bytes + at, record->party_hash, P2P_KEY_HASH_SIZE);
+		at += P2P_KEY_HASH_SIZE;
 		for (index = 0; index < record->party - 1; index++)
 		{
 			memcpy(bytes + at, record->member_keys[index], P2P_KEY_SIZE);
@@ -226,9 +240,11 @@ int mm_record_read(const unsigned char *bytes, int size, struct mm_record *recor
 	}
 	if (bytes[2] == MM_FORMAT_PARTY)
 	{
-		if (record->kind != MM_KIND_SEARCHING || size < at + 1 + P2P_SIGNATURE_SIZE)
+		if (record->kind != MM_KIND_SEARCHING || size < at + 1 + P2P_KEY_HASH_SIZE + P2P_SIGNATURE_SIZE)
 			return 0;
 		record->party = bytes[at++];
+		memcpy(record->party_hash, bytes + at, P2P_KEY_HASH_SIZE);
+		at += P2P_KEY_HASH_SIZE;
 		if (record->party < 2 || !mm_party_size_allowed(record->party, record->size) ||
 			size < at + (record->party - 1) * MM_MEMBER_SIZE + P2P_SIGNATURE_SIZE)
 		{
@@ -699,6 +715,7 @@ static struct mm_record base_record(struct mm_search *search, int kind, int play
 	if (kind == MM_KIND_SEARCHING && search->party.count > 1)
 	{
 		record.party = search->party.count;
+		memcpy(record.party_hash, search->party.party_hash, P2P_KEY_HASH_SIZE);
 		memcpy(record.member_keys, search->party.keys, sizeof(record.member_keys));
 		memcpy(record.member_signatures, search->party.signatures, sizeof(record.member_signatures));
 	}

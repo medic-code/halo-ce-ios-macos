@@ -1656,7 +1656,7 @@ static struct mm_record party_of(int leader, int members, unsigned long sequence
 	{
 		seed_of(leader + 1 + index, seed);
 		p2p_ed25519_public(seed, record.member_keys[index], NULL);
-		mm_party_sign(seed, record.key, record.member_signatures[index]);
+		mm_party_sign(seed, record.key, record.party_hash, record.member_signatures[index]);
 	}
 	return record;
 }
@@ -2471,7 +2471,7 @@ static void check_party_pool_invited(void)
 
 static void check_party_records(void)
 {
-	enum { HEADER = MM_HEADER_SIZE + 1 };
+	enum { HEADER = MM_HEADER_SIZE + 1 + P2P_KEY_HASH_SIZE };
 	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE + 1];
 	struct mm_record record = party_of(300, 2, 7), full = party_of(300, 3, 7), big = party_of(300, MM_MAXIMUM_PARTY - 1, 7), bad, read_back;
 	unsigned char x25519[P2P_KEY_SIZE];
@@ -2487,7 +2487,7 @@ static void check_party_records(void)
 
 	bad = record;
 	seed_of(303, seed);
-	mm_party_sign(seed, record.key, bad.member_signatures[1]);
+	mm_party_sign(seed, record.key, record.party_hash, bad.member_signatures[1]);
 	CHECK(party_refused(&bad), "E42: a member's signature that is another key's is refused");
 	bad = record;
 	memset(bad.member_signatures[0], 0, P2P_SIGNATURE_SIZE);
@@ -2499,11 +2499,14 @@ static void check_party_records(void)
 	bad = record;
 	memcpy(bad.member_keys[0], bad.key, P2P_KEY_SIZE);
 	seed_of(300, seed);
-	mm_party_sign(seed, bad.key, bad.member_signatures[0]);
+	mm_party_sign(seed, bad.key, bad.party_hash, bad.member_signatures[0]);
 	CHECK(party_refused(&bad), "the leader named as a member is refused");
 	bad = party_of(304, 2, 7);
 	memcpy(bad.key, record.key, P2P_KEY_SIZE);
 	CHECK(party_refused(&bad), "signatures made for another leader are refused");
+	bad = record;
+	bad.party_hash[0] ^= 1;
+	CHECK(party_refused(&bad), "signatures made for another link are refused");
 	bad = record;
 	memcpy(bad.member_keys[1], bad.member_keys[0], P2P_KEY_SIZE);
 	bad.member_keys[1][P2P_KEY_SIZE - 1] ^= 0x80;
@@ -2906,6 +2909,45 @@ static void check_e47_big_strict_leader(void)
 		CHECK(machines[0].in == 1 && machines[2].in == 1, "size %d: the leader and the other member join it: in %d and %d",
 			sizes[index], machines[0].in, machines[2].in);
 	}
+}
+
+/* a removed member named again beside the new link's signatures */
+static void check_e50_old_signature(void)
+{
+	static const unsigned char secret[P2P_PARTY_SECRET_SIZE] = { 9, 8, 7 };
+	struct mm_search_party before, forged;
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct mm_record record;
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+	char old_topic[P2P_PARTY_TOPIC_SIZE];
+	int size, count, index, searching = 0, read = 0;
+
+	case_name = "e50_old_signature";
+	party_world(3, 3);
+	party_start(3, P2P_MM_4V4, 7);
+	run(8);
+	before = machines[0].search.party;
+	CHECK(before.count == 3, "the leader's search speaks for 3: %d", before.count);
+	strcpy(old_topic, parties[0].topic);
+	size = mm_party_remove(&parties[0], 2, secret, now_ms, bytes);
+	party_send(3, old_topic, bytes, size);
+	run(8);
+	forged = machines[0].search.party;
+	CHECK(forged.count == 2 && memcmp(forged.signatures[0], before.signatures[0], P2P_SIGNATURE_SIZE),
+		"Rook signs again for the new link: count %d", forged.count);
+	forged.count = 3;
+	memcpy(forged.keys[1], before.keys[1], P2P_KEY_SIZE);
+	memcpy(forged.signatures[1], before.signatures[1], P2P_SIGNATURE_SIZE);
+	mm_set_party(&machines[0].search, &forged, now_ms);
+	count = mm_step(&machines[0].search, now_ms, out, MM_MAXIMUM_OUT);
+	for (index = 0; index < count; index++)
+	{
+		if (out[index].bytes[2] != MM_FORMAT_PARTY || out[index].bytes[5] != MM_KIND_SEARCHING)
+			continue;
+		searching++;
+		read += mm_record_read(out[index].bytes, out[index].size, &record);
+	}
+	CHECK(searching && !read, "Kat's old signature beside the new link is refused: %d of %d read", read, searching);
 }
 
 static void check_e25_big_follow_count(void)
@@ -3346,6 +3388,7 @@ static void check_party_journeys(void)
 	check_e47_strict_leader();
 	check_e47_big_strict_leader();
 	check_e25_big_follow_count();
+	check_e50_old_signature();
 	check_e75_member_keeps_hosting();
 	check_e76_party_stays_together();
 	check_e77_friend_joins_search();
@@ -3361,6 +3404,7 @@ static void check_party_record_search(void)
 	int *const fields[] = { &said->game_playlist, &said->game_size, &said->size, &said->playlists };
 	const int bad[] = { NUMBER_OF_P2P_MM_PLAYLISTS, NUMBER_OF_P2P_MM_SIZES, NUMBER_OF_P2P_MM_SIZES,
 		1 << NUMBER_OF_P2P_MM_PLAYLISTS };
+	unsigned char hash[P2P_KEY_HASH_SIZE];
 	int index;
 
 	case_name = "party_record_search";
@@ -3368,8 +3412,9 @@ static void check_party_record_search(void)
 	party_run(3, 7);
 	CHECK(parties[0].members[1].signature_heard && parties[0].members[2].signature_heard,
 		"each member's record carries its signature for the leader's search");
-	CHECK(mm_party_signed(parties[0].members[1].key, parties[0].key, parties[0].members[1].signature),
-		"signed over the leader's key");
+	mm_party_hash(parties[0].seal, hash);
+	CHECK(mm_party_signed(parties[0].members[1].key, parties[0].key, hash, parties[0].members[1].signature),
+		"signed over the leader's key and the link");
 	parties[1].can_host = 1;
 	parties[0].search.number = 7;
 	parties[0].search.searching = 1;
@@ -3388,6 +3433,24 @@ static void check_party_record_search(void)
 	CHECK(parties[2].search.has_game && !strcmp(parties[2].search.invite, "halo://join/0123"),
 		"each member opens the invite sealed to it: %s", parties[2].search.invite);
 	CHECK(!parties[2].left_number && parties[2].followed_game == 3, "the first record heard leaves that search open");
+	strcpy(parties[1].game.invite, "halo://join/4567");
+	parties[1].game.left = 9;
+	parties[1].game.playlist = P2P_MM_CTF;
+	parties[1].game.size = P2P_MM_4V4;
+	parties[1].game.public_game = 1;
+	party_run(3, 7);
+	CHECK(!strcmp(parties[0].members[1].game.invite, "halo://join/4567") && parties[0].members[1].game.left == 9 &&
+		parties[0].members[1].game.playlist == P2P_MM_CTF && parties[0].members[1].game.size == P2P_MM_4V4 &&
+		parties[0].members[1].game.public_game, "the leader opens the game a member reached");
+	parties[1].game.playlist = NUMBER_OF_P2P_MM_PLAYLISTS;
+	parties[0].members[1].game.invite[0] = 0;
+	party_run(3, 7);
+	CHECK(!parties[0].members[1].game.invite[0], "a playlist out of range is dropped");
+	parties[1].game.playlist = P2P_MM_CTF;
+	parties[1].game.size = NUMBER_OF_P2P_MM_SIZES;
+	party_run(3, 7);
+	CHECK(!parties[0].members[1].game.invite[0], "a size out of range is dropped");
+	memset(&parties[1].game, 0, sizeof(parties[1].game));
 	for (index = 0; index < 4; index++)
 	{
 		int *const field = fields[index], good = *field;

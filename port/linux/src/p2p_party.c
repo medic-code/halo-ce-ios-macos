@@ -26,12 +26,15 @@ enum
 	PARTY_FLAG_LEAVING = 1,
 	PARTY_FLAG_CAN_HOST = 2,
 	PARTY_FLAG_IN_GAME = 4,
+	PARTY_FLAG_PUBLIC = 8,
 	PARTY_SEARCHING = 1,
 	PARTY_WIDENED = 2,
 	PARTY_GAME = 4,
 	PARTY_PUBLIC = 8,
 	PARTY_OUTGROWN = 16,
 	PARTY_MEMBER_SIZE = P2P_PARTY_NAME_SIZE + 2 + P2P_SIGNATURE_SIZE,
+	/* a member in a game adds its game: left number, playlist, size, the invite sealed for the leader */
+	PARTY_MEMBER_GAME_SIZE = 3 + MM_SEALED_INVITE_SIZE,
 	SEALED_SECRET_SIZE = P2P_PARTY_SECRET_SIZE + P2P_SEAL_OVERHEAD,
 	MAXIMUM_QUEUED = 32,
 	VERIFY_BUDGET = 2,
@@ -204,22 +207,32 @@ static int record_finish(const struct mm_party *party, unsigned char *plain, int
 	return p2p_seal(party->seal, plain, size + P2P_SIGNATURE_SIZE, bytes);
 }
 
+/* forward: the leader and a member (other: the other's Ed25519 key) seal a game's invite with it */
+static int pair_key(const struct mm_party *party, const unsigned char *other, unsigned char *key);
+
 static int write_member(struct mm_party *party, int flags, unsigned char *bytes)
 {
 	unsigned char plain[MM_MAXIMUM_RECORD_SIZE];
+	unsigned char key[P2P_SHA256_SIZE], hash[P2P_KEY_HASH_SIZE];
+	const struct mm_party_game *game = &party->game;
 	int size = record_start(party, PARTY_MEMBER_RECORD, plain);
 
 	size += put_name(party->name, plain + size);
 	plain[size++] = (unsigned char)(flags | (party->can_host ? PARTY_FLAG_CAN_HOST : 0) |
-		(party->in_game ? PARTY_FLAG_IN_GAME : 0));
+		(party->in_game ? PARTY_FLAG_IN_GAME : 0) | (game->public_game ? PARTY_FLAG_PUBLIC : 0));
 	plain[size++] = (unsigned char)party->left_number;
-	mm_party_sign(party->seed, party->members[0].key, plain + size);
+	mm_party_hash(party->seal, hash);
+	mm_party_sign(party->seed, party->members[0].key, hash, plain + size);
 	size += P2P_SIGNATURE_SIZE;
+	if (game->invite[0] && pair_key(party, party->members[0].key, key))
+	{
+		plain[size++] = (unsigned char)game->left;
+		plain[size++] = (unsigned char)game->playlist;
+		plain[size++] = (unsigned char)game->size;
+		size += p2p_seal(key, game->invite, P2P_LINK_SIZE, plain + size);
+	}
 	return record_finish(party, plain, size, bytes);
 }
-
-/* forward: the leader and a member (other: the other's Ed25519 key) seal a game's invite with it */
-static int pair_key(const struct mm_party *party, const unsigned char *other, unsigned char *key);
 
 static int write_search(struct mm_party *party, unsigned char *plain)
 {
@@ -407,6 +420,9 @@ int mm_party_read(struct mm_party *party, const unsigned char *payload, int size
 	{
 		p2p_key_hash(record->key, hash);
 		memcpy(record->leader, party->members[0].key, P2P_KEY_SIZE);
+		if (body_size == PARTY_MEMBER_SIZE + PARTY_MEMBER_GAME_SIZE)
+			return body[PARTY_MEMBER_SIZE + 1] < NUMBER_OF_P2P_MM_PLAYLISTS &&
+				body[PARTY_MEMBER_SIZE + 2] < NUMBER_OF_P2P_MM_SIZES && !member_record_stale(party, hash, record->sequence);
 		return body_size == PARTY_MEMBER_SIZE && !member_record_stale(party, hash, record->sequence);
 	}
 	if (party->role != MM_PARTY_MEMBER || memcmp(record->key, party->members[0].key, P2P_KEY_SIZE) ||
@@ -437,10 +453,11 @@ int mm_party_read(struct mm_party *party, const unsigned char *payload, int size
 
 int mm_party_verify(const struct mm_party_record *record)
 {
-	unsigned char message[sizeof(record_label) + MM_MAXIMUM_RECORD_SIZE];
+	unsigned char message[sizeof(record_label) + MM_MAXIMUM_RECORD_SIZE], hash[P2P_KEY_HASH_SIZE];
 
+	mm_party_hash(record->seal, hash);
 	if (record->kind == PARTY_MEMBER_RECORD &&
-		!mm_party_signed(record->key, record->leader, record->body + P2P_PARTY_NAME_SIZE + 2))
+		!mm_party_signed(record->key, record->leader, hash, record->body + P2P_PARTY_NAME_SIZE + 2))
 	{
 		return 0;
 	}
@@ -453,6 +470,25 @@ static void get_name(const unsigned char *bytes, char *name)
 {
 	memcpy(name, bytes, P2P_PARTY_NAME_SIZE);
 	name[P2P_PARTY_NAME_SIZE] = 0;
+}
+
+static void heard_member_game(const struct mm_party *party, struct mm_party_member *member,
+	const struct mm_party_record *record)
+{
+	const unsigned char *bytes = record->body + PARTY_MEMBER_SIZE;
+	unsigned char key[P2P_SHA256_SIZE];
+
+	member->game.invite[0] = 0;
+	if (record->size - PARTY_HEADER_SIZE == PARTY_MEMBER_SIZE || !pair_key(party, member->key, key) ||
+		p2p_open(key, bytes + 3, MM_SEALED_INVITE_SIZE, (unsigned char *)member->game.invite) != P2P_LINK_SIZE)
+	{
+		return;
+	}
+	member->game.invite[P2P_LINK_SIZE - 1] = 0;
+	member->game.left = bytes[0];
+	member->game.playlist = bytes[1];
+	member->game.size = bytes[2];
+	member->game.public_game = !!(record->body[P2P_PARTY_NAME_SIZE] & PARTY_FLAG_PUBLIC);
 }
 
 static void heard_member(struct mm_party *party, const struct mm_party_record *record, unsigned long now)
@@ -494,6 +530,8 @@ static void heard_member(struct mm_party *party, const struct mm_party_record *r
 	}
 	member->can_host = !!(flags & PARTY_FLAG_CAN_HOST);
 	member->in_game = !!(flags & PARTY_FLAG_IN_GAME);
+	if (party->role == MM_PARTY_LEADER)
+		heard_member_game(party, member, record);
 	member->left_number = record->body[P2P_PARTY_NAME_SIZE + 1];
 	memcpy(member->signature, record->body + P2P_PARTY_NAME_SIZE + 2, P2P_SIGNATURE_SIZE);
 	member->signature_heard = 1;
@@ -657,6 +695,7 @@ static void search_members(const struct mm_party *party, const struct mm_search 
 
 	memset(wanted, 0, sizeof(*wanted));
 	wanted->count = 1;
+	mm_party_hash(party->seal, wanted->party_hash);
 	*late = NULL;
 	for (index = 1; on && index < party->count; index++)
 	{
@@ -815,6 +854,15 @@ static void member_search(struct mm_party *party, struct mm_search *search, unsi
 		party->sent = now - PARTY_INTERVAL;
 	party->in_game = in_game;
 	party->can_host = search->can_host > 0;
+	memset(&party->game, 0, sizeof(party->game));
+	if (search->in_game)
+	{
+		party->game.left = party->left_seen;
+		party->game.playlist = search->decision.playlist;
+		party->game.size = search->decision.size;
+		party->game.public_game = search->decision.public_game;
+		snprintf(party->game.invite, sizeof(party->game.invite), "%s", search->decision.invite);
+	}
 	if (!party->search_heard)
 		return;
 	if (search->state == P2P_MM_OFF && !search->in_game)
