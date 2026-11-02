@@ -6733,7 +6733,7 @@ static void matchmaking_search_slots_show(struct widget_instance *screen, struct
 {
 	short index, filled, slots = matchmaking_search_slots(status, matchmaking_screen.size, &filled);
 
-	profile_name_show(named(screen, "search_slot_you", 0));
+	text_set(named(named(screen, "search_slot_you", 0), "current_profile_name", 0), matchmaking_screen.name);
 	for (index = 1; index < SEARCH_SLOTS; index++)
 	{
 		struct widget_instance *widget = named(screen, "search_slot", index - 1);
