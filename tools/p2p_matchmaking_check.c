@@ -3425,6 +3425,27 @@ static void check_e77_leader_follows_member(void)
 	CHECK(machines[0].in < 0, "a game the party left is not followed: %d", machines[0].in);
 }
 
+/* a friend joining at any point of the leader's send interval */
+static void check_listing_send(void)
+{
+	int phase;
+
+	case_name = "listing_send";
+	for (phase = 0; phase < 6; phase++)
+	{
+		unsigned long start;
+
+		party_world(1, 2);
+		party_start(1, P2P_MM_2V2, 1);
+		run(3 + phase * 0.5);
+		friend_takes_link(1, "KAT");
+		start = now_ms;
+		while (!machines[1].search.party.following && now_ms < start + 8000)
+			run(0.1);
+		CHECK(now_ms - start <= 1000, "phase %d: the leader lists the friend at once: %lu ms", phase, now_ms - start);
+	}
+}
+
 static void check_party_journeys(void)
 {
 	check_e24_leader_cancels();
@@ -3441,6 +3462,7 @@ static void check_party_journeys(void)
 	check_e77_party_outgrows();
 	check_member_stays_in_game();
 	check_e77_leader_follows_member();
+	check_listing_send();
 	check_e25_follow_big();
 	check_e29_cannot_follow();
 }
@@ -4031,6 +4053,11 @@ static void check_party_wiring(void)
 	p2p_mm_game_lost();
 	CHECK(browse_calls == calls, "and a lost game does not hold it: %d", browse_calls - calls);
 	p2p_mm_cancel();
+	search->party.following = 0;
+	search->in_game = 1;
+	p2p_mm_game_lost();
+	CHECK(search->state == P2P_MM_OFF && !search->in_game && browse_calls == calls,
+		"a member left in a game does not search alone when it is lost: state %d", search->state);
 	calls = browse_calls;
 	search->left_game = 1;
 	CHECK(p2p_mm_take_left_game() == 1 && browse_calls == calls + 1 && browsing, "searching alone, the browser restarts");
