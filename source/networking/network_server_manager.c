@@ -477,6 +477,7 @@ symbols in this file:
 #include "interface/player_ui.h"
 #include "tag_files/tag_files.h"
 #include "map_share.h" /* port: port/linux/game/map_share.c */
+#include "matchmaking.h" /* port: port/linux/game/matchmaking.c */
 #include "server_director.h" /* port: port/linux/game/server_director.c */
 #include "bots.h" /* port: port/linux/game/bots.c */
 
@@ -2662,9 +2663,11 @@ boolean network_game_server_add_player_to_game(
 	if (machine->machine_index == player->machine_index)
 	{
 		/* port: the smaller team (the Xbox game took turns with a counter of
-		its own, which a failed add or an earlier game moved on) */
+		its own, which a failed add or an earlier game moved on), or, in a
+		matchmade game, a party's */
 		{
 			long player_count_by_team[NUMBER_OF_MULTIPLAYER_TEAMS] = { 0, 0 };
+			long party_team = matchmaking_team(&server->game, player->machine_index);
 			long player_index;
 
 			for (player_index = 0; player_index < MAXIMUM_NETWORK_PLAYER_COUNT; player_index++)
@@ -2677,7 +2680,8 @@ boolean network_game_server_add_player_to_game(
 					player_count_by_team[other_player->team_index]++;
 				}
 			}
-			player->team_index = player_count_by_team[1] < player_count_by_team[0] ? 1 : 0;
+			player->team_index = party_team != NONE ? party_team :
+				player_count_by_team[1] < player_count_by_team[0] ? 1 : 0;
 		}
 
 		/* (the name comes from the wire) */

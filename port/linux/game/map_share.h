@@ -109,6 +109,9 @@ boolean map_share_map_version(
 
 /* ---------- prototypes/MAP_SHARE.C */
 
+unsigned long network_order(
+	unsigned long value);
+
 /* A client joining a network game on the level `level_name` (with the
 host's `version`, map_share_hash_version's) that this machine cannot play
 (custom_edition_cache_present said why in `message`): TRUE if it asks the
