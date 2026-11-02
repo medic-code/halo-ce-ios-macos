@@ -714,6 +714,7 @@ static struct mm_unit unit(int machine, int can_host)
 	p2p_ed25519_to_x25519(result.key, x25519);
 	p2p_key_hash(x25519, result.key_hash);
 	result.can_host = can_host;
+	result.players = 1;
 	return result;
 }
 
@@ -735,25 +736,25 @@ static void check_pool(void)
 	case_name = "pool";
 	for (index = 0; index < 6; index++)
 		units[index] = unit(index, 1);
-	count = mm_pool(units, 6, 4, pool);
+	count = mm_pool(units, 6, 4, 1, pool);
 	CHECK(count == 4, "E4: a pool of 4 from 6: %d", count);
 	for (index = 0; index < count; index++)
 		CHECK(hash_rank(units, 6, pool[index]) == index, "E4: the 4 lowest key hashes, in order: %d at %d",
 			pool[index], index);
 	for (index = 0; index < 6; index++)
 		shuffled[index] = units[5 - index];
-	CHECK(mm_pool(shuffled, 6, 4, again) == 4, "shuffled: a pool");
+	CHECK(mm_pool(shuffled, 6, 4, 1, again) == 4, "shuffled: a pool");
 	for (index = 0; index < 4; index++)
 		CHECK(!memcmp(units[pool[index]].key, shuffled[again[index]].key, P2P_KEY_SIZE), "shuffled: the same pool at %d", index);
 	host = mm_elect(units, pool, count);
 	host_again = mm_elect(shuffled, again, 4);
 	CHECK(host >= 0 && host_again >= 0 && !memcmp(units[host].key, shuffled[host_again].key, P2P_KEY_SIZE),
 		"E4: the same host on every machine");
-	CHECK(mm_pool(units, 3, 4, pool) == 0, "3 of 4: no pool");
+	CHECK(mm_pool(units, 3, 4, 1, pool) == 0, "3 of 4: no pool");
 	for (index = 0; index < MM_MAXIMUM_UNITS; index++)
-		every[index].failed = 1;
-	every[MM_MAXIMUM_UNITS].can_host = 1;
-	CHECK(mm_pool(every, MM_MAXIMUM_UNITS + 1, 1, pool) == 1 && pool[0] == MM_MAXIMUM_UNITS,
+		every[index].failed = every[index].players = 1;
+	every[MM_MAXIMUM_UNITS].can_host = every[MM_MAXIMUM_UNITS].players = 1;
+	CHECK(mm_pool(every, MM_MAXIMUM_UNITS + 1, 1, 0, pool) == 1 && pool[0] == MM_MAXIMUM_UNITS,
 		"this machine and a full peers table: every unit is walked");
 	/* four strict, then one that can host with the highest key hash: it can take only the last place */
 	for (index = 0; index < 5; index++)
@@ -762,13 +763,13 @@ static void check_pool(void)
 		if (hash_rank(units, 5, index) == 4)
 			last = index;
 	units[last].can_host = 1;
-	CHECK(mm_pool(units, 5, 4, pool) == 4 && pool[3] == last && mm_elect(units, pool, 4) == last,
+	CHECK(mm_pool(units, 5, 4, 1, pool) == 4 && pool[3] == last && mm_elect(units, pool, 4) == last,
 		"E38: the host takes the last place and hosts");
 	units[last].can_host = 0;
-	CHECK(mm_pool(units, 5, 4, pool) == 0, "E38: five strict routers form no pool");
+	CHECK(mm_pool(units, 5, 4, 1, pool) == 0, "E38: five strict routers form no pool");
 	units[last].can_host = 1;
 	units[last].failed = 1;
-	CHECK(mm_pool(units, 5, 4, pool) == 0, "E12: the only host failed: no pool until another arrives");
+	CHECK(mm_pool(units, 5, 4, 1, pool) == 0, "E12: the only host failed: no pool until another arrives");
 }
 
 static void check_election(void)
@@ -2172,6 +2173,52 @@ static void check_two_queues(void)
 		"machine 0 and the CTF machine end in one game: the CTF pool re-elects machine 0");
 }
 
+static void check_party_pool(void)
+{
+	static const int sizes[5] = { 2, 2, 2, 1, 1 };
+	struct mm_unit units[8];
+	int pool[8], index, count;
+
+	case_name = "e21_party_pool";
+	for (index = 0; index < 3; index++)
+		units[index] = unit(index, 1);
+	units[0].players = 2;
+	CHECK(mm_pool(units, 3, 4, 1, pool) == 3, "E21: a party of 2 and two solos are one pool of three units");
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	for (index = 1; index <= 3; index++)
+	{
+		heard_party(&machines[0].search, 300, 1, index, P2P_MM_SLAYER, P2P_MM_2V2);
+		heard_party(&machines[0].search, 302, 0, index, P2P_MM_SLAYER, P2P_MM_2V2);
+	}
+	run(1.0);
+	CHECK(machines[0].search.pool_count == 3, "E21: a searcher pools a heard party as one unit of 2: %d",
+		machines[0].search.pool_count);
+
+	case_name = "e26_parties_3v3";
+	for (index = 0; index < 5; index++)
+		units[index] = unit(index, 1);
+	for (index = 0; index < 5; index++)
+		units[index].players = sizes[hash_rank(units, 5, index)];
+	count = mm_pool(units, 5, 6, 1, pool);
+	CHECK(count == 4, "E26: four units in the pool: %d", count);
+	if (count == 4)
+	{
+		CHECK(hash_rank(units, 5, pool[0]) == 0 && hash_rank(units, 5, pool[1]) == 1 &&
+			hash_rank(units, 5, pool[2]) == 3 && hash_rank(units, 5, pool[3]) == 4, "E26: A, B, D and E; C waits");
+	}
+	count = mm_pool(units, 5, 6, 0, pool);
+	CHECK(count == 3, "a free-for-all takes three parties of 2: %d", count);
+	for (index = 0; index < 3; index++)
+		units[index].players = 3 - hash_rank(units, 3, index);
+	count = mm_pool(units, 3, 4, 0, pool);
+	CHECK(count == 2 && units[pool[0]].players == 3 && units[pool[1]].players == 1,
+		"a party that does not fit is passed over: %d", count);
+	units[0].players = units[1].players = 2;
+	units[0].can_host = units[1].can_host = 0;
+	CHECK(mm_pool(units, 2, 4, 1, pool) == 0, "two strict parties form no pool");
+}
+
 static void check_party_sizes(void)
 {
 	static const int refused[] = { P2P_MM_1V1, P2P_MM_2V2 };
@@ -2440,6 +2487,7 @@ int main(int argc, char **argv)
 	check_widened_pick();
 	check_failed_pick();
 	check_region();
+	check_party_pool();
 	check_party_sizes();
 	check_party_records();
 	check_worlds();
