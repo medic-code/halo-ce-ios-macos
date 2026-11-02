@@ -1537,8 +1537,9 @@ void p2p_mm_game_lost(void)
 		mm_game_lost(&mm.search, p2p_now());
 		size = mm.search.choice.size;
 		mm.notice = P2P_MM_NOTICE_HOST_LEFT;
-		hold_browser();
-		restarted = 1;
+		restarted = !mm.search.party.following;
+		if (restarted)
+			hold_browser();
 	}
 	pthread_mutex_unlock(&p2p_lock);
 	if (restarted)
