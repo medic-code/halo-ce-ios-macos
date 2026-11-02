@@ -522,7 +522,7 @@ def test_p2p_matchmaking(tmp_path):
     (("elapsed_ms(started) >= VERIFY_BUDGET", "0"), "verify_budget"),
     (("elapsed_ms(started) >= VERIFY_BUDGET", "0"), "verify_budget_party"),
     (("p2p_signing_seed(),", "p2p_signing_key(),"), "run_key"),
-    (("mm.search.state != P2P_MM_OFF || mm.in_game", "mm.search.state != P2P_MM_OFF"), "joined_then_lost"),
+    (("mm.search.state != P2P_MM_OFF || mm.search.in_game", "mm.search.state != P2P_MM_OFF"), "joined_then_lost"),
     (("search->join_after = now + MM_JOIN_BACKOFF;", "(void)now;"), "failed_join_waits"),
     (("!mm_counted(peer) || !outranks", "!outranks"), "fake_fuller_game"),
     (("record->most_players <= p2p_mm_size_players(record->size)", "1"), "fake_fuller_game"),
