@@ -26,7 +26,6 @@ enum
 	PARTY_FLAG_LEAVING = 1,
 	PARTY_FLAG_CAN_HOST = 2,
 	PARTY_FLAG_IN_GAME = 4,
-	PARTY_FLAG_LATE = 8,
 	PARTY_SEARCHING = 1,
 	PARTY_WIDENED = 2,
 	PARTY_GAME = 4,
@@ -211,7 +210,7 @@ static int write_member(struct mm_party *party, int flags, unsigned char *bytes)
 
 	size += put_name(party->name, plain + size);
 	plain[size++] = (unsigned char)(flags | (party->can_host ? PARTY_FLAG_CAN_HOST : 0) |
-		(party->in_game ? PARTY_FLAG_IN_GAME : 0) | (party->late ? PARTY_FLAG_LATE : 0));
+		(party->in_game ? PARTY_FLAG_IN_GAME : 0));
 	plain[size++] = (unsigned char)party->left_number;
 	mm_party_sign(party->seed, party->members[0].key, plain + size);
 	size += P2P_SIGNATURE_SIZE;
@@ -478,6 +477,9 @@ static void heard_member(struct mm_party *party, const struct mm_party_record *r
 			return;
 		add_member(party, record->key);
 		member = &party->members[party->count - 1];
+		member->searching = party->search.searching && !(flags & PARTY_FLAG_IN_GAME);
+		/* the friend follows on hearing itself listed, within E77's 6 s */
+		party->sent = now - PARTY_INTERVAL;
 	}
 	get_name(record->body, member->name);
 	member->sequence = record->sequence;
@@ -486,8 +488,7 @@ static void heard_member(struct mm_party *party, const struct mm_party_record *r
 		record->body[P2P_PARTY_NAME_SIZE + 1] == party->search.number)
 	{
 		member->searching = 0;
-		if (!(flags & PARTY_FLAG_LATE))
-			set_notice(party, P2P_PARTY_NOTICE_LEFT_SEARCH, member->name);
+		set_notice(party, P2P_PARTY_NOTICE_LEFT_SEARCH, member->name);
 	}
 	member->can_host = !!(flags & PARTY_FLAG_CAN_HOST);
 	member->in_game = !!(flags & PARTY_FLAG_IN_GAME);
@@ -516,8 +517,6 @@ static void heard_search(struct mm_party *party, const unsigned char *block, int
 	if (!party->search_heard)
 	{
 		party->search_heard = 1;
-		party->left_number = search->number;
-		party->late = search->searching;
 		party->left_seen = search->left;
 		party->followed_game = search->game;
 	}
@@ -879,7 +878,6 @@ void mm_party_search_left(struct mm_party *party, unsigned long now)
 	if (party->role != MM_PARTY_MEMBER)
 		return;
 	party->left_number = party->search.number;
-	party->late = 0;
 	party->sent = now - PARTY_INTERVAL;
 }
 
