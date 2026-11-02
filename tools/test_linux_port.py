@@ -509,7 +509,10 @@ def test_p2p_matchmaking(tmp_path):
     (("p2p_lobby_masters_forget();\n\t\tmm_game_lost", "mm_game_lost"), "big_lost"),
     (("if (restarted)\n\t\tbrowse_for(size);", "if (restarted)\n\t\tp2p_lobby_browse(1);"), "big_lost"),
     (("search->queue_count && !p2p_mm_size_big(search->choice.size) &&", "search->queue_count &&"), "e32_big_hosts"),
-    (("search->can_host > 0 && search->queue_count)", "search->queue_count)"), "e32_big_hosts"),
+    (("search->can_host > 0 && hosts_for_party(search) && search->queue_count)",
+      "hosts_for_party(search) && search->queue_count)"), "e32_big_hosts"),
+    (("search->can_host > 0 && hosts_for_party(search) && search->queue_count)",
+      "search->can_host > 0 && search->queue_count)"), "e47_big_strict_leader"),
     (("search->held_until = now + (search->pool_count ? MM_HOLD : 0);", "search->held_until = now + MM_HOLD;"),
      "e32_big_hosts"),
     (("p2p_mm_size_big(peer->size) && !big_host_near(peer)", "0"), "e32_big_hosts"),
@@ -526,7 +529,7 @@ def test_p2p_matchmaking(tmp_path):
     ((" ||\n\t\t\t!mm_party_size_allowed(party_players(search), search->choice.size)", ""), "party_search"),
     (("for (other = 0; other < member->record.party - 1; other++)", "for (other = 0; other < 0; other++)"), "party_pool_invited"),
     (("for (other = 0; other < search->party.count - 1; other++)", "for (other = 0; other < 0; other++)"), "party_pool_invited"),
-    (("if (host == 0 && !search->party.member_hosts)", "if (host == 0)"), "party_search"),
+    (("if (host == 0 && hosts_for_party(search))", "if (host == 0)"), "party_search"),
     (("party * 2 <= p2p_mm_size_players(size)", "party <= p2p_mm_size_players(size)"), "e22_sizes"),
     (("!mm_party_size_allowed(record->party, record->size) ||\n\t\t\tsize", "size"), "e22_sizes"),
     (("!mm_party_size_allowed(record->party, record->size) ||\n\t\t\tsize", "size"), "party_no_signature"),
@@ -573,6 +576,11 @@ def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
     (("mm_party_step(&local.party, p2p_now(), bytes)", "mm_party_step(&local.party, started, bytes)"),
      "party verify window"),
     ((" || memcmp(record->seal, party->seal, sizeof(party->seal))", ""), "party verify window"),
+    (("party->left_number = party->search.number;\n\tparty->sent", "party->sent"), "e60_member_b"),
+    (("if (member->can_host && !wanted->member_hosts && search->can_host <= 0)", "if (0)"), "e47_strict_leader"),
+    (("if (!said->searching)\n\t{\n\t\tmm_cancel(search, NULL, 0);", "if (0)\n\t{\n\t\tmm_cancel(search, NULL, 0);"), "e24_leader_cancels"),
+    (("else if (search->party.following)\n\t\tmm_cancel(search, NULL, 0);", ""), "e30_leader_quits"),
+    (("search->has_game = pair_key(party, party->members[0].key, key) &&", "search->has_game = 0 &&"), "party_record_search"),
 ])
 def test_p2p_party_negative_control(tmp_path, fault, case):
     output = matchmaking_check(tmp_path, party_fault=fault)
