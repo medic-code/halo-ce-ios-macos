@@ -27,9 +27,9 @@
 	</widget>
 	<widget name="main_menu/multiplayer_type_select/matchmaking/party_line" type="text" controller="1" left="340" top="284" width="265" height="36" font="ui\small_ui" color="#FFFFFFFF">
 	</widget>
-	<widget name="main_menu/multiplayer_type_select/matchmaking/party_help" type="text" controller="1" left="373" top="357" width="232" height="40" font="ui\small_ui" color="#FFFFFFFF">
+	<widget name="main_menu/multiplayer_type_select/matchmaking/party_help" type="text" controller="1" left="340" top="357" width="265" height="40" font="ui\small_ui" color="#FFFFFFFF">
 	</widget>
-	<widget name="main_menu/multiplayer_type_select/matchmaking/help" type="text" controller="1" left="373" top="357" width="232" height="40" string_list="main_menu/multiplayer_type_select/matchmaking/help_strings" font="ui\small_ui" color="#FFFFFFFF">
+	<widget name="main_menu/multiplayer_type_select/matchmaking/help" type="text" controller="1" left="340" top="357" width="265" height="40" string_list="main_menu/multiplayer_type_select/matchmaking/help_strings" font="ui\small_ui" color="#FFFFFFFF">
 	</widget>
 	<widget name="main_menu/multiplayer_type_select/matchmaking/options_menu" type="column_list" width="640" height="480" flags="pass_unhandled_to_focused_child up_down_tabs_children" description="main_menu/multiplayer_type_select/matchmaking/help">
 		<data input="port matchmaking update"/>
@@ -58,7 +58,7 @@
 		<child widget="main_menu/multiplayer_type_select/matchmaking/party_slot_name" x="24"/>
 		<child widget="main_menu/multiplayer_type_select/matchmaking/party_slot_mark" x="145"/>
 	</widget>
-	<widget name="main_menu/multiplayer_type_select/matchmaking/party_slot_name" type="text" controller="1" width="120" height="18" font="ui\small_ui" color="#FFFFFFFF" text_y="1">
+	<widget name="main_menu/multiplayer_type_select/matchmaking/party_slot_name" type="text" controller="1" width="134" height="18" font="ui\small_ui" color="#FFFFFFFF" text_y="1">
 	</widget>
 	<widget name="main_menu/multiplayer_type_select/matchmaking/party_slot_mark" type="text" controller="1" width="112" height="18" font="ui\small_ui" color="#FFE6C66E" align="right" text_y="1">
 	</widget>
