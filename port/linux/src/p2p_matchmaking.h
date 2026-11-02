@@ -109,6 +109,8 @@ enum
 	/* milliseconds */
 	MM_SETTLE = 4000,
 	MM_HOLD = 20000,
+	/* a join's 25 seconds, and a member's 20 to follow */
+	MM_PARTY_SEATS = 45000,
 	MM_HOST_WAIT = P2P_MM_HOST_WAIT_SECONDS * 1000,
 	MM_WIDEN = P2P_MM_WIDEN_SECONDS * 1000,
 	MM_HOST = P2P_MM_HOST_SECONDS * 1000,
@@ -198,6 +200,10 @@ struct mm_search
 	/* the game side is to leave the game it is in */
 	int left_game;
 	unsigned char failed_game[P2P_KEY_HASH_SIZE];
+	/* hosting: kept here, for a leader's cancel replaces its record before its members come */
+	struct p2p_mm_team_party team_parties[P2P_MM_TEAM_PARTIES];
+	int team_party_count;
+	unsigned long team_seats_until;
 };
 
 void mm_wanted(const struct mm_search *search, int queue, struct p2p_lobby_wanted *wanted);
@@ -210,6 +216,7 @@ void mm_heard(struct mm_search *search, const struct mm_record *record, unsigned
 int mm_step(struct mm_search *search, unsigned long now, struct mm_out *out, int out_size);
 void mm_hosted(struct mm_search *search, const unsigned char *token, int players, int red_players, int most_players,
 	int under_way, unsigned long now);
+int mm_team_parties(const struct mm_search *search, unsigned long now, struct p2p_mm_team_party *parties);
 void mm_joined(struct mm_search *search, int ok, unsigned long now);
 void mm_widen_now(struct mm_search *search);
 void mm_host_now(struct mm_search *search);

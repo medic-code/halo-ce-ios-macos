@@ -503,6 +503,15 @@ void p2p_mm_host_gave_up(void);
 
 /* MATCHMAKING's party (p2p_party.c) */
 enum { P2P_PARTY_MAXIMUM = 8, P2P_PARTY_NAME_SIZE = 32, P2P_PARTY_LINK_SIZE = 110 };
+
+enum { P2P_MM_TEAM_PARTIES = 32 };
+struct p2p_mm_team_party
+{
+	int players, reserved;
+	unsigned char key_hashes[P2P_PARTY_MAXIMUM][P2P_PLAYER_KEY_HASH_SIZE];
+};
+/* the parties of the game this machine hosts: fills P2P_MM_TEAM_PARTIES at most, returns their count */
+int p2p_mm_team_parties(struct p2p_mm_team_party *parties, unsigned char *own_key_hash);
 enum
 {
 	P2P_PARTY_NOTICE_NONE,

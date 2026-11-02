@@ -589,12 +589,44 @@ void mm_follow_game(struct mm_search *search, const char *invite, int playlist, 
 	search->decided = P2P_MM_DECIDE_JOIN;
 }
 
+static void team_party_add(struct mm_search *search, const unsigned char *leader_hash, int players,
+	const unsigned char (*keys)[P2P_KEY_SIZE], int reserved)
+{
+	struct p2p_mm_team_party *party = NULL;
+	int index;
+
+	for (index = 0; index < search->team_party_count && index < P2P_MM_TEAM_PARTIES; index++)
+	{
+		if (!memcmp(search->team_parties[index].key_hashes[0], leader_hash, P2P_KEY_HASH_SIZE))
+			party = &search->team_parties[index];
+	}
+	if (party)
+		reserved |= party->reserved;
+	else
+		party = &search->team_parties[search->team_party_count++ % P2P_MM_TEAM_PARTIES];
+	memset(party, 0, sizeof(*party));
+	party->players = players;
+	party->reserved = reserved;
+	memcpy(party->key_hashes[0], leader_hash, P2P_KEY_HASH_SIZE);
+	for (index = 1; index < players; index++)
+		key_hash_of(keys[index - 1], party->key_hashes[index]);
+}
+
+/* a member hosting sees no leader's record in a big size, so it adds the party itself */
+static void own_team_party_add(struct mm_search *search)
+{
+	team_party_add(search, search->party.following ? search->party.leader_hash : search->key_hash, search->party.count,
+		search->party.keys, 1);
+}
+
 void mm_set_party(struct mm_search *search, const struct mm_search_party *party, unsigned long now)
 {
 	if (!memcmp(&search->party, party, sizeof(*party)))
 		return;
 	memcpy(&search->party, party, sizeof(*party));
 	search->next_record = now;
+	if (search->decided == P2P_MM_DECIDE_HOST && party->count > 1)
+		own_team_party_add(search);
 	if (search->state == P2P_MM_LOOKING || search->state == P2P_MM_QUEUED)
 		set_queues(search);
 }
@@ -687,6 +719,8 @@ void mm_heard(struct mm_search *search, const struct mm_record *record, unsigned
 		peer->failed = MM_FAILED_NONE;
 	if (record->kind == MM_KIND_HOSTING && !memcmp(record->key_hash, search->failed_game, P2P_KEY_HASH_SIZE))
 		peer->failed = MM_FAILED_GAME_UNJOINABLE;
+	if (record->kind == MM_KIND_SEARCHING && record->party > 1 && search->decided == P2P_MM_DECIDE_HOST)
+		team_party_add(search, record->key_hash, record->party, record->member_keys, 0);
 }
 
 static void expire(struct mm_search *search, unsigned long now)
@@ -813,8 +847,30 @@ static int hosts_for_party(const struct mm_search *search)
 	return search->party.following ? search->party.member_hosts : !search->party.member_hosts;
 }
 
+static void team_parties_fill(struct mm_search *search)
+{
+	int index, member, reserved;
+
+	search->team_party_count = 0;
+	if (search->party.count > 1)
+		own_team_party_add(search);
+	for (index = 0; index < MM_MAXIMUM_UNITS; index++)
+	{
+		const struct mm_peer *peer = &search->peers[index];
+
+		if (!peer->used || peer->record.kind != MM_KIND_SEARCHING || peer->record.party <= 1)
+			continue;
+		reserved = search->party.following &&
+			!memcmp(peer->record.key_hash, search->party.leader_hash, P2P_KEY_HASH_SIZE);
+		for (member = 0; member < search->pool_count; member++)
+			reserved |= !memcmp(peer->record.key_hash, search->pool[member], P2P_KEY_HASH_SIZE);
+		team_party_add(search, peer->record.key_hash, peer->record.party, peer->record.member_keys, reserved);
+	}
+}
+
 static int decide_host(struct mm_search *search, int playlist, int size, struct mm_out *out, int out_size)
 {
+	team_parties_fill(search);
 	search->decision.kind = P2P_MM_DECIDE_HOST;
 	search->decision.playlist = search->hosting_playlist = playlist;
 	search->decision.size = search->hosting_size = size;
@@ -1225,6 +1281,7 @@ void mm_hosted(struct mm_search *search, const unsigned char *token, int players
 			return;
 		search->state = P2P_MM_HOSTING;
 		search->held_until = now + (search->pool_count ? MM_HOLD : 0);
+		search->team_seats_until = now + MM_PARTY_SEATS;
 		search->next_hosting_record = now;
 		memcpy(search->token, token, P2P_TOKEN_SIZE);
 	}
@@ -1240,6 +1297,19 @@ void mm_hosted(struct mm_search *search, const unsigned char *token, int players
 	search->red_players = red_players;
 	search->most_players = most_players;
 	search->under_way = under_way;
+}
+
+int mm_team_parties(const struct mm_search *search, unsigned long now, struct p2p_mm_team_party *parties)
+{
+	int count = search->team_party_count < P2P_MM_TEAM_PARTIES ? search->team_party_count : P2P_MM_TEAM_PARTIES, index;
+
+	for (index = 0; index < count; index++)
+	{
+		parties[index] = search->team_parties[index];
+		if ((long)(now - search->team_seats_until) >= 0)
+			parties[index].reserved = 0;
+	}
+	return count;
 }
 
 /* a searching record names a party once; a hosting record names each machine an invite is for */
@@ -1707,6 +1777,17 @@ void p2p_mm_game(int players, int red_players, int most_players, int under_way)
 	pthread_mutex_unlock(&p2p_lock);
 	if (was >= 0)
 		p2p_lobby_browse(was);
+}
+
+int p2p_mm_team_parties(struct p2p_mm_team_party *parties, unsigned char *own_key_hash)
+{
+	int count;
+
+	pthread_mutex_lock(&p2p_lock);
+	memcpy(own_key_hash, mm.search.key_hash, P2P_KEY_HASH_SIZE);
+	count = mm_team_parties(&mm.search, p2p_now(), parties);
+	pthread_mutex_unlock(&p2p_lock);
+	return count;
 }
 
 void p2p_mm_joined(int ok)

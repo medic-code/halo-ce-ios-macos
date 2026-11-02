@@ -2583,6 +2583,100 @@ static void check_team_counts(void)
 	CHECK(red == 2, "a player's move is published at once: %d", red);
 }
 
+static int team_party_named(const struct mm_search *search, int machine, int *reserved)
+{
+	struct p2p_mm_team_party parties[P2P_MM_TEAM_PARTIES];
+	struct mm_record named = heard_as(NULL, machine, 1, 1);
+	int count = mm_team_parties(search, now_ms, parties), index, member;
+
+	for (index = 0; index < count; index++)
+	{
+		for (member = 0; member < parties[index].players; member++)
+		{
+			if (!memcmp(parties[index].key_hashes[member], named.key_hash, P2P_KEY_HASH_SIZE))
+			{
+				*reserved = parties[index].reserved;
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+static void heard_strict_party(struct mm_search *search, int leader, unsigned long sequence)
+{
+	struct mm_record record = party_of(leader, 1, sequence), read_back;
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+
+	record.playlist = P2P_MM_SLAYER;
+	record.size = P2P_MM_2V2;
+	record.can_host = 0;
+	seed_of(leader, seed);
+	if (mm_record_read(bytes, mm_record_write(&record, seed, bytes, sizeof(bytes)), &read_back))
+		mm_heard(search, &read_back, now_ms);
+}
+
+static void check_team_parties(void)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct mm_record own;
+	struct mm_search *search;
+	unsigned char token[P2P_TOKEN_SIZE] = { 1 };
+	int reserved = 0, index;
+
+	case_name = "team_parties";
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	heard_strict_party(search, 200, 1);
+	CHECK(!team_party_named(search, 201, &reserved), "no parties before this machine hosts");
+	for (index = 0; index < 16 && search->decided != P2P_MM_DECIDE_HOST; index++)
+	{
+		now_ms += 500;
+		heard_strict(search, 300, 300 + (unsigned long)index);
+		heard_strict_party(search, 200, 300 + (unsigned long)index);
+		mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	}
+	CHECK(search->decided == P2P_MM_DECIDE_HOST, "the one machine that can host hosts");
+	mm_hosted(search, token, 1, 1, 4, 0, now_ms);
+	CHECK(team_party_named(search, 200, &reserved) && reserved, "a pool party's leader, seats held");
+	CHECK(team_party_named(search, 201, &reserved) && reserved, "and its member");
+	CHECK(!team_party_named(search, 300, &reserved), "a solo is in no party");
+	now_ms += 100;
+	heard_kind(search, 200, 400, MM_KIND_CANCEL);
+	CHECK(team_party_named(search, 201, &reserved) && reserved, "the leader's cancel, as it joins, keeps its member");
+	heard_party(search, 200, 1, 500, P2P_MM_SLAYER, P2P_MM_2V2);
+	CHECK(team_party_named(search, 201, &reserved) && reserved, "heard again, a party keeps its seats");
+	heard_party(search, 210, 1, 1, P2P_MM_SLAYER, P2P_MM_2V2);
+	CHECK(team_party_named(search, 211, &reserved) && !reserved, "a party heard while hosting holds no seats");
+	heard_party(search, 210, 1, 2, P2P_MM_SLAYER, P2P_MM_2V2);
+	CHECK(search->team_party_count == 2, "heard again, it is the same party: %d", search->team_party_count);
+	now_ms += MM_PARTY_SEATS;
+	CHECK(team_party_named(search, 201, &reserved) && !reserved, "held seats lapse, and the party stays known");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	own = party_of(100, 1, 1);
+	set_party(search, &own, 0);
+	mm_host_now(search);
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decided == P2P_MM_DECIDE_HOST, "its leader hosts");
+	mm_hosted(search, token, 1, 1, 4, 0, now_ms);
+	CHECK(team_party_named(search, 100, &reserved) && reserved, "the host's own party, seats held");
+	CHECK(team_party_named(search, 101, &reserved) && reserved, "and its member");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	mm_host_now(search);
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	mm_hosted(search, token, 1, 1, 4, 0, now_ms);
+	own = party_of(100, 1, 1);
+	set_party(search, &own, 0);
+	CHECK(team_party_named(search, 101, &reserved) && reserved, "a member gained while hosting is placed");
+}
+
 static void check_party_pool_invited(void)
 {
 	struct mm_out out[MM_MAXIMUM_OUT];
@@ -3038,6 +3132,8 @@ static void check_e30_leader_quits(void)
 
 static void check_e47_strict_leader(void)
 {
+	struct p2p_mm_team_party team_table[P2P_MM_TEAM_PARTIES];
+
 	case_name = "e47_strict_leader";
 	party_world(2, 2);
 	party_start(2, P2P_MM_2V2, 2);
@@ -3046,12 +3142,17 @@ static void check_e47_strict_leader(void)
 	run(40);
 	CHECK(machines[1].hosting, "the member hosts");
 	CHECK(machines[0].in == 1, "the leader joins");
+	CHECK(mm_team_parties(&machines[1].search, now_ms, team_table) == 1 && team_table[0].players == 2 &&
+		!memcmp(team_table[0].key_hashes[0], machines[0].search.key_hash, P2P_KEY_HASH_SIZE) &&
+		!memcmp(team_table[0].key_hashes[1], machines[1].search.key_hash, P2P_KEY_HASH_SIZE),
+		"the member hosting knows its party, to place the leader on its team");
 	CHECK(machines[0].search.in_game && !parties[0].notice, "and the party stays together: notice %d", parties[0].notice);
 }
 
 static void check_e47_big_strict_leader(void)
 {
 	static const int sizes[] = { P2P_MM_BIG_TEAM, P2P_MM_BIG_FFA };
+	struct p2p_mm_team_party team_table[P2P_MM_TEAM_PARTIES];
 	int index;
 
 	case_name = "e47_big_strict_leader";
@@ -3062,6 +3163,11 @@ static void check_e47_big_strict_leader(void)
 		run(20);
 		CHECK(machines[1].hosting && !machines[2].hosting, "size %d: the first member who can hosts: %d and %d",
 			sizes[index], machines[1].hosting, machines[2].hosting);
+		CHECK(mm_team_parties(&machines[1].search, now_ms, team_table) == 1 && team_table[0].players == 3 &&
+			!memcmp(team_table[0].key_hashes[0], machines[0].search.key_hash, P2P_KEY_HASH_SIZE) &&
+			!memcmp(team_table[0].key_hashes[1], machines[1].search.key_hash, P2P_KEY_HASH_SIZE) &&
+			!memcmp(team_table[0].key_hashes[2], machines[2].search.key_hash, P2P_KEY_HASH_SIZE),
+			"size %d: the member hosting knows its party, to place it on one team", sizes[index]);
 		run(20);
 		CHECK(machines[0].in == 1 && machines[2].in == 1, "size %d: the leader and the other member join it: in %d and %d",
 			sizes[index], machines[0].in, machines[2].in);
@@ -4270,6 +4376,7 @@ int main(int argc, char **argv)
 	check_party_pool_invited();
 	check_e28_room();
 	check_team_counts();
+	check_team_parties();
 	check_party_sizes();
 	check_party_records();
 	check_party_link();
