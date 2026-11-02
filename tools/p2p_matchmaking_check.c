@@ -3124,7 +3124,7 @@ static void check_party_flags(void)
 	party_now += 3000;
 	size = mm_party_step(&parties[1], party_now, bytes);
 	party_send(1, parties[0].topic, bytes, size);
-	CHECK(!parties[0].notice && !parties[0].members[1].searching, "KAT never had that search: notice %d",
+	CHECK(!parties[0].notice && parties[0].members[1].searching, "KAT's first record heard was the search: notice %d",
 		parties[0].notice);
 
 	mm_party_search_begin(&parties[0], &search, party_now);
@@ -3214,6 +3214,72 @@ static void check_e76_party_stays_together(void)
 		"the member hosts again and the party joins: in %d %d", machines[0].in, machines[2].in);
 }
 
+static void friend_takes_link(int index, const char *name)
+{
+	unsigned char seed[P2P_SEED_SIZE];
+
+	strcpy(parties[index].name, name);
+	party_seed(index, seed);
+	mm_party_join(&parties[index], seed, parties[0].link, now_ms);
+	party_machines = index + 1;
+}
+
+static void check_e77_friend_joins_search(void)
+{
+	struct mm_search *const friend = &machines[1].search;
+	int index, joined;
+
+	case_name = "e77_friend_joins_search";
+	party_world(1, 4);
+	party_start(1, P2P_MM_2V2, 1);
+	start_searching(2, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	start_searching(3, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(19);
+	CHECK(machines[2].search.state == P2P_MM_QUEUED, "three of four wait: state %d", machines[2].search.state);
+	friend_takes_link(1, "KAT");
+	run(3);
+	CHECK(party_size() == 2 && friend->party.following, "KAT is in the search within 3 s: %d", party_size());
+	run(30);
+	for (index = joined = 0; index < 4; index++)
+		joined += machines[index].hosting ? machines[index].players == 4 : 0;
+	CHECK(joined == 1 && machines[1].in >= 0 && machines[1].in == machines[0].in, "the pool forms again with all four");
+	CHECK(!parties[0].notice, "no notice: %d", parties[0].notice);
+
+	party_world(1, 3);
+	list_game(2, 2, 8);
+	party_start(1, P2P_MM_4V4, 1);
+	for (index = 0; index < 10 && machines[0].in < 0; index++)
+		run(1);
+	CHECK(machines[0].in == 2, "the leader is in a game");
+	run(25);
+	fail_join = 1;
+	friend_takes_link(1, "KAT");
+	run(25);
+	CHECK(machines[0].in == 2 && !parties[0].notice, "a friend who cannot follow leaves the leader's game alone: %d",
+		parties[0].notice);
+	listing_count = 0;
+
+	party_world(1, 3);
+	list_game(2, 2, 8);
+	party_start(1, P2P_MM_4V4, 1);
+	for (index = 0; index < 10 && machines[0].in < 0; index++)
+		run(1);
+	run(5);
+	friend_takes_link(1, "KAT");
+	run(6);
+	CHECK(machines[1].in == 2, "the friend follows the leader into its game: in %d", machines[1].in);
+	CHECK(machines[0].in == 2 && !parties[0].notice, "and the leader stays: %d", parties[0].notice);
+	listing_count = 0;
+
+	party_world(1, 2);
+	party_start(1, P2P_MM_2V2, 1);
+	friend->in_game = 1;
+	friend_takes_link(1, "KAT");
+	run(6);
+	CHECK(party_size() == 1 && !friend->party.following, "a friend in a game stays out: %d", party_size());
+	CHECK(!parties[0].notice, "and it never had the search: %d", parties[0].notice);
+}
+
 static void check_party_journeys(void)
 {
 	check_e24_leader_cancels();
@@ -3227,6 +3293,7 @@ static void check_party_journeys(void)
 	check_big_member_size();
 	check_e75_member_keeps_hosting();
 	check_e76_party_stays_together();
+	check_e77_friend_joins_search();
 	check_e25_follow_big();
 	check_e29_cannot_follow();
 }
@@ -3263,7 +3330,7 @@ static void check_party_record_search(void)
 		"the member reads the search");
 	CHECK(parties[2].search.has_game && !strcmp(parties[2].search.invite, "halo://join/0123"),
 		"each member opens the invite sealed to it: %s", parties[2].search.invite);
-	CHECK(parties[2].left_number == 7 && parties[2].followed_game == 3, "the first record heard takes no action");
+	CHECK(!parties[2].left_number && parties[2].followed_game == 3, "the first record heard leaves that search open");
 	for (index = 0; index < 4; index++)
 	{
 		int *const field = fields[index], good = *field;
