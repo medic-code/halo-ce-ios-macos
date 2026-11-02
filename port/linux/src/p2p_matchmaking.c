@@ -101,11 +101,18 @@ void mm_party_sign(const unsigned char *seed, const unsigned char *leader_key, u
 	p2p_ed25519_sign(seed, key, message, party_message(leader_key, message), signature);
 }
 
+int mm_party_signed(const unsigned char *key, const unsigned char *leader_key, const unsigned char *signature)
+{
+	unsigned char message[sizeof(party_label) + P2P_KEY_SIZE];
+
+	return p2p_ed25519_verify(key, message, party_message(leader_key, message), signature);
+}
+
 /* key hashes, not keys: a key and its negative are different bytes with one X25519 form */
 static int members_signed(const struct mm_record *record)
 {
-	unsigned char message[sizeof(party_label) + P2P_KEY_SIZE], hashes[MM_MAXIMUM_PARTY][P2P_KEY_HASH_SIZE];
-	int size = party_message(record->key, message), member, other;
+	unsigned char hashes[MM_MAXIMUM_PARTY][P2P_KEY_HASH_SIZE];
+	int member, other;
 
 	memcpy(hashes[0], record->key_hash, P2P_KEY_HASH_SIZE);
 	for (member = 1; member < record->party; member++)
@@ -115,7 +122,7 @@ static int members_signed(const struct mm_record *record)
 		for (other = 0; other < member && memcmp(hashes[other], hashes[member], P2P_KEY_HASH_SIZE); other++)
 			;
 		if (other < member ||
-			!p2p_ed25519_verify(record->member_keys[member - 1], message, size, record->member_signatures[member - 1]))
+			!mm_party_signed(record->member_keys[member - 1], record->key, record->member_signatures[member - 1]))
 		{
 			return 0;
 		}
