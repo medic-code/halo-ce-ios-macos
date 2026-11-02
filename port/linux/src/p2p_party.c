@@ -414,14 +414,20 @@ int mm_party_read(struct mm_party *party, const unsigned char *payload, int size
 	}
 	if (record->kind == PARTY_LEADER_RECORD)
 	{
+		const unsigned char *block;
 		int count, base;
 
 		if (body_size <= P2P_PARTY_NAME_SIZE || body[P2P_PARTY_NAME_SIZE] >= P2P_PARTY_MAXIMUM)
 			return 0;
 		count = body[P2P_PARTY_NAME_SIZE];
 		base = P2P_PARTY_NAME_SIZE + 1 + count * P2P_KEY_HASH_SIZE + MM_PARTY_SEARCH_SIZE;
-		return body_size >= base && body_size == base +
-			(body[base - MM_PARTY_SEARCH_SIZE] & PARTY_GAME ? 2 + count * MM_SEALED_INVITE_SIZE : 0);
+		block = body + base - MM_PARTY_SEARCH_SIZE;
+		if (body_size < base || block[4] >= 1u << NUMBER_OF_P2P_MM_PLAYLISTS || block[5] >= NUMBER_OF_P2P_MM_SIZES)
+			return 0;
+		if (!(block[0] & PARTY_GAME))
+			return body_size == base;
+		return body_size == base + 2 + count * MM_SEALED_INVITE_SIZE && body[base] < NUMBER_OF_P2P_MM_PLAYLISTS &&
+			body[base + 1] < NUMBER_OF_P2P_MM_SIZES;
 	}
 	return record->kind == PARTY_LINK_RECORD && body_size > P2P_KEY_HASH_SIZE &&
 		body_size == P2P_KEY_HASH_SIZE + 1 + body[P2P_KEY_HASH_SIZE] * (P2P_KEY_HASH_SIZE + SEALED_SECRET_SIZE);
