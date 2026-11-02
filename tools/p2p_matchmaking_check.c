@@ -1590,6 +1590,51 @@ static void check_host_failed(void)
 			"host_failed: machine %d is in the one game", index);
 }
 
+static void check_failed_join_waits(void)
+{
+	struct p2p_mm_choice choice = { 1u << P2P_MM_SLAYER, P2P_MM_2V2 };
+	struct mm_record record = searching(20, 1);
+	struct p2p_mm_decision decision;
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+	int size;
+
+	case_name = "failed_join_waits";
+	record.kind = MM_KIND_HOSTING;
+	record.players = 1;
+	record.most_players = 4;
+	seed_of(20, seed);
+	size = mm_record_write(&record, seed, bytes, sizeof(bytes));
+	p2p_mm_search(&choice);
+	pthread_mutex_lock(&p2p_lock);
+	p2p_mm_heard(bytes, size);
+	clock_now += MM_LOOK_TIME;
+	p2p_mm_update(clock_now, 1, NULL);
+	pthread_mutex_unlock(&p2p_lock);
+	CHECK(p2p_mm_take_decision(&decision) == P2P_MM_DECIDE_JOIN, "the first fake is joined");
+	p2p_mm_joined(0);
+	record = searching(21, 1);
+	record.kind = MM_KIND_HOSTING;
+	record.players = 1;
+	record.most_players = 4;
+	seed_of(21, seed);
+	size = mm_record_write(&record, seed, bytes, sizeof(bytes));
+	pthread_mutex_lock(&p2p_lock);
+	p2p_mm_heard(bytes, size);
+	clock_now += MM_JOIN_BACKOFF - 1000;
+	p2p_mm_update(clock_now, 1, NULL);
+	pthread_mutex_unlock(&p2p_lock);
+	CHECK(p2p_mm_take_decision(&decision) == P2P_MM_DECIDE_NONE, "a second open game waits out the back-off");
+	record.sequence = 2;
+	size = mm_record_write(&record, seed, bytes, sizeof(bytes));
+	pthread_mutex_lock(&p2p_lock);
+	p2p_mm_heard(bytes, size);
+	clock_now += 1000;
+	p2p_mm_update(clock_now, 1, NULL);
+	pthread_mutex_unlock(&p2p_lock);
+	CHECK(p2p_mm_take_decision(&decision) == P2P_MM_DECIDE_JOIN, "the open game is joined after the back-off");
+	p2p_mm_cancel();
+}
+
 static int elects_second(int first, int second)
 {
 	struct mm_unit units[2];
@@ -1703,6 +1748,7 @@ int main(int argc, char **argv)
 	check_verify_budget();
 	check_run_key();
 	check_joined_then_lost();
+	check_failed_join_waits();
 	check_look();
 	check_ffa_wanted();
 	check_widened_pick();
