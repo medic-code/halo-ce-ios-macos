@@ -992,11 +992,21 @@ static int better_host_settling(const struct mm_search *search, const struct mm_
 	return 0;
 }
 
+void mm_invite_text(const unsigned char *key_hash, const unsigned char *token, char *text)
+{
+	unsigned char bytes[P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE];
+	char hex[2 * sizeof(bytes) + 1];
+
+	memcpy(bytes, key_hash, P2P_KEY_HASH_SIZE);
+	memcpy(bytes + P2P_KEY_HASH_SIZE, token, P2P_TOKEN_SIZE);
+	p2p_hex(bytes, sizeof(bytes), hex);
+	snprintf(text, P2P_LINK_SIZE, "halo://join/%s", hex);
+}
+
 static int join(struct mm_search *search, unsigned long now, struct mm_out *out, int out_size)
 {
 	struct mm_peer *best = NULL;
-	unsigned char bytes[P2P_KEY_HASH_SIZE + P2P_TOKEN_SIZE];
-	char text[2 * sizeof(bytes) + 1];
+	unsigned char token[P2P_TOKEN_SIZE];
 	int index, member;
 
 	for (index = 0; index < MM_MAXIMUM_UNITS; index++)
@@ -1021,11 +1031,10 @@ static int join(struct mm_search *search, unsigned long now, struct mm_out *out,
 	{
 		return 0;
 	}
-	memcpy(bytes, best->record.key_hash, P2P_KEY_HASH_SIZE);
 	if (best->record.held)
 	{
 		member = pool_index(&best->record, search->key_hash);
-		if (!mm_open_token(search->seed, best->record.key, best->record.sealed[member], bytes + P2P_KEY_HASH_SIZE))
+		if (!mm_open_token(search->seed, best->record.key, best->record.sealed[member], token))
 		{
 			best->failed = MM_FAILED_GAME_UNJOINABLE;
 			return 0;
@@ -1033,15 +1042,14 @@ static int join(struct mm_search *search, unsigned long now, struct mm_out *out,
 	}
 	else
 	{
-		memcpy(bytes + P2P_KEY_HASH_SIZE, best->record.token, P2P_TOKEN_SIZE);
+		memcpy(token, best->record.token, P2P_TOKEN_SIZE);
 	}
-	p2p_hex(bytes, sizeof(bytes), text);
 	search->picked_set = 0;
 	search->decision.kind = P2P_MM_DECIDE_JOIN;
 	search->decision.playlist = best->playlist;
 	search->decision.size = best->size;
 	search->decision.public_game = 0;
-	snprintf(search->decision.invite, sizeof(search->decision.invite), "halo://join/%s", text);
+	mm_invite_text(best->record.key_hash, token, search->decision.invite);
 	memcpy(search->joining, best->record.key_hash, P2P_KEY_HASH_SIZE);
 	search->joining_since = now;
 	search->joining_players = best->record.held ? best->record.pool_count + 1 : best->record.players + party_players(search);
