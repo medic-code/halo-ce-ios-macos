@@ -12,6 +12,7 @@ static const char link_prefix[] = "halo://party/";
 enum
 {
 	PARTY_INTERVAL = 3000,
+	PARTY_EXPIRY = 10000,
 	/* a record's kind, its key and its sequence */
 	PARTY_HEADER_SIZE = 1 + P2P_KEY_SIZE + 4,
 	PARTY_MEMBER_RECORD = 1,
@@ -225,10 +226,34 @@ static int write_leader(struct mm_party *party, unsigned char *bytes)
 	return record_finish(party, plain, size, bytes);
 }
 
+static void drop_member(struct mm_party *party, struct mm_party_member *member)
+{
+	memmove(member, member + 1, (size_t)(party->members + --party->count - member) * sizeof(*member));
+}
+
 int mm_party_step(struct mm_party *party, unsigned long now, unsigned char *bytes)
 {
+	int index;
+
 	if (party->role == MM_PARTY_NONE)
 		return 0;
+	if (party->role == MM_PARTY_MEMBER && elapsed(party->members[0].heard, now, PARTY_EXPIRY))
+	{
+		set_notice(party, P2P_PARTY_NOTICE_ENDED, party->members[0].name);
+		clear_party(party);
+		return 0;
+	}
+	if (party->role == MM_PARTY_LEADER)
+	{
+		for (index = party->count - 1; index > 0; index--)
+		{
+			if (elapsed(party->members[index].heard, now, PARTY_EXPIRY))
+			{
+				set_notice(party, P2P_PARTY_NOTICE_LEFT, party->members[index].name);
+				drop_member(party, &party->members[index]);
+			}
+		}
+	}
 	if (!elapsed(party->sent, now, PARTY_INTERVAL))
 		return 0;
 	party->sent = now;
