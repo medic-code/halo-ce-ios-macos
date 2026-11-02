@@ -17,6 +17,7 @@
 void platform_log(const char *format, ...);
 
 static const char record_label[] = "hceu-mm-1";
+static const char party_label[] = "hceu-mm-party-1";
 
 const char *const p2p_mm_playlist_names[NUMBER_OF_P2P_MM_PLAYLISTS] = { "slayer", "ctf", "king", "oddball", "race" };
 const char *const p2p_mm_size_names[NUMBER_OF_P2P_MM_SIZES] = { "1v1", "2v2", "3v3", "4v4", "ffa6", "big-team", "big-ffa" };
@@ -75,6 +76,43 @@ static int signed_message(const unsigned char *bytes, int size, unsigned char *m
 	return (int)(sizeof(record_label) - 1) + size;
 }
 
+static int party_message(const unsigned char *leader_key, unsigned char *message)
+{
+	memcpy(message, party_label, sizeof(party_label) - 1);
+	memcpy(message + sizeof(party_label) - 1, leader_key, P2P_KEY_SIZE);
+	return (int)(sizeof(party_label) - 1) + P2P_KEY_SIZE;
+}
+
+void mm_party_sign(const unsigned char *seed, const unsigned char *leader_key, unsigned char *signature)
+{
+	unsigned char message[sizeof(party_label) + P2P_KEY_SIZE], key[P2P_KEY_SIZE];
+
+	p2p_ed25519_public(seed, key, NULL);
+	p2p_ed25519_sign(seed, key, message, party_message(leader_key, message), signature);
+}
+
+/* key hashes, not keys: a key and its negative are different bytes with one X25519 form */
+static int members_signed(const struct mm_record *record)
+{
+	unsigned char message[sizeof(party_label) + P2P_KEY_SIZE], hashes[MM_MAXIMUM_PARTY][P2P_KEY_HASH_SIZE];
+	int size = party_message(record->key, message), member, other;
+
+	memcpy(hashes[0], record->key_hash, P2P_KEY_HASH_SIZE);
+	for (member = 1; member < record->party; member++)
+	{
+		if (!key_hash_of(record->member_keys[member - 1], hashes[member]))
+			return 0;
+		for (other = 0; other < member && memcmp(hashes[other], hashes[member], P2P_KEY_HASH_SIZE); other++)
+			;
+		if (other < member ||
+			!p2p_ed25519_verify(record->member_keys[member - 1], message, size, record->member_signatures[member - 1]))
+		{
+			return 0;
+		}
+	}
+	return 1;
+}
+
 int mm_playlist_has_size(unsigned playlists, int size)
 {
 	return (size != P2P_MM_FFA_6 && size != P2P_MM_BIG_FFA) || playlists != 1u << P2P_MM_CTF;
@@ -85,11 +123,14 @@ int mm_record_write(const struct mm_record *record, const unsigned char *seed, u
 	unsigned char message[sizeof(record_label) + MM_MAXIMUM_RECORD_SIZE];
 	int at = 0, index;
 
-	if (size < MM_MAXIMUM_RECORD_SIZE || record->pool_count < 0 || record->pool_count > MM_MAXIMUM_POOL)
+	if (size < MM_MAXIMUM_RECORD_SIZE || record->pool_count < 0 || record->pool_count > MM_MAXIMUM_POOL ||
+		record->party > MM_MAXIMUM_PARTY || (record->party > 1 && record->kind != MM_KIND_SEARCHING))
+	{
 		return 0;
+	}
 	bytes[at++] = 'H';
 	bytes[at++] = 'M';
-	bytes[at++] = MM_FORMAT;
+	bytes[at++] = record->party > 1 ? MM_FORMAT_PARTY : MM_FORMAT;
 	bytes[at++] = (unsigned char)(record->network_version >> 8);
 	bytes[at++] = (unsigned char)record->network_version;
 	bytes[at++] = (unsigned char)record->kind;
@@ -102,6 +143,17 @@ int mm_record_write(const struct mm_record *record, const unsigned char *seed, u
 	bytes[at++] = (unsigned char)record->size;
 	memcpy(bytes + at, record->key, P2P_KEY_SIZE);
 	at += P2P_KEY_SIZE;
+	if (record->party > 1)
+	{
+		bytes[at++] = (unsigned char)record->party;
+		for (index = 0; index < record->party - 1; index++)
+		{
+			memcpy(bytes + at, record->member_keys[index], P2P_KEY_SIZE);
+			at += P2P_KEY_SIZE;
+			memcpy(bytes + at, record->member_signatures[index], P2P_SIGNATURE_SIZE);
+			at += P2P_SIGNATURE_SIZE;
+		}
+	}
 	if (record->kind == MM_KIND_HOSTING)
 	{
 		bytes[at++] = (unsigned char)record->players;
@@ -133,11 +185,12 @@ int mm_record_read(const unsigned char *bytes, int size, struct mm_record *recor
 	int at = MM_HEADER_SIZE, index, entry;
 
 	if (size < MM_HEADER_SIZE + P2P_SIGNATURE_SIZE || size > MM_MAXIMUM_RECORD_SIZE ||
-		bytes[0] != 'H' || bytes[1] != 'M' || bytes[2] != MM_FORMAT)
+		bytes[0] != 'H' || bytes[1] != 'M' || (bytes[2] != MM_FORMAT_PARTY && bytes[2] != MM_FORMAT))
 	{
 		return 0;
 	}
 	memset(record, 0, sizeof(*record));
+	record->party = 1;
 	record->network_version = (unsigned short)(bytes[3] << 8 | bytes[4]);
 	record->kind = bytes[5];
 	record->sequence = get_long(bytes + 6);
@@ -153,6 +206,24 @@ int mm_record_read(const unsigned char *bytes, int size, struct mm_record *recor
 		record->interval < MM_MINIMUM_INTERVAL)
 	{
 		return 0;
+	}
+	if (bytes[2] == MM_FORMAT_PARTY)
+	{
+		if (record->kind != MM_KIND_SEARCHING || size < at + 1 + P2P_SIGNATURE_SIZE)
+			return 0;
+		record->party = bytes[at++];
+		if (record->party < 2 || !mm_party_size_allowed(record->party, record->size) ||
+			size < at + (record->party - 1) * MM_MEMBER_SIZE + P2P_SIGNATURE_SIZE)
+		{
+			return 0;
+		}
+		for (index = 0; index < record->party - 1; index++)
+		{
+			memcpy(record->member_keys[index], bytes + at, P2P_KEY_SIZE);
+			at += P2P_KEY_SIZE;
+			memcpy(record->member_signatures[index], bytes + at, P2P_SIGNATURE_SIZE);
+			at += P2P_SIGNATURE_SIZE;
+		}
 	}
 	if (record->kind == MM_KIND_HOSTING)
 	{
@@ -187,7 +258,7 @@ int mm_record_read(const unsigned char *bytes, int size, struct mm_record *recor
 		return 0;
 	if (!p2p_ed25519_verify(record->key, message, signed_message(bytes, at, message), bytes + at))
 		return 0;
-	return key_hash_of(record->key, record->key_hash);
+	return key_hash_of(record->key, record->key_hash) && members_signed(record);
 }
 
 static int token_key(const unsigned char *seed, const unsigned char *other_key, unsigned char *key)
@@ -300,6 +371,11 @@ int p2p_mm_size_players(int size)
 int p2p_mm_size_big(int size)
 {
 	return size >= P2P_MM_BIG_TEAM;
+}
+
+int mm_party_size_allowed(int party, int size)
+{
+	return party <= MM_MAXIMUM_PARTY && party * 2 <= p2p_mm_size_players(size);
 }
 
 /* each playlist's game engine (a listing's engine_type) */

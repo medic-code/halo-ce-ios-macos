@@ -9,6 +9,7 @@
 enum
 {
 	MM_FORMAT = 1,
+	MM_FORMAT_PARTY = 2,
 	MM_KIND_SEARCHING = 1,
 	MM_KIND_HOSTING,
 	MM_KIND_CANCEL,
@@ -16,14 +17,19 @@ enum
 	MM_FLAG_UNDER_WAY = 2,
 	MM_FLAG_HELD = 4,
 	MM_MAXIMUM_POOL = 8,
+	MM_MAXIMUM_PARTY = 8,
 	MM_MAXIMUM_UNITS = 256,
 	/* records after the first */
 	MM_REFRESHES_COUNTED = 2,
 	MM_REFRESHES_PINGED = 6,
 	MM_SEALED_TOKEN_SIZE = P2P_TOKEN_SIZE + P2P_SEAL_OVERHEAD,
 	MM_HEADER_SIZE = 2 + 1 + 2 + 1 + 4 + 1 + 1 + 1 + 1 + P2P_KEY_SIZE,
-	MM_MAXIMUM_RECORD_SIZE = MM_HEADER_SIZE + 3 + MM_MAXIMUM_POOL * (P2P_KEY_HASH_SIZE + MM_SEALED_TOKEN_SIZE) +
+	MM_MAXIMUM_HOSTING_SIZE = MM_HEADER_SIZE + 3 + MM_MAXIMUM_POOL * (P2P_KEY_HASH_SIZE + MM_SEALED_TOKEN_SIZE) +
 		P2P_TOKEN_SIZE + P2P_SIGNATURE_SIZE,
+	MM_MEMBER_SIZE = P2P_KEY_SIZE + P2P_SIGNATURE_SIZE,
+	MM_MAXIMUM_PARTY_SIZE = MM_HEADER_SIZE + 1 + (MM_MAXIMUM_PARTY - 1) * MM_MEMBER_SIZE + P2P_SIGNATURE_SIZE,
+	MM_MAXIMUM_RECORD_SIZE = MM_MAXIMUM_HOSTING_SIZE > MM_MAXIMUM_PARTY_SIZE ? MM_MAXIMUM_HOSTING_SIZE :
+		MM_MAXIMUM_PARTY_SIZE,
 	/* tenths of a second */
 	MM_INTERVAL = 30,
 	MM_MINIMUM_INTERVAL = 10,
@@ -48,6 +54,9 @@ struct mm_record
 	unsigned char pool[MM_MAXIMUM_POOL][P2P_KEY_HASH_SIZE];
 	unsigned char sealed[MM_MAXIMUM_POOL][MM_SEALED_TOKEN_SIZE];
 	unsigned char token[P2P_TOKEN_SIZE];
+	int party;
+	unsigned char member_keys[MM_MAXIMUM_PARTY - 1][P2P_KEY_SIZE];
+	unsigned char member_signatures[MM_MAXIMUM_PARTY - 1][P2P_SIGNATURE_SIZE];
 };
 
 void mm_topic(int playlist, int size, char *topic, int topic_size);
@@ -57,8 +66,10 @@ int mm_interval(int queues);
 int mm_topic_listed(const char *const *topics, int count, const char *topic);
 
 int mm_record_write(const struct mm_record *record, const unsigned char *seed, unsigned char *bytes, int size);
-/* checks the signature: 1 only if whole and signed by its key */
+/* checks the signatures: 1 only if whole, signed by its key, and by every member it names */
 int mm_record_read(const unsigned char *bytes, int size, struct mm_record *record);
+void mm_party_sign(const unsigned char *seed, const unsigned char *leader_key, unsigned char *signature);
+int mm_party_size_allowed(int party, int size);
 int mm_seal_token(const unsigned char *seed, const unsigned char *member_key, const unsigned char *token,
 	unsigned char *sealed);
 int mm_open_token(const unsigned char *seed, const unsigned char *host_key, const unsigned char *sealed,

@@ -86,6 +86,16 @@ void lobby_mark_failed_unlocked(const unsigned char *identifier)
 }
 /* lobby_pick.inc: written by tools/test_linux_port.py from p2p_lobby.c */
 #include "lobby_pick.inc"
+
+static int verifies;
+
+int __real_p2p_ed25519_verify(const unsigned char *public_key, const void *message, int size, const unsigned char *signature);
+
+int __wrap_p2p_ed25519_verify(const unsigned char *public_key, const void *message, int size, const unsigned char *signature)
+{
+	verifies++;
+	return __real_p2p_ed25519_verify(public_key, message, size, signature);
+}
 int p2p_lobby_browsing(void) { return browsing; }
 void p2p_lobby_browse(int on)
 {
@@ -154,7 +164,7 @@ static void check_records(void)
 	bytes[30] ^= 1;
 	CHECK(!mm_record_read(bytes, size - 1, &read_back), "cut short");
 	/* (signed again, so that only the format is wrong) */
-	bytes[2] = MM_FORMAT + 1;
+	bytes[2] = MM_FORMAT_PARTY + 1;
 	memcpy(message, "hceu-mm-1", 9);
 	memcpy(message + 9, bytes, (size_t)(size - P2P_SIGNATURE_SIZE));
 	p2p_ed25519_sign(seed, record.key, message, 9 + size - P2P_SIGNATURE_SIZE, bytes + size - P2P_SIGNATURE_SIZE);
@@ -204,22 +214,24 @@ static void check_topic_moves(void)
 	CHECK(unsubscribed == 1 && !unsubscribed_wanted, "[A,B,C] to [B,C]: only A is unsubscribed: %d", unsubscribed);
 }
 
-static void check_verify_budget(void)
+static struct mm_record party_of(int leader, int members, unsigned long sequence);
+
+static void verify_budget_of(int members, int queue_size, double limit_ms)
 {
-	struct p2p_mm_choice choice = { 1u << P2P_MM_SLAYER, P2P_MM_2V2 };
+	struct p2p_mm_choice choice = { 1u << P2P_MM_SLAYER, queue_size };
 	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
 	struct p2p_mm_status status;
 	struct timespec before, after;
 	int index, size, passes, left;
 	double first_pass_ms;
 
-	case_name = "verify_budget";
 	p2p_mm_search(&choice);
 	/* MAXIMUM_QUEUED (64) are kept: 21 keys of three records, and one more */
 	for (index = 0; index < 300; index++)
 	{
-		struct mm_record record = searching(index / 3 + 10, (unsigned long)(index % 3 + 1));
+		struct mm_record record = party_of(index / 3 + 10, members, (unsigned long)(index % 3 + 1));
 
+		record.size = queue_size;
 		seed_of(index / 3 + 10, seed);
 		size = mm_record_write(&record, seed, bytes, sizeof(bytes));
 		pthread_mutex_lock(&p2p_lock);
@@ -234,12 +246,20 @@ static void check_verify_budget(void)
 	for (passes = 1; left && passes < 100; passes++)
 		left = p2p_mm_verify_pass(clock_now);
 	pthread_mutex_unlock(&p2p_lock);
-	CHECK(first_pass_ms < 4.0, "one pass took %.1f ms", first_pass_ms);
+	CHECK(first_pass_ms < limit_ms, "one pass took %.1f ms", first_pass_ms);
 	CHECK(passes > 1 || first_pass_ms < 2.5, "a pass of %.1f ms past the budget stopped early: %d passes", first_pass_ms, passes);
 	CHECK(!left, "the queue drains over later passes: %d left", left);
 	p2p_mm_get_status(&status);
 	CHECK(status.count == 22, "64 kept, all verified into the search: %d searchers counted, 21 and this machine", status.count);
 	p2p_mm_cancel();
+}
+
+static void check_verify_budget(void)
+{
+	case_name = "verify_budget";
+	verify_budget_of(0, P2P_MM_2V2, 4.0);
+	case_name = "verify_budget_party";
+	verify_budget_of(3, P2P_MM_4V4, 8.0);
 }
 
 static void check_run_key(void)
@@ -1558,6 +1578,35 @@ static struct mm_record heard_as(struct mm_search *search, int machine, unsigned
 	return read_back;
 }
 
+static struct mm_record party_of(int leader, int members, unsigned long sequence)
+{
+	struct mm_record record = searching(leader, sequence);
+	unsigned char seed[P2P_SEED_SIZE];
+	int index;
+
+	record.party = members + 1;
+	record.size = P2P_MM_4V4;
+	for (index = 0; index < members; index++)
+	{
+		seed_of(leader + 1 + index, seed);
+		p2p_ed25519_public(seed, record.member_keys[index], NULL);
+		mm_party_sign(seed, record.key, record.member_signatures[index]);
+	}
+	return record;
+}
+
+static void heard_party(struct mm_search *search, int leader, int members, unsigned long sequence, int playlist, int size)
+{
+	struct mm_record record = party_of(leader, members, sequence), read_back;
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+
+	record.playlist = playlist;
+	record.size = size;
+	seed_of(leader, seed);
+	if (mm_record_read(bytes, mm_record_write(&record, seed, bytes, sizeof(bytes)), &read_back))
+		mm_heard(search, &read_back, now_ms);
+}
+
 static void check_strict_lowest(void)
 {
 	int strict = 300, sequence;
@@ -2123,6 +2172,157 @@ static void check_two_queues(void)
 		"machine 0 and the CTF machine end in one game: the CTF pool re-elects machine 0");
 }
 
+static void check_party_sizes(void)
+{
+	static const int refused[] = { P2P_MM_1V1, P2P_MM_2V2 };
+	static const int allowed[] = { P2P_MM_3V3, P2P_MM_4V4, P2P_MM_FFA_6, P2P_MM_BIG_TEAM, P2P_MM_BIG_FFA };
+	unsigned index;
+
+	case_name = "e22_sizes";
+	for (index = 0; index < sizeof(refused) / sizeof(*refused); index++)
+		CHECK(!mm_party_size_allowed(3, refused[index]), "E22: a party of 3 is refused on %s",
+			p2p_mm_size_names[refused[index]]);
+	for (index = 0; index < sizeof(allowed) / sizeof(*allowed); index++)
+		CHECK(mm_party_size_allowed(3, allowed[index]), "E22: a party of 3 is allowed on %s",
+			p2p_mm_size_names[allowed[index]]);
+	CHECK(mm_party_size_allowed(1, P2P_MM_1V1), "a solo stands on every size");
+	CHECK(!mm_party_size_allowed(4, P2P_MM_FFA_6), "FFA 6 takes a party of 3 at most");
+	CHECK(mm_party_size_allowed(MM_MAXIMUM_PARTY, P2P_MM_BIG_TEAM) && mm_party_size_allowed(MM_MAXIMUM_PARTY, P2P_MM_BIG_FFA),
+		"a full party has BIG TEAM and BIG FFA");
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	heard_party(&machines[0].search, 300, 2, 1, P2P_MM_SLAYER, P2P_MM_2V2);
+	CHECK(!has_peer(&machines[0].search, 300), "a party too large for its queue is not heard");
+}
+
+static void party_key(int machine, unsigned char *key)
+{
+	unsigned char seed[P2P_SEED_SIZE];
+
+	seed_of(machine, seed);
+	p2p_ed25519_public(seed, key, NULL);
+}
+
+static void resign(int machine, unsigned char *bytes, int size)
+{
+	unsigned char seed[P2P_SEED_SIZE], key[P2P_KEY_SIZE], message[MM_MAXIMUM_RECORD_SIZE + 9];
+
+	seed_of(machine, seed);
+	party_key(machine, key);
+	memcpy(message, "hceu-mm-1", 9);
+	memcpy(message + 9, bytes, (size_t)(size - P2P_SIGNATURE_SIZE));
+	p2p_ed25519_sign(seed, key, message, 9 + size - P2P_SIGNATURE_SIZE, bytes + size - P2P_SIGNATURE_SIZE);
+}
+
+static int party_refused(const struct mm_record *record)
+{
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+	struct mm_record read_back;
+
+	int size;
+
+	seed_of(300, seed);
+	size = mm_record_write(record, seed, bytes, sizeof(bytes));
+	verifies = 0;
+	return !mm_record_read(bytes, size, &read_back);
+}
+
+static void check_party_records(void)
+{
+	enum { HEADER = MM_HEADER_SIZE + 1 };
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE + 1];
+	struct mm_record record = party_of(300, 2, 7), full = party_of(300, 3, 7), big = party_of(300, MM_MAXIMUM_PARTY - 1, 7), bad, read_back;
+	unsigned char x25519[P2P_KEY_SIZE];
+	int size, index;
+
+	case_name = "e42_member_signatures";
+	seed_of(300, seed);
+	size = mm_record_write(&record, seed, bytes, MM_MAXIMUM_RECORD_SIZE);
+	CHECK(size == HEADER + 2 * MM_MEMBER_SIZE + P2P_SIGNATURE_SIZE && bytes[2] == MM_FORMAT_PARTY && bytes[MM_HEADER_SIZE] == 3,
+		"format 2, N and two members: %d bytes", size);
+	CHECK(mm_record_read(bytes, size, &read_back) && read_back.party == 3 &&
+		!memcmp(read_back.member_keys, record.member_keys, 2 * P2P_KEY_SIZE), "a party of 3 read back");
+
+	bad = record;
+	seed_of(303, seed);
+	mm_party_sign(seed, record.key, bad.member_signatures[1]);
+	CHECK(party_refused(&bad), "E42: a member's signature that is another key's is refused");
+	bad = record;
+	memset(bad.member_signatures[0], 0, P2P_SIGNATURE_SIZE);
+	CHECK(party_refused(&bad), "an unsigned member is refused");
+	bad = record;
+	party_key(301, bad.member_keys[1]);
+	memcpy(bad.member_signatures[1], bad.member_signatures[0], P2P_SIGNATURE_SIZE);
+	CHECK(party_refused(&bad), "a member named twice is refused");
+	bad = record;
+	memcpy(bad.member_keys[0], bad.key, P2P_KEY_SIZE);
+	seed_of(300, seed);
+	mm_party_sign(seed, bad.key, bad.member_signatures[0]);
+	CHECK(party_refused(&bad), "the leader named as a member is refused");
+	bad = party_of(304, 2, 7);
+	memcpy(bad.key, record.key, P2P_KEY_SIZE);
+	CHECK(party_refused(&bad), "signatures made for another leader are refused");
+	bad = record;
+	memcpy(bad.member_keys[1], bad.member_keys[0], P2P_KEY_SIZE);
+	bad.member_keys[1][P2P_KEY_SIZE - 1] ^= 0x80;
+	CHECK(party_refused(&bad) && verifies == 2, "a member's negative is the same machine, unchecked: %d signatures", verifies);
+	bad = record;
+	memset(bad.member_keys[1], 0, P2P_KEY_SIZE);
+	CHECK(!p2p_ed25519_to_x25519(bad.member_keys[1], x25519), "the zero key has no X25519 form");
+	CHECK(party_refused(&bad) && verifies == 2, "a member with no X25519 form goes unchecked: %d signatures", verifies);
+
+	seed_of(300, seed);
+	size = mm_record_write(&full, seed, bytes, MM_MAXIMUM_RECORD_SIZE);
+	CHECK(mm_record_read(bytes, size, &read_back) && read_back.party == 4, "the largest party a queue takes read back");
+	size = mm_record_write(&big, seed, bytes, MM_MAXIMUM_RECORD_SIZE);
+	CHECK(size == MM_MAXIMUM_PARTY_SIZE && !mm_record_read(bytes, size, &read_back),
+		"the largest party the format holds is written and 4v4 refuses it: %d bytes", size);
+	bad = big;
+	bad.party = MM_MAXIMUM_PARTY + 1;
+	CHECK(!mm_record_write(&bad, seed, bytes, MM_MAXIMUM_RECORD_SIZE), "a party too large is not written");
+	bad = record;
+	bad.kind = MM_KIND_HOSTING;
+	CHECK(!mm_record_write(&bad, seed, bytes, MM_MAXIMUM_RECORD_SIZE), "only a searching record names a party");
+
+	size = mm_record_write(&record, seed, bytes, MM_MAXIMUM_RECORD_SIZE);
+	CHECK(!mm_record_read(bytes, size - 1, &read_back), "cut short");
+	bytes[size] = 0;
+	resign(300, bytes, size + 1);
+	CHECK(!mm_record_read(bytes, size + 1, &read_back), "a byte too long");
+	size = mm_record_write(&record, seed, bytes, MM_MAXIMUM_RECORD_SIZE);
+	for (index = 0; index < 2; index++)
+	{
+		bytes[MM_HEADER_SIZE] = (unsigned char)index;
+		resign(300, bytes, HEADER + P2P_SIGNATURE_SIZE);
+		CHECK(!mm_record_read(bytes, HEADER + P2P_SIGNATURE_SIZE, &read_back), "a count of %d is refused", index);
+	}
+	size = mm_record_write(&record, seed, bytes, MM_MAXIMUM_RECORD_SIZE);
+	bytes[MM_HEADER_SIZE] = 4;
+	resign(300, bytes, size);
+	CHECK(!mm_record_read(bytes, size, &read_back), "a count past the bytes is refused");
+	bytes[MM_HEADER_SIZE] = 3;
+	bytes[5] = MM_KIND_CANCEL;
+	resign(300, bytes, size);
+	CHECK(!mm_record_read(bytes, size, &read_back), "a cancel in format 2 is refused");
+	size = mm_record_write(&record, seed, bytes, MM_MAXIMUM_RECORD_SIZE);
+	bytes[size - 1] ^= 1;
+	CHECK(!mm_record_read(bytes, size, &read_back), "unsigned by the leader");
+	size = mm_record_write(&record, seed, bytes, MM_MAXIMUM_RECORD_SIZE);
+	bytes[2] = MM_FORMAT;
+	resign(300, bytes, size);
+	CHECK(!mm_record_read(bytes, size, &read_back), "format 1 with a party's bytes is refused");
+	record = searching(300, 7);
+	size = mm_record_write(&record, seed, bytes, MM_MAXIMUM_RECORD_SIZE);
+	CHECK(size == MM_HEADER_SIZE + P2P_SIGNATURE_SIZE && bytes[2] == MM_FORMAT && mm_record_read(bytes, size, &read_back) &&
+		read_back.party == 1, "a solo's record stays format 1");
+
+	case_name = "party_no_signature";
+	bad = party_of(300, 2, 7);
+	bad.size = P2P_MM_2V2;
+	CHECK(party_refused(&bad) && !verifies, "a party too large for its queue spends no signature: %d", verifies);
+	CHECK(party_refused(&big) && !verifies, "a party of 8 on 4v4 spends no signature: %d", verifies);
+}
+
 static void check_pool_never_hosts(void)
 {
 	int low = lowest_key_hash(4), index;
@@ -2240,6 +2440,8 @@ int main(int argc, char **argv)
 	check_widened_pick();
 	check_failed_pick();
 	check_region();
+	check_party_sizes();
+	check_party_records();
 	check_worlds();
 	check_faults();
 	if (argc > 1)
