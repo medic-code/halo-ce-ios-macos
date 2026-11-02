@@ -391,6 +391,8 @@ void p2p_party_update(void);
 /* under p2p_lock; 1 if the text holds a party link, joined or not */
 int p2p_party_link_received(const char *text);
 int p2p_party_link_held(const char *text);
+int p2p_party_can_join(const char *text);
+void p2p_clipboard_offer(const char *text);
 int p2p_mm_active(void);
 /* call under p2p_lock; it drops the lock around each signature check */
 int p2p_mm_verify_pass(unsigned long now);
