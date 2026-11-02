@@ -603,6 +603,7 @@ struct network_game *network_game_server_get_game(struct network_game_server *se
 #include "mcc_ui_teams.h" /* port: port/linux/game/mcc_ui_teams.c */
 #include "server_team_switch.h" /* port: port/linux/game/server_team_switch.c */
 #include "latency_meter.h" /* port: port/linux/game/latency_meter.c */
+#include "matchmaking.h" /* port: port/linux/game/matchmaking.c */
 #include "touch_postgame.h" /* port: port/linux/game/touch_postgame.c */
 
 /* network_game_globals.c's */
@@ -5182,8 +5183,10 @@ void game_engine_player_killed(
 	moves the dead to the other team when his is two or more bigger (his
 	next unit is the other team's, which the clients take it from:
 	network_player_attach_unit) */
-	/* port: (not Infection's teams, which are its roles: infection.c) */
+	/* port: (not Infection's teams, which are its roles: infection.c, nor a
+	matchmade game's: its parties stay whole) */
 	if (global_variant.universal_variant.teams && game_variant_options_get()->auto_team_balance && !infection_enabled() &&
+		!matchmaking_teams_locked() &&
 		!network_game_distributed_client() && VALID_INDEX(dead_player->team_index, 2) && !dead_player->quit_out_of_game)
 	{
 		struct data_iterator iterator;
