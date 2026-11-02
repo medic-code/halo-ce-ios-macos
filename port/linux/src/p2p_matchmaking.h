@@ -223,6 +223,7 @@ struct mm_party_record
 
 void mm_party_make(struct mm_party *party, const unsigned char *seed, const unsigned char *secret, unsigned long now);
 int mm_party_link_held(const char *text);
+int mm_party_can_join(const struct mm_party *party, const unsigned char *seed, const char *text);
 int mm_party_join(struct mm_party *party, const unsigned char *seed, const char *text, unsigned long now);
 /* each returns the size of a record to publish on the topic held before the call, 0 if none */
 int mm_party_step(struct mm_party *party, unsigned long now, unsigned char *bytes);

@@ -1940,7 +1940,7 @@ static void platform_invite_clipboard(BOOL look)
 		platform_log("Internet play: the invite link is on the clipboard");
 #endif
 #ifdef HALO_ANDROID
-		SDL_ShowAndroidToast("Hosting: the invite link is on the clipboard", 1, -1, 0, 0);
+		SDL_ShowAndroidToast("The invite link is on the clipboard", 1, -1, 0, 0);
 #endif
 	}
 	if (look && config_boolean("network.join_from_clipboard"))
@@ -1951,12 +1951,20 @@ static void platform_invite_clipboard(BOOL look)
 		{
 			snprintf(seen, sizeof(seen), "%s", text);
 			/* (a link, not a bare code: 64 hex digits alone are as often a
-			checksum copied for something else) */
-			if (platform_text_has_invite_link(text) && (p2p_mm_cancel(), p2p_join_invite(text)))
+			checksum copied for something else; a link this copy refuses
+			leaves a search running) */
+			if (platform_text_has_invite_link(text))
 			{
+				int can_join = p2p_invite_can_join(text);
+
+				if (can_join)
+					p2p_mm_cancel();
+				if (p2p_join_invite(text) && can_join)
+				{
 #ifdef HALO_ANDROID
-				SDL_ShowAndroidToast("Joining the invite on the clipboard", 1, -1, 0, 0);
+					SDL_ShowAndroidToast("Joining the invite on the clipboard", 1, -1, 0, 0);
 #endif
+				}
 			}
 		}
 		SDL_free(text);
