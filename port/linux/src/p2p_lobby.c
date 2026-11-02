@@ -77,6 +77,11 @@ game with a password is not: its token is sealed.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#define strcasecmp _stricmp
+#else
+#include <strings.h>
+#endif
 #include <time.h>
 
 enum
@@ -977,6 +982,25 @@ int p2p_lobby_take_master_listing(const unsigned char *payload, int size, const 
 	return taken;
 }
 
+static int masters_answered;
+
+int p2p_lobby_masters_were_heard(void)
+{
+	return masters_answered;
+}
+
+void p2p_lobby_masters_forget(void)
+{
+	masters_answered = 0;
+}
+
+void p2p_lobby_master_answered(void)
+{
+	pthread_mutex_lock(&p2p_lock);
+	masters_answered = 1;
+	pthread_mutex_unlock(&p2p_lock);
+}
+
 void p2p_lobby_masters_heard(void)
 {
 	int index;
@@ -1193,16 +1217,19 @@ static int pick_fits(const struct p2p_listing *game, const struct p2p_lobby_want
 	{
 		return 0;
 	}
-	if (!(wanted->engines & 1u << game->engine_type) || game->maximum_player_count != wanted->players ||
-		!game->has_teams != !wanted->teams)
+	if (!(wanted->engines & 1u << game->engine_type) || !game->has_teams != !wanted->teams ||
+		(wanted->big ? game->maximum_player_count <= 8 : game->maximum_player_count != wanted->players))
 	{
 		return 0;
 	}
-	if (!game->player_count || game->player_count >= game->maximum_player_count)
+	if (game->player_count >= game->maximum_player_count)
 		return 0;
-	/* a dedicated server plays its operator's game, not the one searched for */
+	/* an empty dedicated server starts its game on its own once a player joins */
+	if (!game->player_count && !(wanted->big && game->dedicated))
+		return 0;
+	/* a small search passes over a dedicated server: it plays its operator's game, not the one searched for */
 	if (game->dedicated)
-		return 0;
+		return wanted->big && !game->kind && (!wanted->region[0] || !strcasecmp(game->region, wanted->region));
 	if (game->ping < 0 || game->ping >= P2P_LOBBY_PICK_PING)
 		return 0;
 	return 1;
@@ -1216,10 +1243,14 @@ int p2p_lobby_pick(const struct p2p_listing *games, int count, const struct p2p_
 	{
 		const struct p2p_listing *game = &games[index];
 
+		int preferred = wanted->big && !game->dedicated == !wanted->region[0];
+		int best_preferred = best >= 0 && wanted->big && !games[best].dedicated == !wanted->region[0];
+
 		if (!pick_fits(game, wanted))
 			continue;
-		if (best < 0 || game->player_count > games[best].player_count ||
-			(game->player_count == games[best].player_count && game->ping < games[best].ping))
+		if (best < 0 || preferred > best_preferred ||
+			(preferred == best_preferred && (game->player_count > games[best].player_count ||
+				(game->player_count == games[best].player_count && game->ping < games[best].ping))))
 		{
 			best = index;
 		}
@@ -1235,7 +1266,7 @@ int p2p_lobby_pick_unpinged(const struct p2p_listing *games, int count, const st
 	{
 		struct p2p_listing timed;
 
-		if (games[index].ping >= 0)
+		if (games[index].ping >= 0 || games[index].dedicated)
 			continue;
 		timed = games[index];
 		timed.ping = 0;

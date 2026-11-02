@@ -23,7 +23,8 @@ def generated(fault=None):
     return (('enums.inc', enums), ('under_test.inc', code))
 
 
-CASES = ['e1_fits', 'e2_most_players', 'e3_passed_over', 'e51_e56_dedicated']
+CASES = ['e1_fits', 'e2_most_players', 'e3_passed_over', 'e51_e56_dedicated', 'e31_big', 'e46_region_first',
+         'e52_e57_region_only', 'e53_e58_no_region', 'e55_empty_dedicated', 'e54_no_masters', 'small_unchanged']
 
 
 @pytest.mark.parametrize('case', CASES)
@@ -38,6 +39,9 @@ def test_case(case):
     (('game->ping >= P2P_LOBBY_PICK_PING', 'game->ping > P2P_LOBBY_PICK_PING'), 'e3_passed_over'),
     (('if (game->dedicated)', 'if (0)'), 'e51_e56_dedicated'),
     (('!game->has_teams != !wanted->teams', '0'), 'e3_passed_over'),
+    (('!wanted->region[0] || !strcasecmp(game->region, wanted->region)', '1'), 'e52_e57_region_only'),
+    (('preferred > best_preferred', 'preferred < best_preferred'), 'e53_e58_no_region'),
+    (('!game->player_count && !(wanted->big && game->dedicated)', '!game->player_count'), 'e55_empty_dedicated'),
 ])
 def test_negative_control(fault, case):
     status, output = run(build('matchmaking_pick', generated(fault)), case)

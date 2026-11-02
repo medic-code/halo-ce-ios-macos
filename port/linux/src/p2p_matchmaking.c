@@ -2,6 +2,7 @@
 
 #include "p2p_matchmaking.h"
 #include "halo_port_limits.h"
+#include "master_list.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -13,7 +14,7 @@ void platform_log(const char *format, ...);
 static const char record_label[] = "hceu-mm-1";
 
 const char *const p2p_mm_playlist_names[NUMBER_OF_P2P_MM_PLAYLISTS] = { "slayer", "ctf", "king", "oddball", "race" };
-const char *const p2p_mm_size_names[NUMBER_OF_P2P_MM_SIZES] = { "1v1", "2v2", "3v3", "4v4", "ffa6" };
+const char *const p2p_mm_size_names[NUMBER_OF_P2P_MM_SIZES] = { "1v1", "2v2", "3v3", "4v4", "ffa6", "big-team", "big-ffa" };
 
 void mm_topic(int playlist, int size, char *topic, int topic_size)
 {
@@ -286,9 +287,14 @@ int mm_elect(const struct mm_unit *units, const int *pool, int pool_count)
 
 int p2p_mm_size_players(int size)
 {
-	static const int players[NUMBER_OF_P2P_MM_SIZES] = { 2, 4, 6, 8, 6 };
+	static const int players[NUMBER_OF_P2P_MM_SIZES] = { 2, 4, 6, 8, 6, 16, 16 };
 
 	return players[size];
+}
+
+int p2p_mm_size_big(int size)
+{
+	return size >= P2P_MM_BIG_TEAM;
 }
 
 /* each playlist's game engine (a listing's engine_type) */
@@ -308,7 +314,9 @@ void mm_wanted(const struct mm_search *search, int queue, struct p2p_lobby_wante
 		wanted->engines |= 1u << engines[playlist];
 	}
 	wanted->players = p2p_mm_size_players(queue_size);
-	wanted->teams = queue_size != P2P_MM_FFA_6;
+	wanted->teams = queue_size != P2P_MM_FFA_6 && queue_size != P2P_MM_BIG_FFA;
+	wanted->big = p2p_mm_size_big(queue_size);
+	snprintf(wanted->region, sizeof(wanted->region), "%s", search->choice.region);
 }
 
 int mm_counted(const struct mm_peer *peer)
@@ -727,6 +735,7 @@ static int pick_game(struct mm_search *search, unsigned long now, struct mm_out 
 			continue;
 		mm_wanted(search, queue, &wanted);
 		waiting += p2p_lobby_pick_unpinged(games, count, &wanted);
+		waiting += wanted.big && !p2p_lobby_masters_were_heard();
 		found = p2p_lobby_pick(games, count, &wanted);
 		if (found < 0)
 			continue;
@@ -775,6 +784,7 @@ static int pick_game(struct mm_search *search, unsigned long now, struct mm_out 
 	search->joining_players = games[index].player_count + 1;
 	search->joining_most_players = games[index].maximum_player_count;
 	search->joining_ping = games[index].ping;
+	snprintf(search->joining_region, sizeof(search->joining_region), "%s", games[index].dedicated ? games[index].region : "");
 	search->state = P2P_MM_FOUND;
 	search->decided = P2P_MM_DECIDE_JOIN;
 	if (looking)
@@ -840,6 +850,7 @@ static int join(struct mm_search *search, unsigned long now, struct mm_out *out,
 	search->joining_players = best->record.held ? best->record.pool_count + 1 : best->record.players + 1;
 	search->joining_most_players = best->record.most_players;
 	search->joining_ping = -1;
+	search->joining_region[0] = 0;
 	search->state = P2P_MM_FOUND;
 	search->decided = P2P_MM_DECIDE_JOIN;
 	return cancel_except(search, best->playlist, best->size, out, out_size);
@@ -1231,6 +1242,7 @@ void p2p_mm_search(const struct p2p_mm_choice *choice)
 	if (mm.search.state != P2P_MM_OFF)
 		cancel_search();
 	mm.in_game = 0;
+	p2p_lobby_masters_forget();
 	mm_start(&mm.search, p2p_signing_seed(), choice, p2p_now(), (unsigned long)time(NULL));
 	mm.notice = P2P_MM_NOTICE_NONE;
 	{
@@ -1240,6 +1252,8 @@ void p2p_mm_search(const struct p2p_mm_choice *choice)
 	}
 	hold_browser();
 	pthread_mutex_unlock(&p2p_lock);
+	if (choice->size >= P2P_MM_BIG_TEAM)
+		master_list_refresh();
 	p2p_lobby_browse(1);
 }
 
@@ -1420,6 +1434,7 @@ void p2p_mm_get_status(struct p2p_mm_status *status)
 			status->players = status->hosts ? search->players : search->joining_players;
 			status->most_players = status->hosts ? search->most_players : search->joining_most_players;
 			status->ping = status->hosts ? -1 : search->joining_ping;
+			memcpy(status->region, search->joining_region, sizeof(status->region));
 		}
 		status->notice = mm.notice = notice_after(mm.notice, search->state);
 	}

@@ -5534,7 +5534,7 @@ enum
 enum
 {
 	_matchmaking_help_size,
-	_matchmaking_help_no_ffa = _matchmaking_help_size + NUMBER_OF_P2P_MM_SIZES,
+	_matchmaking_help_no_ffa = _matchmaking_help_size + NUMBER_OF_P2P_MM_SMALL_SIZES,
 	_matchmaking_help_playlist,
 	_matchmaking_help_search = _matchmaking_help_playlist + NUMBER_OF_P2P_MM_PLAYLISTS,
 	_matchmaking_help_none = _matchmaking_help_search + MATCHMAKING_ONE_PLAYER + 1,
@@ -5614,9 +5614,9 @@ static boolean matchmaking_screen_load(struct widget_instance *widget, boolean d
 	setting_text("network.matchmaking_playlists", text, sizeof(text), defaults);
 	setting_text("network.matchmaking_size", size_text, sizeof(size_text), defaults);
 	playlists = matchmaking_playlists_read(text);
-	while (size < NUMBER_OF_P2P_MM_SIZES && strcmp(size_text, p2p_mm_size_names[size]))
+	while (size < NUMBER_OF_P2P_MM_SMALL_SIZES && strcmp(size_text, p2p_mm_size_names[size]))
 		size++;
-	size = matchmaking_size_after(playlists, size < NUMBER_OF_P2P_MM_SIZES ? size : P2P_MM_2V2);
+	size = matchmaking_size_after(playlists, size < NUMBER_OF_P2P_MM_SMALL_SIZES ? size : P2P_MM_2V2);
 	matchmaking_screen_show(widget, playlists, size);
 	if (!defaults)
 	{
@@ -5648,7 +5648,7 @@ static void matchmaking_screen_update(struct widget_instance *list)
 		if (playlist && playlist->parameters.list.selected_index)
 			playlists |= 1u << index;
 	}
-	shown = (short)PIN(spinner->parameters.list.selected_index, 0, NUMBER_OF_P2P_MM_SIZES - 1);
+	shown = (short)PIN(spinner->parameters.list.selected_index, 0, NUMBER_OF_P2P_MM_SMALL_SIZES - 1);
 	size = mm_playlist_has_size(playlists, shown) ? shown :
 		matchmaking_size_after(playlists, matchmaking_screen.size);
 	if (list->focused_child != spinner->parent)
@@ -5713,6 +5713,7 @@ static boolean matchmaking_screen_search(void)
 		return FALSE;
 	choice.playlists = matchmaking_screen.playlists;
 	choice.size = matchmaking_screen.size;
+	snprintf(choice.region, sizeof(choice.region), "%s", config_string("network.matchmaking_region"));
 	p2p_mm_search(&choice);
 	ui_play_audio_feedback_sound(SOUND_FORWARD);
 	return TRUE;
@@ -5728,14 +5729,14 @@ static boolean matchmaking_screen_back(struct widget_instance *widget, boolean *
 
 static wchar_t const *const matchmaking_playlist_words[NUMBER_OF_P2P_MM_PLAYLISTS] =
 	{ L"SLAYER", L"CTF", L"KING OF THE HILL", L"ODDBALL", L"RACE" };
-static wchar_t const *const matchmaking_size_words[NUMBER_OF_P2P_MM_SIZES] =
+static wchar_t const *const matchmaking_size_words[NUMBER_OF_P2P_MM_SMALL_SIZES] =
 	{ L"1V1", L"2V2", L"3V3", L"4V4", L"FFA 6" };
 
 static void matchmaking_lines(const struct p2p_mm_status *status, wchar_t *title, wchar_t *count, wchar_t *help,
 	wchar_t *notice, short size)
 {
 	wchar_t const *playlist = matchmaking_playlist_words[PIN(status->playlist, 0, NUMBER_OF_P2P_MM_PLAYLISTS - 1)];
-	wchar_t const *game_size = matchmaking_size_words[PIN(status->size, 0, NUMBER_OF_P2P_MM_SIZES - 1)];
+	wchar_t const *game_size = matchmaking_size_words[PIN(status->size, 0, NUMBER_OF_P2P_MM_SMALL_SIZES - 1)];
 	int missing = status->needed - status->count;
 
 	title[0] = count[0] = help[0] = notice[0] = 0;

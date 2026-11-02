@@ -359,22 +359,38 @@ def platform_flags():
     return flags
 
 
+def lobby_check(tmp_path, fault=None):
+    flags = platform_flags()
+    lobby = Path("port/linux/src/p2p_lobby.c").read_text()
+    if fault:
+        assert lobby.count(fault[0]) == 1, fault[0]
+        lobby = lobby.replace(*fault)
+    (tmp_path / "p2p_lobby.c").write_text(lobby)
+    program = tmp_path / "p2p_lobby_check"
+    built = subprocess.run(["clang", *flags, "-O1", "-no-pie", "-Wl,--unresolved-symbols=ignore-all", "-o",
+                            str(program), "tools/p2p_lobby_check.c", "port/linux/src/p2p_crypto.c",
+                            "-Iport/linux/src", str(tmp_path / "p2p_lobby.c"), "port/third_party/monocypher/monocypher.c",
+                            "port/third_party/monocypher/monocypher-ed25519.c"],
+                           capture_output=True, text=True)
+    assert built.returncode == 0, built.stderr[-4000:]
+    return subprocess.run([str(program)], capture_output=True, text=True, timeout=60)
+
+
 @linux_host_only
 def test_p2p_signatures_and_listings(tmp_path):
     """internet play's Ed25519 (RFC 8032), the X25519 key of a seed, and the
     server browser's listings from host to browser (tools/p2p_lobby_check.c),
     built with the flags ninja gives the platform layer"""
-    flags = platform_flags()
-    program = tmp_path / "p2p_lobby_check"
-    built = subprocess.run(["clang", *flags, "-O1", "-no-pie", "-Wl,--unresolved-symbols=ignore-all", "-o",
-                            str(program), "tools/p2p_lobby_check.c", "port/linux/src/p2p_crypto.c",
-                            "port/linux/src/p2p_lobby.c", "port/third_party/monocypher/monocypher.c",
-                            "port/third_party/monocypher/monocypher-ed25519.c"],
-                           capture_output=True, text=True)
-    assert built.returncode == 0, built.stderr[-4000:]
-    result = subprocess.run([str(program)], capture_output=True, text=True, timeout=60)
+    result = lobby_check(tmp_path)
     assert result.returncode == 0, result.stdout
     assert "PASS" in result.stdout
+
+
+@linux_host_only
+def test_p2p_masters_heard_needs_an_answer(tmp_path):
+    result = lobby_check(tmp_path, ("lobby.games[index].listing.master_count = 0;",
+                                    "lobby.games[index].listing.master_count = 0; masters_answered = 1;"))
+    assert result.returncode != 0 and "FAIL" in result.stdout
 
 
 MATCHMAKING_SOURCES = ["port/linux/src/p2p_crypto.c", "port/third_party/monocypher/monocypher.c",
@@ -383,12 +399,13 @@ MATCHMAKING_SOURCES = ["port/linux/src/p2p_crypto.c", "port/third_party/monocyph
 
 def matchmaking_check(tmp_path, fault=None, *arguments):
     source = Path("port/linux/src/p2p_matchmaking.c").read_text()
+    lobby = read("port/linux/src/p2p_lobby.c")
     if fault:
-        assert source.count(fault[0]) == 1, fault[0]
+        assert source.count(fault[0]) + lobby.count(fault[0]) == 1, fault[0]
         source = source.replace(*fault)
+        lobby = lobby.replace(*fault)
     copy = tmp_path / "p2p_matchmaking.c"
     copy.write_text(source)
-    lobby = read("port/linux/src/p2p_lobby.c")
     (tmp_path / "lobby_pick.inc").write_text("\n".join(function(lobby, name) for name in
                                                       ("pick_fits", "p2p_lobby_pick", "p2p_lobby_pick_unpinged")))
     program = tmp_path / "p2p_matchmaking_check"
