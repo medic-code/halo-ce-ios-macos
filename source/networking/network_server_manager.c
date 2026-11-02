@@ -5285,8 +5285,10 @@ static boolean network_game_server_idle_pregame_tasks(
 
 		/* port: the gametype's auto team balance (game_variant_options):
 		the lobby's teams kept within a player of each other, the bigger
-		team's last player moved */
-		if (server->game.variant.universal_variant.teams && server->game.variant_options.auto_team_balance)
+		team's last player moved (a matchmade game's teams are the host's,
+		and it places each party whole) */
+		if (server->game.variant.universal_variant.teams && server->game.variant_options.auto_team_balance &&
+			!matchmaking_teams_locked())
 		{
 			for (;;)
 			{
