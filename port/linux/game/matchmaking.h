@@ -10,6 +10,9 @@ The game side of a MATCHMAKING search (matchmaking.c).
 #include "cseries.h"
 
 void matchmaking_update(float seconds);
+void matchmaking_party_name_update(void);
+/* menu_functions.c's */
+void matchmaking_party_name_utf8(wchar_t const *wide, char *text, short size);
 boolean matchmaking_game_locked(void);
 boolean matchmaking_teams_locked(void);
 struct network_game;

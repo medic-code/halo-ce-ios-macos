@@ -25,6 +25,7 @@ def generated(fault=None):
                       function(source, 'machine_party'),
                       function(source, 'party_team'),
                       function(source, 'matchmaking_team'),
+                      function(read('port/linux/game/menu_functions.c'), 'matchmaking_party_name_utf8'),
                       function(source, 'player_named'),
                       function(source, 'leader_team'),
                       function(read('port/linux/src/p2p_matchmaking.c'), 'p2p_mm_size_big'),
