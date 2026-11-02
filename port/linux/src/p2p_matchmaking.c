@@ -55,7 +55,7 @@ int mm_interval(int queues)
 	return (queues * 10 + MM_RECORDS_PER_SECOND - 1) / MM_RECORDS_PER_SECOND;
 }
 
-static void put_long(unsigned char *bytes, unsigned long value)
+void mm_put_long(unsigned char *bytes, unsigned long value)
 {
 	bytes[0] = (unsigned char)(value >> 24);
 	bytes[1] = (unsigned char)(value >> 16);
@@ -63,7 +63,7 @@ static void put_long(unsigned char *bytes, unsigned long value)
 	bytes[3] = (unsigned char)value;
 }
 
-static unsigned long get_long(const unsigned char *bytes)
+unsigned long mm_get_long(const unsigned char *bytes)
 {
 	return (unsigned long)bytes[0] << 24 | (unsigned long)bytes[1] << 16 | (unsigned long)bytes[2] << 8 | bytes[3];
 }
@@ -144,7 +144,7 @@ int mm_record_write(const struct mm_record *record, const unsigned char *seed, u
 	bytes[at++] = (unsigned char)(record->network_version >> 8);
 	bytes[at++] = (unsigned char)record->network_version;
 	bytes[at++] = (unsigned char)record->kind;
-	put_long(bytes + at, record->sequence);
+	mm_put_long(bytes + at, record->sequence);
 	at += 4;
 	bytes[at++] = (unsigned char)record->interval;
 	bytes[at++] = (unsigned char)((record->can_host ? MM_FLAG_CAN_HOST : 0) |
@@ -203,7 +203,7 @@ int mm_record_read(const unsigned char *bytes, int size, struct mm_record *recor
 	record->party = 1;
 	record->network_version = (unsigned short)(bytes[3] << 8 | bytes[4]);
 	record->kind = bytes[5];
-	record->sequence = get_long(bytes + 6);
+	record->sequence = mm_get_long(bytes + 6);
 	record->interval = bytes[10];
 	record->can_host = (bytes[11] & MM_FLAG_CAN_HOST) != 0;
 	record->under_way = (bytes[11] & MM_FLAG_UNDER_WAY) != 0;
@@ -1218,7 +1218,7 @@ static int record_stale(const struct queued *queued)
 		if (peer->used && peer->playlist == queued->bytes[12] && peer->size == queued->bytes[13] &&
 			!memcmp(peer->record.key, queued->bytes + 14, P2P_KEY_SIZE))
 		{
-			return get_long(queued->bytes + 6) <= peer->record.sequence;
+			return mm_get_long(queued->bytes + 6) <= peer->record.sequence;
 		}
 	}
 	return 0;

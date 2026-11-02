@@ -17,7 +17,6 @@ enum
 {
 	PARTY_INTERVAL = 3000,
 	PARTY_EXPIRY = 10000,
-	/* a record's kind, its key and its sequence */
 	PARTY_HEADER_SIZE = 1 + P2P_KEY_SIZE + 4,
 	PARTY_MEMBER_RECORD = 1,
 	PARTY_LEADER_RECORD,
@@ -31,29 +30,7 @@ enum
 
 static int elapsed(unsigned long since, unsigned long now, unsigned long time)
 {
-	/* (unsigned, as the clock wraps) */
 	return (unsigned int)(now - since) >= (unsigned int)time;
-}
-
-static void put_long(unsigned char *bytes, unsigned long value)
-{
-	bytes[0] = (unsigned char)(value >> 24);
-	bytes[1] = (unsigned char)(value >> 16);
-	bytes[2] = (unsigned char)(value >> 8);
-	bytes[3] = (unsigned char)value;
-}
-
-static unsigned long get_long(const unsigned char *bytes)
-{
-	return (unsigned long)bytes[0] << 24 | (unsigned long)bytes[1] << 16 | (unsigned long)bytes[2] << 8 | bytes[3];
-}
-
-static void hash_of(const unsigned char *key, unsigned char *hash)
-{
-	unsigned char digest[P2P_SHA256_SIZE];
-
-	p2p_sha256(key, P2P_KEY_SIZE, digest);
-	memcpy(hash, digest, P2P_KEY_HASH_SIZE);
 }
 
 static struct mm_party_member *find_member(struct mm_party *party, const unsigned char *hash)
@@ -98,16 +75,15 @@ static void add_member(struct mm_party *party, const unsigned char *key)
 
 	memset(member, 0, sizeof(*member));
 	memcpy(member->key, key, P2P_KEY_SIZE);
-	hash_of(key, member->hash);
+	p2p_key_hash(key, member->hash);
 }
 
-/* (the sequence stays, so a machine's records rise from one party to the next) */
 static void begin_party(struct mm_party *party, const unsigned char *seed, int role, const unsigned char *leader,
 	unsigned long now)
 {
 	memcpy(party->seed, seed, P2P_SEED_SIZE);
 	p2p_ed25519_public(seed, party->key, NULL);
-	hash_of(party->key, party->hash);
+	p2p_key_hash(party->key, party->hash);
 	party->role = role;
 	party->count = 0;
 	add_member(party, leader);
@@ -126,7 +102,6 @@ void mm_party_make(struct mm_party *party, const unsigned char *seed, const unsi
 	set_secret(party, secret);
 }
 
-/* secret, then the leader's key */
 static int link_read(const char *text, unsigned char *bytes)
 {
 	const size_t length = sizeof(link_prefix) - 1;
@@ -191,7 +166,7 @@ static int record_start(struct mm_party *party, int kind, unsigned char *plain)
 {
 	plain[0] = (unsigned char)kind;
 	memcpy(plain + 1, party->key, P2P_KEY_SIZE);
-	put_long(plain + 1 + P2P_KEY_SIZE, ++party->sequence);
+	mm_put_long(plain + 1 + P2P_KEY_SIZE, ++party->sequence);
 	return PARTY_HEADER_SIZE;
 }
 
@@ -374,14 +349,14 @@ int mm_party_read(struct mm_party *party, const unsigned char *payload, int size
 	body_size = record->size - PARTY_HEADER_SIZE;
 	record->kind = record->plain[0];
 	record->key = record->plain + 1;
-	record->sequence = get_long(record->plain + 1 + P2P_KEY_SIZE);
+	record->sequence = mm_get_long(record->plain + 1 + P2P_KEY_SIZE);
 	record->body = body;
 	memcpy(record->seal, party->seal, sizeof(record->seal));
 	if (!memcmp(record->key, party->key, P2P_KEY_SIZE))
 		return 0;
 	if (record->kind == PARTY_MEMBER_RECORD)
 	{
-		hash_of(record->key, hash);
+		p2p_key_hash(record->key, hash);
 		return body_size == P2P_PARTY_NAME_SIZE + 1 && !member_record_stale(party, hash, record->sequence);
 	}
 	if (party->role != MM_PARTY_MEMBER || memcmp(record->key, party->members[0].key, P2P_KEY_SIZE) ||
@@ -416,7 +391,7 @@ static void heard_member(struct mm_party *party, const struct mm_party_record *r
 	unsigned char hash[P2P_KEY_HASH_SIZE];
 	struct mm_party_member *member;
 
-	hash_of(record->key, hash);
+	p2p_key_hash(record->key, hash);
 	member = find_member(party, hash);
 	if (record->body[P2P_PARTY_NAME_SIZE] & PARTY_FLAG_LEAVING)
 	{
@@ -603,10 +578,10 @@ void p2p_party_update(void)
 	while (local.queue_count && !elapsed(started, p2p_now(), VERIFY_BUDGET))
 	{
 		struct mm_party_record record;
-		int read = mm_party_read(&local.party, local.queue[0].bytes, local.queue[0].size, &record), good;
+		int opened = mm_party_read(&local.party, local.queue[0].bytes, local.queue[0].size, &record), good;
 
 		memmove(local.queue, local.queue + 1, sizeof(*local.queue) * (size_t)(--local.queue_count));
-		if (!read)
+		if (!opened)
 			continue;
 		pthread_mutex_unlock(&p2p_lock);
 		good = mm_party_verify(&record);
@@ -625,11 +600,6 @@ void p2p_party_update(void)
 	}
 	sync_topic();
 	sync_offer();
-}
-
-int p2p_party_link_held(const char *text)
-{
-	return mm_party_link_held(text);
 }
 
 int p2p_party_can_join(const char *text)
