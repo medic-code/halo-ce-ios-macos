@@ -258,6 +258,8 @@ struct mm_party
 	struct mm_party_search search;
 	/* a member's: the leader's record has been heard; the numbers it had then or has since acted on */
 	int search_heard, left_number, followed_game, left_seen;
+	/* a member's: that first record was already searching, without it */
+	int late;
 	int in_game, can_host;
 	/* the leader's: since when members have had to follow */
 	unsigned long follow_since;

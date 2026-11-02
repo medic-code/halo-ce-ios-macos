@@ -3092,6 +3092,76 @@ static void check_e75_member_keeps_hosting(void)
 		member->state);
 }
 
+static void check_party_flags(void)
+{
+	static const unsigned char secret[P2P_PARTY_SECRET_SIZE] = { 8 };
+	static struct mm_search search;
+	struct p2p_mm_choice choice = { 1u << P2P_MM_SLAYER, P2P_MM_2V2 };
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+	int size;
+
+	case_name = "party flags";
+	memset(parties, 0, sizeof(parties));
+	memset(&search, 0, sizeof(search));
+	party_machines = 0;
+	party_now = 2000000;
+	strcpy(parties[0].name, "CHIEF");
+	strcpy(parties[1].name, "KAT");
+	party_seed(0, seed);
+	mm_party_make(&parties[0], seed, secret, party_now);
+	mm_start(&search, seed, &choice, party_now, 1);
+	party_seed(1, seed);
+	mm_party_join(&parties[1], seed, parties[0].link, party_now);
+	parties[1].sent = party_now - 3000;
+	size = mm_party_step(&parties[1], party_now, bytes);
+	party_send(1, parties[0].topic, bytes, size);
+	CHECK(parties[0].count == 2, "the leader lists KAT");
+	mm_party_search_begin(&parties[0], &search, party_now);
+	CHECK(parties[0].members[1].searching, "the search counts KAT");
+	parties[0].sent = party_now - 3000;
+	size = mm_party_step(&parties[0], party_now, bytes);
+	party_send(2, parties[1].topic, bytes, size);
+	party_now += 3000;
+	size = mm_party_step(&parties[1], party_now, bytes);
+	party_send(1, parties[0].topic, bytes, size);
+	CHECK(!parties[0].notice && !parties[0].members[1].searching, "KAT never had that search: notice %d",
+		parties[0].notice);
+
+	mm_party_search_begin(&parties[0], &search, party_now);
+	parties[0].sent = party_now - 3000;
+	size = mm_party_step(&parties[0], party_now, bytes);
+	party_send(2, parties[1].topic, bytes, size);
+	mm_party_search_left(&parties[1], party_now);
+	size = mm_party_step(&parties[1], party_now, bytes);
+	party_send(1, parties[0].topic, bytes, size);
+	CHECK(parties[0].notice == P2P_PARTY_NOTICE_LEFT_SEARCH, "KAT leaving a search it had is told: %d",
+		parties[0].notice);
+
+	memset(&search, 0, sizeof(search));
+	parties[1].sent = party_now;
+	search.in_game = 1;
+	mm_party_search(&parties[1], &search, party_now, 1);
+	CHECK(mm_party_step(&parties[1], party_now, bytes) > 0, "a member's game goes out at once");
+
+	memset(&search, 0, sizeof(search));
+	search.state = P2P_MM_QUEUED;
+	parties[0].members[1].searching = 1;
+	parties[0].members[1].in_game = 1;
+	search.in_game = 1;
+	mm_party_search(&parties[0], &search, party_now, 1);
+	mm_party_search(&parties[0], &search, party_now, 1);
+	search.in_game = 0;
+	mm_party_search(&parties[0], &search, party_now, 1);
+	parties[0].members[1].in_game = 1;
+	search.in_game = 1;
+	mm_party_search(&parties[0], &search, party_now, 1);
+	parties[0].notice = 0;
+	party_now += 21000;
+	mm_party_search(&parties[0], &search, party_now, 1);
+	CHECK(parties[0].notice == P2P_PARTY_NOTICE_COULD_NOT_JOIN, "a second game asks again of the last one's players: %d",
+		parties[0].notice);
+}
+
 static void check_e76_party_stays_together(void)
 {
 	int waited;
@@ -3685,6 +3755,7 @@ int main(int argc, char **argv)
 	check_party_sealed();
 	check_party_copies();
 	check_party_full();
+	check_party_flags();
 	check_party_machine();
 	check_party_verify_window();
 	check_worlds();
