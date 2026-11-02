@@ -975,6 +975,14 @@ static void game_side(int index)
 
 	memset(token, index + 1, sizeof(token));
 	machine->search.decision.kind = P2P_MM_DECIDE_NONE;
+	if (machine->search.left_game)
+	{
+		machine->search.left_game = 0;
+		if (machine->in >= 0)
+			machines[machine->in].players--;
+		machine->in = -1;
+		machine->hosting = 0;
+	}
 	if (machine->in >= 0 && (machines[machine->in].quit || !machines[machine->in].hosting))
 	{
 		machine->in = -1;
@@ -2950,6 +2958,34 @@ static void check_e25_follow_big(void)
 	listing_count = 0;
 }
 
+static void check_e29_cannot_follow(void)
+{
+	int joined;
+
+	case_name = "e29_cannot_follow";
+	party_world(3, 4);
+	list_game(3, 2, 8);
+	listings[0].identifier[0] = 9;
+	marked_count = 0;
+	party_start(3, P2P_MM_4V4, 7);
+	fail_join = 2;
+	for (joined = 0; joined < 10 && machines[0].in < 0; joined++)
+		run(1);
+	CHECK(machines[0].in == 3, "the leader joins the listed game");
+	run(4);
+	CHECK(machines[1].in == 3, "one member follows");
+	joined = machines[3].players;
+	run(14);
+	CHECK(machines[0].in == 3 && machines[3].players == joined, "the party waits 20 s");
+	run(3);
+	CHECK(machines[0].in < 0 && machines[1].in < 0 && machines[3].players == 2, "the party leaves it: %d in", machines[3].players);
+	CHECK(marked_count == 1 && listings[0].failed, "marks it FAILED: %d", marked_count);
+	CHECK(parties[0].notice == P2P_PARTY_NOTICE_COULD_NOT_JOIN && !strcmp(parties[0].notice_name, "KAT"),
+		"names who could not: %d %s", parties[0].notice, parties[0].notice_name);
+	CHECK(machines[0].search.state != P2P_MM_OFF && machines[1].search.state == P2P_MM_QUEUED, "searches again");
+	listing_count = 0;
+}
+
 static void check_party_journeys(void)
 {
 	check_e24_leader_cancels();
@@ -2960,6 +2996,7 @@ static void check_party_journeys(void)
 	check_e47_big_strict_leader();
 	check_e25_big_follow_count();
 	check_e25_follow_big();
+	check_e29_cannot_follow();
 }
 
 static void check_party_record_search(void)

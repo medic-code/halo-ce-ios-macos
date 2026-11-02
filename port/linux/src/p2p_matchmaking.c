@@ -505,6 +505,18 @@ void mm_game_lost(struct mm_search *search, unsigned long now)
 		search->state = P2P_MM_QUEUED;
 }
 
+void mm_game_left(struct mm_search *search, unsigned long now)
+{
+	unsigned char game[P2P_KEY_HASH_SIZE];
+
+	memcpy(game, search->joining, sizeof(game));
+	if (search->picked_set)
+		lobby_mark_failed_unlocked(search->picked);
+	mm_game_lost(search, now);
+	memcpy(search->failed_game, game, sizeof(game));
+	search->left_game = 1;
+}
+
 void mm_follow(struct mm_search *search, const unsigned char *seed, const struct p2p_mm_choice *choice,
 	const unsigned char *leader, int players, unsigned long now, unsigned long unix_now)
 {
@@ -633,6 +645,8 @@ void mm_heard(struct mm_search *search, const struct mm_record *record, unsigned
 		peer->refreshes++;
 	if (record->kind == MM_KIND_HOSTING && peer->failed == MM_FAILED_PASSED_OVER)
 		peer->failed = MM_FAILED_NONE;
+	if (record->kind == MM_KIND_HOSTING && !memcmp(record->key_hash, search->failed_game, P2P_KEY_HASH_SIZE))
+		peer->failed = MM_FAILED_GAME_UNJOINABLE;
 }
 
 static void expire(struct mm_search *search, unsigned long now)
@@ -1647,7 +1661,7 @@ void p2p_mm_joined(int ok)
 	{
 		if (!ok && mm.search.picked_set)
 			lobby_mark_failed_unlocked(mm.search.picked);
-		mm.search.picked_set = 0;
+		mm.search.picked_set = mm.search.picked_set && ok;
 		mm_joined(&mm.search, ok, p2p_now());
 		platform_log("matchmaking: %s", ok ? "joined the game" : "could not join the game: back in the queue");
 		if (!ok)
@@ -1691,6 +1705,23 @@ void p2p_mm_game_lost(void)
 	pthread_mutex_unlock(&p2p_lock);
 	if (restarted)
 		browse_for(size);
+}
+
+int p2p_mm_take_left_game(void)
+{
+	int left, restart, size;
+
+	pthread_mutex_lock(&p2p_lock);
+	left = mm.search.left_game;
+	mm.search.left_game = 0;
+	restart = left && !mm.search.party.following;
+	size = mm.search.choice.size;
+	if (restart)
+		hold_browser();
+	pthread_mutex_unlock(&p2p_lock);
+	if (restart)
+		browse_for(size);
+	return left;
 }
 
 int p2p_mm_take_decision(struct p2p_mm_decision *decision)

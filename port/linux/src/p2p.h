@@ -479,6 +479,8 @@ void p2p_mm_game(int players, int most_players, int under_way);
 void p2p_mm_joined(int ok);
 void p2p_mm_game_lost(void);
 int p2p_mm_take_decision(struct p2p_mm_decision *decision);
+/* the party gave up the game this machine is in: the game side is to leave it */
+int p2p_mm_take_left_game(void);
 struct p2p_mm_status
 {
 	int state;
