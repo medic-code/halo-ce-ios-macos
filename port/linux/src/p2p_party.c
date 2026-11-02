@@ -542,6 +542,14 @@ static void heard_leader(struct mm_party *party, const struct mm_party_record *r
 	const unsigned char *hashes = record->body + P2P_PARTY_NAME_SIZE + 1;
 	int old_count = party->count, count = record->body[P2P_PARTY_NAME_SIZE], index, listed;
 
+	for (index = listed = 0; index < count; index++)
+		listed |= !memcmp(hashes + index * P2P_KEY_HASH_SIZE, party->hash, P2P_KEY_HASH_SIZE);
+	if (!listed && count + 1 == P2P_PARTY_MAXIMUM)
+	{
+		set_notice(party, P2P_PARTY_NOTICE_FULL, party->members[0].name);
+		clear_party(party);
+		return;
+	}
 	memcpy(old, party->members, sizeof(old));
 	party->count = 1;
 	for (index = 0; index < count; index++)

@@ -3509,6 +3509,9 @@ static void check_party_full(void)
 	strcpy(parties[8].name, "SIX");
 	party_run(P2P_PARTY_MAXIMUM + 1, 6);
 	CHECK(parties[0].count == P2P_PARTY_MAXIMUM && !party_lists(&parties[0], "SIX"), "a ninth is not taken");
+	CHECK(parties[8].notice == P2P_PARTY_NOTICE_FULL && parties[8].role == MM_PARTY_NONE && !parties[8].topic[0],
+		"the ninth is told and leaves: notice %d role %d", parties[8].notice, parties[8].role);
+	CHECK(parties[1].role == MM_PARTY_MEMBER && !parties[1].notice, "the eight stay");
 	memset(&parties[8], 0, sizeof(parties[8]));
 	strcpy(topic, parties[0].topic);
 	size = mm_party_remove(&parties[0], 7, secret, party_now, bytes);
