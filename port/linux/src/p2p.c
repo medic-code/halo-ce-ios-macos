@@ -2802,8 +2802,11 @@ static int join_invite(const char *text)
 {
 	unsigned char hash[P2P_KEY_HASH_SIZE], host[P2P_IDENTIFIER_SIZE], token[P2P_TOKEN_SIZE];
 	struct peer *peer;
-	int parsed = parse_invite(text, hash, token);
+	int parsed;
 
+	if (p2p_party_link_received(text))
+		return 1;
+	parsed = parse_invite(text, hash, token);
 	if (parsed < 0)
 		platform_log("Internet play: that invite is from an older version of the game, which this one "
 			"cannot join");
@@ -3587,7 +3590,7 @@ static int command_line_invite(char *text, int size)
 	{
 		unsigned char hash[P2P_KEY_HASH_SIZE], token[P2P_TOKEN_SIZE];
 
-		if (parse_invite(text, hash, token))
+		if (parse_invite(text, hash, token) || p2p_party_link_held(text))
 			return 1;
 	}
 	return 0;
