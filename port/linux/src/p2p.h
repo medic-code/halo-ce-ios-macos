@@ -527,6 +527,7 @@ void p2p_party_set_name(const char *name);
 int p2p_party_invite(char *link, int size);
 /* the leader: a member's place in the status, its removal making a new link sent sealed to the rest */
 void p2p_party_remove(int member);
+void p2p_party_leave(void);
 void p2p_party_get_status(struct p2p_party_status *status);
 
 #endif

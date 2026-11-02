@@ -2851,6 +2851,16 @@ static void party_update_locked(void)
 	pthread_mutex_unlock(&p2p_lock);
 }
 
+static int party_link_locked(const char *text)
+{
+	int received;
+
+	pthread_mutex_lock(&p2p_lock);
+	received = p2p_party_link_received(text);
+	pthread_mutex_unlock(&p2p_lock);
+	return received;
+}
+
 static void check_party_machine(void)
 {
 	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
@@ -2892,6 +2902,18 @@ static void check_party_machine(void)
 	p2p_party_remove(1);
 	CHECK(!strcmp(publish_topic, old_topic), "the new link goes out on the old topic");
 	CHECK(strcmp(signal_topic, old_topic) && signal_topic[0], "and then the topic moves");
+
+	memset(&parties[0], 0, sizeof(parties[0]));
+	party_seed(0, seed);
+	mm_party_make(&parties[0], seed, (const unsigned char *)"0123456789abcdef", clock_now);
+	CHECK(!party_link_locked("no link here"), "text with no party link is left for the game's invites");
+	CHECK(party_link_locked(parties[0].link), "a party link joins the party");
+	CHECK(!strcmp(signal_topic, parties[0].topic), "the brokers carry the new party's topic");
+	CHECK(party_link_locked(parties[0].link), "a link for a party this machine is in is still a party link");
+	strcpy(old_topic, signal_topic);
+	p2p_party_leave();
+	CHECK(!strcmp(publish_topic, old_topic) && party_published_size > 0, "the goodbye goes out on the party's topic");
+	CHECK(!signal_topic[0] && !p2p_party_active(), "the machine leaves the topic");
 }
 
 /* under loss two machines can elect themselves at once, so the lossy runs check only the end state */
