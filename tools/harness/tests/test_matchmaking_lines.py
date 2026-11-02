@@ -14,6 +14,7 @@ CASES = ["looking", "queued", "widened", "hosting", "found", "big_looking", "big
 
 NEGATIVE_CONTROLS = {
     "strict-offered-2:00": (("status->can_host > 0 ? L\"%d more", "1 ? L\"%d more"), "queued"),
+    "full-before-pool": (("if (status->count <= 0)\n\t\t\t\tbreak;\n", ""), "queued"),
     "never-widened": (("if (status->widened)", "if (0)"), "widened"),
     "number-without-countdown": (("seconds >= 0", "seconds >= -1"), "lobby"),
     "last-second-lost": (("seconds >= 0", "seconds > 0"), "lobby"),

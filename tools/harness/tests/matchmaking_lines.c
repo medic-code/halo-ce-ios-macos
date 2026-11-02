@@ -55,6 +55,9 @@ int main(int argc, char **argv)
 		status.count = 1;
 		matchmaking_lines(&status, title, count, help, notice, 64);
 		CHECK(!wcscmp(count, L"1 searching"), "E5: alone: %ls", count);
+		status.count = status.needed = 0;
+		matchmaking_lines(&status, title, count, help, notice, 64);
+		CHECK(!help[0], "no pool yet, no line about it: %ls", help);
 	}
 	CASE("widened")
 	{

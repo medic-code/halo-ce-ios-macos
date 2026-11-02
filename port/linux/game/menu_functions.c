@@ -5782,6 +5782,9 @@ static void matchmaking_lines(const struct p2p_mm_status *status, wchar_t *title
 		else
 		{
 			usnprintf(count, size - 1, L"%d searching", status->count);
+			/* a member counts itself out, and has no size until the leader's record arrives */
+			if (status->count <= 0)
+				break;
 			if (missing <= 0)
 				usnprintf(help, size - 1, L"The %ls is full: choosing the host.", game_size);
 			else
