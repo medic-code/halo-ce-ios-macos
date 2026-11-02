@@ -2638,6 +2638,56 @@ static void check_party_leaked_link(void)
 	CHECK(strcmp(parties[1].members[0].name, "FAKE") != 0, "E42: the leader's key without its signature is ignored");
 }
 
+static void check_party_removed(void)
+{
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE], old_record[MM_MAXIMUM_RECORD_SIZE];
+	static const unsigned char secret[P2P_PARTY_SECRET_SIZE] = { 9, 8, 7 };
+	char old_topic[P2P_PARTY_TOPIC_SIZE], old_link[P2P_PARTY_LINK_SIZE];
+	struct mm_party mallory, copy;
+	int size, old_size;
+
+	case_name = "e50_removed";
+	party_form(3);
+	strcpy(old_topic, parties[0].topic);
+	strcpy(old_link, parties[0].link);
+	copy = parties[2];
+	copy.sent = party_now - 3000;
+	old_size = mm_party_step(&copy, party_now, old_record);
+	mallory = parties[1];
+	party_seed(8, mallory.seed);
+	CHECK(mm_party_remove(&parties[1], 1, secret, party_now, bytes) == 0, "a member removes nobody");
+	CHECK(mm_party_remove(&parties[0], 0, secret, party_now, bytes) == 0, "the leader stays");
+	CHECK(mm_party_remove(&parties[0], 3, secret, party_now, bytes) == 0, "a place past the list");
+	CHECK(!strcmp(parties[0].members[2].name, "KAT"), "%s", parties[0].members[2].name);
+	size = mm_party_remove(&parties[0], 2, secret, party_now, bytes);
+	CHECK(size > 0 && size <= MM_MAXIMUM_RECORD_SIZE, "a new link's record: %d bytes", size);
+	CHECK(strcmp(parties[0].topic, old_topic) && strcmp(parties[0].link, old_link), "the leader has a new link");
+	party_send(3, old_topic, bytes, size);
+	CHECK(parties[2].role == MM_PARTY_NONE && !parties[2].topic[0], "E50: Kat is out of the party");
+	CHECK(parties[2].notice == P2P_PARTY_NOTICE_REMOVED && !strcmp(parties[2].notice_name, "CHIEF"),
+		"E50: CHIEF REMOVED YOU: %d %s", parties[2].notice, parties[2].notice_name);
+	CHECK(!strcmp(parties[1].topic, parties[0].topic), "E50: Rook moves to the new topic");
+	{
+		struct mm_party_record record;
+
+		CHECK(mm_party_read(&mallory, bytes, size, &record) && mm_party_verify(&record), "the record reads on the old topic");
+		mm_party_heard(&mallory, &record, party_now);
+		CHECK(!strcmp(mallory.topic, old_topic), "E50: the new secret opens for its member alone");
+	}
+	party_send(3, parties[0].topic, old_record, old_size);
+	party_send(3, old_topic, old_record, old_size);
+	party_run(2, 6);
+	CHECK(parties[0].count == 2 && !party_lists(&parties[0], "KAT") && !party_lists(&parties[1], "KAT"),
+		"E50: Kat's record on the old topic reaches nobody's list");
+	CHECK(parties[1].notice == P2P_PARTY_NOTICE_LEFT && !strcmp(parties[1].notice_name, "KAT"), "Rook is told");
+	party_seed(2, seed);
+	CHECK(mm_party_join(&parties[2], seed, old_link, party_now), "Kat opens the old link again");
+	party_run(3, 6);
+	CHECK(parties[0].count == 2 && !party_lists(&parties[0], "KAT"), "E50: the old link reaches nobody");
+	party_run(3, 16);
+	CHECK(parties[2].role == MM_PARTY_NONE && parties[2].notice == P2P_PARTY_NOTICE_ENDED, "a link nobody answers ends");
+}
+
 static void check_party_leaves(void)
 {
 	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE], late[MM_MAXIMUM_RECORD_SIZE];
@@ -2743,7 +2793,9 @@ static void check_party_copies(void)
 static void check_party_full(void)
 {
 	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE], seed[P2P_SEED_SIZE];
-	int size;
+	static const unsigned char secret[P2P_PARTY_SECRET_SIZE] = { 5 };
+	char topic[P2P_PARTY_TOPIC_SIZE];
+	int index, size;
 
 	case_name = "party full";
 	party_form(P2P_PARTY_MAXIMUM);
@@ -2762,6 +2814,14 @@ static void check_party_full(void)
 	strcpy(parties[8].name, "SIX");
 	party_run(P2P_PARTY_MAXIMUM + 1, 6);
 	CHECK(parties[0].count == P2P_PARTY_MAXIMUM && !party_lists(&parties[0], "SIX"), "a ninth is not taken");
+	memset(&parties[8], 0, sizeof(parties[8]));
+	strcpy(topic, parties[0].topic);
+	size = mm_party_remove(&parties[0], 7, secret, party_now, bytes);
+	CHECK(size > 0 && size <= MM_MAXIMUM_RECORD_SIZE, "a full party's new link fits: %d bytes", size);
+	party_send(P2P_PARTY_MAXIMUM, topic, bytes, size);
+	for (index = 1; index < P2P_PARTY_MAXIMUM; index++)
+		if (parties[index].role != MM_PARTY_NONE)
+			CHECK(!strcmp(parties[index].topic, parties[0].topic), "member %d moves", index);
 }
 
 /* under loss two machines can elect themselves at once, so the lossy runs check only the end state */
@@ -2795,6 +2855,7 @@ int main(int argc, char **argv)
 	check_party_link();
 	check_party_status();
 	check_party_leaked_link();
+	check_party_removed();
 	check_party_leaves();
 	check_party_expiry();
 	check_party_sealed();
