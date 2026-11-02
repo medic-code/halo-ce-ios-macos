@@ -387,6 +387,8 @@ void p2p_mm_heard(const unsigned char *payload, int size);
 void p2p_signal_party_topic(const char *topic);
 void p2p_signal_party_publish(const unsigned char *payload, int size);
 void p2p_party_heard(const unsigned char *payload, int size);
+int p2p_party_active(void);
+void p2p_party_update(unsigned long now);
 int p2p_mm_active(void);
 /* call under p2p_lock */
 int p2p_mm_hosts_big_game(void);

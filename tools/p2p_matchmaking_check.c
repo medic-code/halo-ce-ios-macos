@@ -16,7 +16,12 @@ pthread_mutex_t p2p_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static unsigned long clock_now = 1800000000UL;
 
-void posix_random_bytes(void *buffer, unsigned long size) { memset(buffer, 0x5a, size); }
+void posix_random_bytes(void *buffer, unsigned long size)
+{
+	static unsigned char next = 0x5a;
+
+	memset(buffer, next++, size);
+}
 unsigned long p2p_now(void) { return clock_now; }
 int config_boolean(const char *name) { (void)name; return 1; }
 void platform_log(const char *format, ...) { (void)format; }
@@ -55,6 +60,20 @@ const unsigned char *p2p_signing_key(void)
 	return run_key;
 }
 void p2p_signal_mm_topics(const char topics[][P2P_MM_TOPIC_SIZE], int count) { (void)topics; (void)count; }
+
+static char signal_topic[P2P_PARTY_TOPIC_SIZE], publish_topic[P2P_PARTY_TOPIC_SIZE];
+static char clipboard[P2P_PARTY_LINK_SIZE];
+static unsigned char party_published[MM_MAXIMUM_RECORD_SIZE];
+static int party_published_size;
+
+void p2p_signal_party_topic(const char *topic) { strcpy(signal_topic, topic); }
+void p2p_signal_party_publish(const unsigned char *payload, int size)
+{
+	strcpy(publish_topic, signal_topic);
+	memcpy(party_published, payload, (size_t)size);
+	party_published_size = size;
+}
+void platform_clipboard_set(const char *text) { strcpy(clipboard, text); }
 
 static struct p2p_listing listings[8];
 static int listing_count, browsing, browse_calls;
@@ -2824,6 +2843,57 @@ static void check_party_full(void)
 			CHECK(!strcmp(parties[index].topic, parties[0].topic), "member %d moves", index);
 }
 
+/* as the p2p thread calls them */
+static void party_update_locked(void)
+{
+	pthread_mutex_lock(&p2p_lock);
+	p2p_party_update(clock_now);
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+static void check_party_machine(void)
+{
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+	char link[P2P_PARTY_LINK_SIZE], old_topic[P2P_PARTY_TOPIC_SIZE];
+	struct p2p_party_status status;
+	int size;
+
+	case_name = "party machine";
+	CHECK(!p2p_party_active(), "no party yet");
+	p2p_party_set_name("CHIEF");
+	CHECK(!p2p_party_invite(link, 8), "a link needs its room");
+	CHECK(p2p_party_invite(link, sizeof(link)) && p2p_party_active(), "INVITE makes a party");
+	CHECK(!strcmp(clipboard, link), "INVITE puts the link on the clipboard");
+	CHECK(signal_topic[0], "the brokers carry the party's topic");
+	party_update_locked();
+	CHECK(party_published_size > 0, "the leader publishes");
+
+	memset(parties, 0, sizeof(parties));
+	party_seed(1, seed);
+	strcpy(parties[1].name, "ROOK");
+	CHECK(mm_party_join(&parties[1], seed, link, clock_now), "Rook holds the link");
+	parties[1].sent = clock_now - 3000;
+	size = mm_party_step(&parties[1], clock_now, bytes);
+	p2p_party_heard(bytes, 0);
+	p2p_party_heard(bytes, MM_MAXIMUM_RECORD_SIZE + 1);
+	p2p_party_get_status(&status);
+	CHECK(status.count == 1, "nothing is taken before its turn");
+	party_update_locked();
+	p2p_party_get_status(&status);
+	CHECK(status.count == 1, "sizes outside a record are dropped");
+	p2p_party_heard(bytes, size);
+	p2p_party_heard(bytes, size);
+	party_update_locked();
+	p2p_party_get_status(&status);
+	CHECK(status.count == 2 && !strcmp(status.members[1].name, "ROOK"), "a heard member joins: %d", status.count);
+	CHECK(!strcmp(status.members[0].name, "CHIEF") && status.members[0].you, "the name set is shown");
+
+	strcpy(old_topic, signal_topic);
+	p2p_party_remove(1);
+	CHECK(!strcmp(publish_topic, old_topic), "the new link goes out on the old topic");
+	CHECK(strcmp(signal_topic, old_topic) && signal_topic[0], "and then the topic moves");
+}
+
 /* under loss two machines can elect themselves at once, so the lossy runs check only the end state */
 int main(int argc, char **argv)
 {
@@ -2861,6 +2931,7 @@ int main(int argc, char **argv)
 	check_party_sealed();
 	check_party_copies();
 	check_party_full();
+	check_party_machine();
 	check_worlds();
 	check_faults();
 	if (argc > 1)

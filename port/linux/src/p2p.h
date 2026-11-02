@@ -521,5 +521,12 @@ struct p2p_party_status
 	int notice;
 	char notice_name[P2P_PARTY_NAME_SIZE + 1];
 };
+/* these take p2p_lock: call from the game's thread, never the p2p thread */
+void p2p_party_set_name(const char *name);
+/* a leader's link, made if there is no party: on the clipboard and offered through Discord's INVITE; 0 for a member */
+int p2p_party_invite(char *link, int size);
+/* the leader: a member's place in the status, its removal making a new link sent sealed to the rest */
+void p2p_party_remove(int member);
+void p2p_party_get_status(struct p2p_party_status *status);
 
 #endif

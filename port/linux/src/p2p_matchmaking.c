@@ -1265,12 +1265,6 @@ void p2p_mm_heard(const unsigned char *payload, int size)
 	mm.queue[mm.queue_count++].size = size;
 }
 
-void p2p_party_heard(const unsigned char *payload, int size)
-{
-	(void)payload;
-	(void)size;
-}
-
 int p2p_mm_verify_pass(unsigned long now)
 {
 	unsigned long started = monotonic_us();

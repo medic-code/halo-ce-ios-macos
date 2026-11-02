@@ -590,6 +590,9 @@ def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
     (("PARTY_EXPIRY = 10000", "PARTY_EXPIRY = 20000"), "member_expiry"),
     (("party->count == P2P_PARTY_MAXIMUM", "party->count == P2P_PARTY_MAXIMUM - 1"), "party full"),
     (("return !isxdigit((unsigned char)*text);", "return 1;"), "party link"),
+    (("size = mm_party_remove(&local.party, member, secret, p2p_now(), bytes);\n\tif (size)\n\t\tp2p_signal_party_publish(bytes, size);\n\tsync_topic();",
+      "size = mm_party_remove(&local.party, member, secret, p2p_now(), bytes);\n\tsync_topic();\n\tif (size)\n\t\tp2p_signal_party_publish(bytes, size);"),
+     "party machine"),
     (("!p2p_ed25519_to_x25519(leader, x25519) ||\n", "\n"), "party link"),
 ])
 def test_p2p_party_negative_control(tmp_path, fault, case):
