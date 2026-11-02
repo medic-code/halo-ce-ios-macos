@@ -1867,11 +1867,10 @@ BOOL platform_next_keystroke(struct platform_keystroke *keystroke)
 bool SDL_ShowAndroidToast(const char *message, int duration, int gravity, int xoffset, int yoffset);
 #endif
 
-/* whether the text has an invite link in it (its prefix, in any case) */
-static BOOL platform_text_has_invite_link(const char *text)
+/* whether the text has this prefix in it, in any case */
+static BOOL platform_text_has_prefix(const char *text, const char *prefix)
 {
-	static const char prefix[] = "halo://join/";
-	size_t length = sizeof(prefix) - 1;
+	size_t length = strlen(prefix);
 
 	for (; *text; text++)
 	{
@@ -1885,6 +1884,12 @@ static BOOL platform_text_has_invite_link(const char *text)
 			return TRUE;
 	}
 	return FALSE;
+}
+
+/* whether the text has a game's or a party's invite link in it */
+static BOOL platform_text_has_invite_link(const char *text)
+{
+	return platform_text_has_prefix(text, "halo://join/") || platform_text_has_prefix(text, "halo://party/");
 }
 
 /* the clipboard's text (the menus' text fields' Ctrl+V), and text put on it

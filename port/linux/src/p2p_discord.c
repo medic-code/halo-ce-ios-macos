@@ -62,6 +62,9 @@ static struct
 	char secret[MAXIMUM_SECRET_SIZE];
 	int player_count;
 	int maximum_player_count;
+	char party_link[MAXIMUM_SECRET_SIZE];
+	int party_count;
+	int party_maximum;
 	int changed;
 
 	/* the Discord user signed in to the client (its READY), as told: an id
@@ -157,18 +160,20 @@ static void send_activity(void)
 	int size;
 
 	p2p_hex(p2p_identifier(), P2P_IDENTIFIER_SIZE, party);
-	if (discord.hosting)
+	if (discord.hosting || discord.party_link[0])
 	{
 		size = snprintf(json, sizeof(json),
 			"{\"cmd\":\"SET_ACTIVITY\",\"nonce\":\"%lu\",\"args\":{\"pid\":%lu,\"activity\":{"
-			"\"details\":\"Hosting a game\",\"state\":\"Invite only\","
+			"\"details\":\"%s\",\"state\":\"Invite only\","
 			/* the image uploaded as "logo" under the application's Rich
 			Presence art assets */
 			"\"assets\":{\"large_image\":\"logo\",\"large_text\":\"Halo: Combat Evolved\"},"
 			"\"party\":{\"id\":\"%s\",\"size\":[%d,%d]},"
 			"\"secrets\":{\"join\":\"%s\"},\"instance\":false}}}",
-			++discord.nonce, (unsigned long)posix_process_id(), party, discord.player_count,
-			discord.maximum_player_count, discord.secret);
+			++discord.nonce, (unsigned long)posix_process_id(), discord.hosting ? "Hosting a game" : "In a party",
+			party, discord.hosting ? discord.player_count : discord.party_count,
+			discord.hosting ? discord.maximum_player_count : discord.party_maximum,
+			discord.hosting ? discord.secret : discord.party_link);
 	}
 	else
 	{
@@ -372,5 +377,13 @@ void p2p_discord_set_hosting(const char *secret, int player_count, int maximum_p
 		snprintf(discord.secret, sizeof(discord.secret), "%s", secret);
 	discord.player_count = player_count;
 	discord.maximum_player_count = maximum_player_count;
+	discord.changed = 1;
+}
+
+void p2p_discord_set_party(const char *link, int count, int maximum)
+{
+	snprintf(discord.party_link, sizeof(discord.party_link), "%s", link);
+	discord.party_count = count;
+	discord.party_maximum = maximum;
 	discord.changed = 1;
 }

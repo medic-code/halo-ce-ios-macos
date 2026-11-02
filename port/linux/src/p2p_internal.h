@@ -386,6 +386,11 @@ void p2p_mm_heard(const unsigned char *payload, int size);
 void p2p_signal_party_topic(const char *topic);
 void p2p_signal_party_publish(const unsigned char *payload, int size);
 void p2p_party_heard(const unsigned char *payload, int size);
+int p2p_party_active(void);
+void p2p_party_update(unsigned long now);
+/* under p2p_lock; 1 if the text holds a party link, joined or not */
+int p2p_party_link_received(const char *text);
+int p2p_party_link_held(const char *text);
 int p2p_mm_active(void);
 /* call under p2p_lock; it drops the lock around each signature check */
 int p2p_mm_verify_pass(unsigned long now);
@@ -409,5 +414,7 @@ void p2p_discord_user(char *id, int id_size, char *name, int name_size);
 /* what to show: hosting with an invite link's secret and player counts, or
 not (secret NULL) */
 void p2p_discord_set_hosting(const char *secret, int player_count, int maximum_player_count);
+/* what to show while not hosting: a party with its link, or none ("") */
+void p2p_discord_set_party(const char *link, int count, int maximum);
 
 #endif
