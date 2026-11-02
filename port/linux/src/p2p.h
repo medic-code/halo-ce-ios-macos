@@ -492,6 +492,8 @@ struct p2p_mm_status
 {
 	int state;
 	int can_host;
+	/* the players the search is for, its party's */
+	int party;
 	/* counts include this machine */
 	int playlist, size, count, needed;
 	int games_checked;
@@ -554,5 +556,6 @@ int p2p_party_invite(char *link, int size);
 void p2p_party_remove(int member);
 void p2p_party_leave(void);
 void p2p_party_get_status(struct p2p_party_status *status);
+void p2p_party_notice_clear(void);
 
 #endif
