@@ -2643,9 +2643,9 @@ int p2p_probe_start(const unsigned char *host_hash, const unsigned char *token)
 
 	p2p_identifier_from_hash(host_hash, host);
 	peer = find_peer(host);
-	/* (this machine's own game, and a host the tunnel reaches already: no
+	/* (this machine's own game, and a host the tunnel has timed already: no
 	tunnel to make) */
-	if (!memcmp(host, identifier, P2P_IDENTIFIER_SIZE) || (peer && peer->connected && !peer->probe))
+	if (!memcmp(host, identifier, P2P_IDENTIFIER_SIZE) || (peer && peer->connected && !peer->probe && peer->pongs))
 	{
 		p2p_lobby_probed(host, peer && peer->pongs ? (int)peer->round_trip : -1);
 		return 1;
@@ -2781,6 +2781,8 @@ static int listed_host_known;
 /* the listing joined is a dedicated server's that a master server lists (an
 approved operator's, by its key: a player's host cannot say it is one) */
 static int listed_host_dedicated;
+/* the listing joined says a matchmade big game */
+static int listed_host_big_game;
 /* ... and the masters that listed it, by their key ids */
 static unsigned char listed_host_masters[P2P_LISTING_MAXIMUM_MASTERS][P2P_LISTING_MASTER_KEY_ID_SIZE];
 static int listed_host_master_count;
@@ -2810,6 +2812,7 @@ static int join_invite(const char *text)
 	/* (any invite's game is no listed one, unless p2p_join_listing says) */
 	listed_host_known = 0;
 	listed_host_dedicated = 0;
+	listed_host_big_game = 0;
 	listed_host_master_count = 0;
 	p2p_identifier_from_hash(hash, host);
 	if (!memcmp(host, identifier, P2P_IDENTIFIER_SIZE))
@@ -2840,8 +2843,13 @@ static int join_invite(const char *text)
 	peer = find_peer(host);
 	if (peer && peer->connected)
 	{
-		platform_log("Internet play: already connected to that invite's host");
-		return 1;
+		if (peer->is_host)
+		{
+			platform_log("Internet play: already connected to that invite's host");
+			return 1;
+		}
+		/* a tunnel from its player or its probe of this machine as host is no way into its game */
+		drop_peer(peer, "tunnel given up for a join");
 	}
 	if ((p2p.joining || p2p.join_requested) && !memcmp(hash, p2p.join_host_hash, sizeof(hash)) &&
 		!memcmp(token, p2p.join_token, sizeof(token)))
@@ -2920,6 +2928,7 @@ int p2p_join_listing(const struct p2p_listing *listing)
 		p2p_identifier_from_hash(hash, listed_host);
 		listed_host_known = 1;
 		listed_host_dedicated = listing->dedicated && listing->master;
+		listed_host_big_game = listing->big_game;
 		listed_host_master_count = listing->master ? listing->master_key_id_count : 0;
 		if (listed_host_master_count > P2P_LISTING_MAXIMUM_MASTERS)
 			listed_host_master_count = P2P_LISTING_MAXIMUM_MASTERS;
@@ -2953,6 +2962,18 @@ int p2p_joined_listed_dedicated(void)
 	dedicated = listed_host_dedicated;
 	pthread_mutex_unlock(&p2p_lock);
 	return dedicated;
+}
+
+int p2p_joined_listed_big_game(void)
+{
+	int big_game;
+
+	if (!p2p_joined_listed_host())
+		return 0;
+	pthread_mutex_lock(&p2p_lock);
+	big_game = listed_host_big_game;
+	pthread_mutex_unlock(&p2p_lock);
+	return big_game;
 }
 
 int p2p_joined_listing_masters(unsigned char (*key_ids)[P2P_LISTING_MASTER_KEY_ID_SIZE], int maximum)

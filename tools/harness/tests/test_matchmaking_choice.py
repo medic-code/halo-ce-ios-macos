@@ -14,7 +14,7 @@ CASES = ["no_playlist", "one_playlist", "split_screen", "ctf_only", "unknown_pla
 NEGATIVE_CONTROLS = {
     "no-playlist-searches": (("if (!playlists)", "if (0)"), "no_playlist"),
     "two-players-search": (("if (local_players > 1)", "if (0)"), "split_screen"),
-    "ffa-always-allowed": (("size != P2P_MM_FFA_6 ||", "1 ||"), "ctf_only"),
+    "ffa-always-allowed": (("(size != P2P_MM_FFA_6 && size != P2P_MM_BIG_FFA) ||", "1 ||"), "ctf_only"),
     "ctf-has-ffa": (("playlists != 1u << P2P_MM_CTF", "1"), "ctf_only"),
     "greyed-without-a-playlist": (("playlists != 1u << P2P_MM_CTF", "(playlists & ~(1u << P2P_MM_CTF))"), "ctf_only"),
     "names-by-prefix": (("strlen(p2p_mm_playlist_names[index]) == length && ", ""), "unknown_playlist"),
