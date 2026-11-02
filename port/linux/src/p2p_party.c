@@ -1,10 +1,14 @@
 /* P2P_PARTY.C: MATCHMAKING's party: its link, and the records its machines publish on its topic */
 
 #include "p2p_matchmaking.h"
+#include "posix.h"
 
 #include <ctype.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
+
+void platform_clipboard_set(const char *text);
 
 static const char record_label[] = "hceu-party-1";
 static const char link_prefix[] = "halo://party/";
@@ -20,6 +24,8 @@ enum
 	PARTY_LINK_RECORD,
 	PARTY_FLAG_LEAVING = 1,
 	SEALED_SECRET_SIZE = P2P_PARTY_SECRET_SIZE + P2P_SEAL_OVERHEAD,
+	MAXIMUM_QUEUED = 32,
+	VERIFY_BUDGET = 2,
 };
 
 static int elapsed(unsigned long since, unsigned long now, unsigned long time)
@@ -517,4 +523,119 @@ void mm_party_status(const struct mm_party *party, struct p2p_party_status *stat
 	}
 	status->notice = party->notice;
 	memcpy(status->notice_name, party->notice_name, sizeof(status->notice_name));
+}
+
+/* ---------- this machine's party, under p2p_lock */
+
+static struct
+{
+	struct mm_party party;
+	struct
+	{
+		unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+		int size;
+	} queue[MAXIMUM_QUEUED];
+	int queue_count;
+	/* what the brokers were last told */
+	char topic[P2P_PARTY_TOPIC_SIZE];
+} local;
+
+static void sync_topic(void)
+{
+	if (strcmp(local.topic, local.party.topic))
+	{
+		strcpy(local.topic, local.party.topic);
+		p2p_signal_party_topic(local.topic);
+	}
+}
+
+int p2p_party_active(void)
+{
+	return local.party.role != MM_PARTY_NONE;
+}
+
+void p2p_party_heard(const unsigned char *payload, int size)
+{
+	if (local.party.role == MM_PARTY_NONE || local.queue_count == MAXIMUM_QUEUED || size <= 0 ||
+		size > MM_MAXIMUM_RECORD_SIZE)
+	{
+		return;
+	}
+	memcpy(local.queue[local.queue_count].bytes, payload, (size_t)size);
+	local.queue[local.queue_count++].size = size;
+}
+
+void p2p_party_update(unsigned long now)
+{
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+	unsigned long started = p2p_now();
+	int size;
+
+	while (local.queue_count && !elapsed(started, p2p_now(), VERIFY_BUDGET))
+	{
+		struct mm_party_record record;
+		int read = mm_party_read(&local.party, local.queue[0].bytes, local.queue[0].size, &record), good;
+
+		memmove(local.queue, local.queue + 1, sizeof(*local.queue) * (size_t)(--local.queue_count));
+		if (!read)
+			continue;
+		pthread_mutex_unlock(&p2p_lock);
+		good = mm_party_verify(&record);
+		pthread_mutex_lock(&p2p_lock);
+		if (good)
+			mm_party_heard(&local.party, &record, now);
+	}
+	size = mm_party_step(&local.party, now, bytes);
+	if (size)
+		p2p_signal_party_publish(bytes, size);
+	sync_topic();
+}
+
+void p2p_party_set_name(const char *name)
+{
+	pthread_mutex_lock(&p2p_lock);
+	snprintf(local.party.name, sizeof(local.party.name), "%s", name);
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+int p2p_party_invite(char *link, int size)
+{
+	unsigned char secret[P2P_PARTY_SECRET_SIZE];
+	int made;
+
+	if (size < P2P_PARTY_LINK_SIZE)
+		return 0;
+	posix_random_bytes(secret, sizeof(secret));
+	pthread_mutex_lock(&p2p_lock);
+	if (local.party.role == MM_PARTY_NONE)
+		mm_party_make(&local.party, p2p_signing_seed(), secret, p2p_now());
+	made = local.party.role == MM_PARTY_LEADER;
+	if (made)
+		strcpy(link, local.party.link);
+	sync_topic();
+	pthread_mutex_unlock(&p2p_lock);
+	if (made)
+		platform_clipboard_set(link);
+	return made;
+}
+
+void p2p_party_remove(int member)
+{
+	unsigned char secret[P2P_PARTY_SECRET_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+	int size;
+
+	posix_random_bytes(secret, sizeof(secret));
+	pthread_mutex_lock(&p2p_lock);
+	size = mm_party_remove(&local.party, member, secret, p2p_now(), bytes);
+	if (size)
+		p2p_signal_party_publish(bytes, size);
+	sync_topic();
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+void p2p_party_get_status(struct p2p_party_status *status)
+{
+	pthread_mutex_lock(&p2p_lock);
+	mm_party_status(&local.party, status);
+	pthread_mutex_unlock(&p2p_lock);
 }
