@@ -5836,6 +5836,8 @@ static void matchmaking_lines(const struct p2p_mm_status *status, wchar_t *title
 		usnprintf(notice, size - 1, L"COULD NOT HOST THE GAME. BACK IN THE QUEUE.");
 	else if (status->notice == P2P_MM_NOTICE_TOO_BIG)
 		usnprintf(notice, size - 1, L"THE PARTY IS TOO BIG FOR THAT GAME. PICK A BIGGER GAME.");
+	else if (status->notice == P2P_MM_NOTICE_APART)
+		usnprintf(notice, size - 1, L"COULD NOT GET THE PARTY INTO ONE GAME. SEARCH STOPPED.");
 	title[size - 1] = count[size - 1] = help[size - 1] = notice[size - 1] = 0;
 }
 
