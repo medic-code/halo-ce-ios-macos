@@ -1643,5 +1643,7 @@ void p2p_mm_get_status(struct p2p_mm_status *status)
 		}
 		status->notice = mm.notice = notice_after(mm.notice, search->state);
 	}
+	if (p2p_party_too_big())
+		status->notice = P2P_MM_NOTICE_TOO_BIG;
 	pthread_mutex_unlock(&p2p_lock);
 }
