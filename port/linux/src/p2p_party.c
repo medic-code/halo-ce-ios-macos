@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
+void platform_log(const char *format, ...);
 void platform_clipboard_set(const char *text);
 
 static const char record_label[] = "hceu-party-1";
@@ -591,6 +592,23 @@ void p2p_party_update(unsigned long now)
 	sync_topic();
 }
 
+int p2p_party_link_held(const char *text)
+{
+	return mm_party_link_held(text);
+}
+
+int p2p_party_link_received(const char *text)
+{
+	if (!mm_party_link_held(text))
+		return 0;
+	if (mm_party_join(&local.party, p2p_signing_seed(), text, p2p_now()))
+		platform_log("matchmaking: joined a party");
+	else
+		platform_log("matchmaking: this machine cannot join that party");
+	sync_topic();
+	return 1;
+}
+
 void p2p_party_set_name(const char *name)
 {
 	pthread_mutex_lock(&p2p_lock);
@@ -627,6 +645,19 @@ void p2p_party_remove(int member)
 	posix_random_bytes(secret, sizeof(secret));
 	pthread_mutex_lock(&p2p_lock);
 	size = mm_party_remove(&local.party, member, secret, p2p_now(), bytes);
+	if (size)
+		p2p_signal_party_publish(bytes, size);
+	sync_topic();
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+void p2p_party_leave(void)
+{
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+	int size;
+
+	pthread_mutex_lock(&p2p_lock);
+	size = mm_party_leave(&local.party, bytes);
 	if (size)
 		p2p_signal_party_publish(bytes, size);
 	sync_topic();

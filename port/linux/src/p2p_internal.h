@@ -389,6 +389,9 @@ void p2p_signal_party_publish(const unsigned char *payload, int size);
 void p2p_party_heard(const unsigned char *payload, int size);
 int p2p_party_active(void);
 void p2p_party_update(unsigned long now);
+/* under p2p_lock; 1 if the text holds a party link, joined or not */
+int p2p_party_link_received(const char *text);
+int p2p_party_link_held(const char *text);
 int p2p_mm_active(void);
 /* call under p2p_lock */
 int p2p_mm_hosts_big_game(void);
