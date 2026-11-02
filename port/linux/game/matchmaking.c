@@ -212,7 +212,7 @@ static void matchmaking_update_host(float seconds)
 		return;
 	}
 	if (state != SERVER_PREGAME)
-		matchmaking.start_now = FALSE;
+		matchmaking.start_now = matchmaking.map_set = FALSE;
 	else if (matchmaking.player_added)
 		matchmaking_start_countdown(server, game->player_count, game->maximum_players, matchmaking.start_now);
 }
