@@ -3,15 +3,21 @@
 /* PARTY_TEAMS.C (test): a matchmade host's team rule (matchmaking.c), with every join order of each game */
 
 enum { _matchmaking_idle, _matchmaking_hosting };
-static struct { int role; boolean public_game; } matchmaking = { _matchmaking_hosting, FALSE };
+static struct { int role; boolean public_game; float team_seconds; int team_asks; short size; } matchmaking = { _matchmaking_hosting, FALSE };
 
 #define VALID_INDEX(index, count) ((index) >= 0 && (index) < (count))
-struct network_player { int valid; char machine_index, team_index; };
-struct network_game { struct network_player players[HALO_PORT_MAXIMUM_NETWORK_PLAYERS]; };
+struct network_player { int valid; char machine_index, team_index; wchar_t name[16]; };
+struct network_game
+{
+	struct { struct { boolean teams; } universal_variant; } variant;
+	struct network_player players[HALO_PORT_MAXIMUM_NETWORK_PLAYERS];
+};
+struct p2p_party_member { char name[16]; int leader, you; };
+struct p2p_party_status { int count; struct p2p_party_member members[P2P_PARTY_MAXIMUM]; };
 
 static struct network_game game;
 static struct p2p_mm_team_party table[P2P_MM_TEAM_PARTIES];
-static int table_count, own_machine, unknown_machine = NONE;
+static int table_count, own_machine, unknown_machine = NONE, team_asks_sent;
 
 static boolean network_player_is_valid(struct network_player const *player)
 {
@@ -55,6 +61,34 @@ static int p2p_mm_team_parties(struct p2p_mm_team_party *parties, unsigned char 
 	memcpy(parties, table, sizeof(table));
 	hash_of(own_machine, own_key_hash);
 	return table_count;
+}
+
+static void *global_network_game_client_get(void)
+{
+	return NULL;
+}
+
+static struct network_game *network_game_client_get_game(void *client)
+{
+	(void)client;
+	return &game;
+}
+
+static boolean network_game_client_set_team(char team)
+{
+	(void)team;
+	team_asks_sent++;
+	return FALSE;
+}
+
+static void p2p_party_get_status(struct p2p_party_status *status)
+{
+	memset(status, 0, sizeof(*status));
+	status->count = 2;
+	strcpy(status->members[0].name, "Chief");
+	status->members[0].leader = 1;
+	strcpy(status->members[1].name, "Rook");
+	status->members[1].you = 1;
 }
 
 #include "under_test.inc"
@@ -221,6 +255,73 @@ int main(int argc, char **argv)
 		add_party(1, 2, party_c);
 		add_party(1, 3, party_a);
 		each_order(order, 0, 8, check_largest);
+	}
+	CASE("leader_team")
+	{
+		clear_all();
+		game.variant.universal_variant.teams = TRUE;
+		game.players[0] = (struct network_player){ 1, 1, 0, L"Chief" };
+		game.players[1] = (struct network_player){ 1, 2, 1, L"Rook" };
+		game.players[2] = (struct network_player){ 1, 3, 1, L"Ace" };
+		CHECK(leader_team(&game, 2, "Chief") == 0, "the other team: asks for the leader's");
+		game.variant.universal_variant.teams = FALSE;
+		CHECK(leader_team(&game, 2, "Chief") == NONE, "a free-for-all: asks for nothing");
+		game.variant.universal_variant.teams = TRUE;
+		game.players[1].team_index = 0;
+		CHECK(leader_team(&game, 2, "Chief") == NONE, "the leader's team: asks for nothing");
+		CHECK(leader_team(&game, 2, "Nova") == NONE, "the leader is not here: asks for nothing");
+		game.players[0].valid = 0;
+		game.players[1].team_index = 1;
+		CHECK(leader_team(&game, 2, "Chief") == NONE, "the leader left: asks for nothing");
+		game.players[0].valid = 1;
+		game.players[1] = (struct network_player){ 1, 2, 1, L"Chief" };
+		game.players[0].team_index = 0;
+		game.players[2].team_index = 0;
+		game.players[2].valid = 0;
+		CHECK(leader_team(&game, 2, "Chief") == 0, "the member's own name, the leader's too: another machine's counts");
+	}
+	CASE("follow_asks")
+	{
+		int second;
+
+		clear_all();
+		own_machine = 2;
+		game.variant.universal_variant.teams = TRUE;
+		game.players[0] = (struct network_player){ 1, 1, 0, L"Chief" };
+		game.players[1] = (struct network_player){ 1, 2, 1, L"Rook" };
+		matchmaking.public_game = TRUE;
+		matchmaking.team_asks = 0;
+		team_asks_sent = 0;
+		for (second = 0; second < 10; second++)
+			matchmaking_follow_leader(1.0f);
+		CHECK(team_asks_sent == 3, "a host that keeps refusing is asked 3 times: %d", team_asks_sent);
+		matchmaking.public_game = FALSE;
+	}
+	CASE("big_follow")
+	{
+		clear_all();
+		own_machine = 2;
+		game.variant.universal_variant.teams = TRUE;
+		game.players[0] = (struct network_player){ 1, 1, 0, L"Chief" };
+		game.players[1] = (struct network_player){ 1, 2, 1, L"Rook" };
+		matchmaking.size = P2P_MM_BIG_TEAM;
+		matchmaking.team_asks = 0;
+		team_asks_sent = 0;
+		matchmaking_follow_leader(1.0f);
+		CHECK(team_asks_sent == 1, "a member in a matchmade big game asks for its leader's team: %d", team_asks_sent);
+		matchmaking.size = P2P_MM_4V4;
+		matchmaking.team_asks = 0;
+		team_asks_sent = 0;
+		matchmaking_follow_leader(1.0f);
+		CHECK(team_asks_sent == 0, "a matchmade small game's host places it: %d", team_asks_sent);
+	}
+	CASE("player_named")
+	{
+		CHECK(player_named(L"Chief", "Chief"), "the same name");
+		CHECK(!player_named(L"Chief", "Chie"), "a shorter one");
+		CHECK(player_named(L"Andr\u00e9", "Andr\xc3\xa9"), "two bytes");
+		CHECK(player_named(L"\u4e2d", "\xe4\xb8\xad"), "three bytes");
+		CHECK(!player_named(L"\u00e9", "\xc3\xa8"), "the last bits count");
 	}
 	CASE("e28_short_team")
 	{
