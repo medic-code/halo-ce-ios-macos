@@ -724,6 +724,9 @@ static void leader_search(struct mm_party *party, struct mm_search *search, unsi
 			party->members[index].in_game = 0;
 		mm_game_left(search, now);
 	}
+	for (index = 1; index < party->count; index++)
+		if (!party->members[index].in_game)
+			mm_forget_game(search, party->members[index].key);
 }
 
 static int invited_to_own_game(const struct mm_search *search, const char *invite)
@@ -732,6 +735,15 @@ static int invited_to_own_game(const struct mm_search *search, const char *invit
 
 	p2p_hex(search->key_hash, P2P_KEY_HASH_SIZE, hash);
 	return strstr(invite, hash) != NULL;
+}
+
+static int other_members_in_game(const struct mm_party *party)
+{
+	int count = 0, index;
+
+	for (index = 1; index < party->count; index++)
+		count += party->members[index].in_game && memcmp(party->members[index].hash, party->hash, P2P_KEY_HASH_SIZE);
+	return count;
 }
 
 /* a member hosting keeps its game, which goes on as its own: the players in it stay */
@@ -790,6 +802,22 @@ static void member_search(struct mm_party *party, struct mm_search *search, unsi
 		party->left_seen = said->left;
 		if (search->in_game || search->state == P2P_MM_FOUND || search->state == P2P_MM_HOSTING)
 			mm_game_left(search, now);
+	}
+	if (search->state != P2P_MM_HOSTING || said->has_game)
+		party->waiting_for_leader = 0;
+	else if (!party->waiting_for_leader)
+	{
+		party->waiting_for_leader = 1;
+		party->waiting_since = now;
+	}
+	/* the party's own game stops here; with other players in it the member goes on hosting them */
+	if (party->waiting_for_leader && elapsed(party->waiting_since, now, PARTY_FOLLOW_WAIT) &&
+		search->players <= 1 + other_members_in_game(party))
+	{
+		party->waiting_for_leader = 0;
+		mm_game_lost(search, now);
+		search->left_game = 1;
+		return;
 	}
 	if (said->widened)
 		mm_widen_now(search);

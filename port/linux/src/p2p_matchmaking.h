@@ -210,6 +210,8 @@ void mm_follow(struct mm_search *search, const unsigned char *seed, const struct
 void mm_follow_game(struct mm_search *search, const char *invite, int playlist, int size, int public_game,
 	unsigned long now);
 void mm_game_left(struct mm_search *search, unsigned long now);
+/* a party member not in a game hosts none: its last record is old, and a game of its that failed is over */
+void mm_forget_game(struct mm_search *search, const unsigned char *key);
 void mm_invite_text(const unsigned char *key_hash, const unsigned char *token, char *text);
 
 enum { MM_PARTY_NONE, MM_PARTY_LEADER, MM_PARTY_MEMBER };
@@ -260,6 +262,9 @@ struct mm_party
 	/* the leader's: since when members have had to follow */
 	unsigned long follow_since;
 	int follow_done;
+	/* a member's: hosting while the leader is in no game */
+	unsigned long waiting_since;
+	int waiting_for_leader;
 };
 
 struct mm_party_record
