@@ -17,7 +17,7 @@ enum
 	MM_FLAG_UNDER_WAY = 2,
 	MM_FLAG_HELD = 4,
 	MM_MAXIMUM_POOL = 8,
-	MM_MAXIMUM_PARTY = 8,
+	MM_MAXIMUM_PARTY = P2P_PARTY_MAXIMUM,
 	MM_MAXIMUM_UNITS = 256,
 	/* records after the first */
 	MM_REFRESHES_COUNTED = 2,
@@ -180,5 +180,47 @@ void mm_host_now(struct mm_search *search);
 int mm_cancel(struct mm_search *search, struct mm_out *out, int out_size);
 void mm_game_lost(struct mm_search *search, unsigned long now);
 void mm_host_gave_up(struct mm_search *search, unsigned long now);
+
+enum { MM_PARTY_NONE, MM_PARTY_LEADER, MM_PARTY_MEMBER };
+
+struct mm_party_member
+{
+	unsigned char key[P2P_KEY_SIZE], hash[P2P_KEY_HASH_SIZE];
+	char name[P2P_PARTY_NAME_SIZE + 1];
+	unsigned long sequence, heard;
+};
+
+struct mm_party
+{
+	unsigned char seed[P2P_SEED_SIZE], key[P2P_KEY_SIZE], hash[P2P_KEY_HASH_SIZE], seal[P2P_SHA256_SIZE];
+	char name[P2P_PARTY_NAME_SIZE + 1];
+	int role;
+	/* the leader first */
+	struct mm_party_member members[P2P_PARTY_MAXIMUM];
+	int count;
+	char topic[P2P_PARTY_TOPIC_SIZE], link[P2P_PARTY_LINK_SIZE];
+	unsigned long sequence, sent;
+	int notice;
+	char notice_name[P2P_PARTY_NAME_SIZE + 1];
+};
+
+struct mm_party_record
+{
+	unsigned char plain[MM_MAXIMUM_RECORD_SIZE];
+	int size, kind;
+	const unsigned char *key, *body;
+	unsigned long sequence;
+};
+
+void mm_party_make(struct mm_party *party, const unsigned char *seed, const unsigned char *secret, unsigned long now);
+int mm_party_link_held(const char *text);
+int mm_party_join(struct mm_party *party, const unsigned char *seed, const char *text, unsigned long now);
+/* each returns the size of a record to publish on the topic held before the call, 0 if none */
+int mm_party_step(struct mm_party *party, unsigned long now, unsigned char *bytes);
+/* opens a record and screens copies from other brokers, before any signature check; 1 if mm_party_verify should see it */
+int mm_party_read(struct mm_party *party, const unsigned char *payload, int size, struct mm_party_record *record);
+int mm_party_verify(const struct mm_party_record *record);
+void mm_party_heard(struct mm_party *party, const struct mm_party_record *record, unsigned long now);
+void mm_party_status(const struct mm_party *party, struct p2p_party_status *status);
 
 #endif
