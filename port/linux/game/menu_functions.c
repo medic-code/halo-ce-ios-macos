@@ -6383,7 +6383,7 @@ static void matchmaking_search_tracker_show(struct widget_instance *screen, stru
 		SEARCH_SLOTS);
 	slots = (short)PIN(big || status->state == P2P_MM_OFF ? 1 : found ? status->most_players : status->widened ? filled :
 		status->needed ? status->needed : p2p_mm_size_players(matchmaking_screen.size), filled, SEARCH_SLOTS);
-	profile_name_show(named(screen, "search_slot_you", 0));
+	text_set(named(named(screen, "search_slot_you", 0), "current_profile_name", 0), matchmaking_screen.name);
 	for (index = 1; index < SEARCH_SLOTS; index++)
 	{
 		struct widget_instance *name;
