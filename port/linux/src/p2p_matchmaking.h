@@ -83,6 +83,7 @@ enum
 	MM_EXPIRY_INTERVALS = 3,
 	MM_RUNNING_INTERVAL = 25000,
 	MM_LOOK_TIME = 6000,
+	MM_JOIN_BACKOFF = 30000,
 	MM_MAXIMUM_OUT = 32,
 };
 
@@ -120,6 +121,7 @@ struct mm_search
 	/* Unix seconds, never sent */
 	unsigned long started;
 	unsigned long marks_from;
+	unsigned long join_after;
 	/* 1, 0 (strict router) or -1 (STUN has not answered yet) */
 	int can_host;
 	unsigned long sequence;
