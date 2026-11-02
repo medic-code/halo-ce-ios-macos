@@ -3057,6 +3057,58 @@ static void check_e75_member_keeps_hosting(void)
 		member->state);
 }
 
+static void check_e76_party_stays_together(void)
+{
+	int waited;
+
+	case_name = "e76_party_stays_together";
+	party_world(2, 2);
+	party_start(2, P2P_MM_2V2, 2);
+	fail_join = 0;
+	run(125);
+	CHECK(machines[1].hosting && machines[0].search.state == P2P_MM_QUEUED, "the leader cannot reach the member's game");
+	run(14);
+	CHECK(machines[1].hosting, "the member waits 20 s");
+	run(10);
+	CHECK(!machines[1].hosting, "then stops hosting");
+	CHECK(machines[1].search.state == P2P_MM_QUEUED && machines[1].search.party.following, "and searches with the party");
+	CHECK(machines[0].search.state == P2P_MM_QUEUED && party_size() == 2, "the party searches together: %d", party_size());
+	CHECK(!parties[0].notice && parties[1].role == MM_PARTY_MEMBER, "intact: notice %d", parties[0].notice);
+	fail_join = -1;
+	run(130);
+	CHECK(machines[1].hosting && machines[0].in == 1, "the game the member hosted is not failed: the leader joins its next");
+
+	party_world(2, 3);
+	party_start(2, P2P_MM_2V2, 2);
+	fail_join = 0;
+	run(125);
+	CHECK(machines[1].hosting, "the member hosts");
+	start_searching(2, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 0);
+	for (waited = 0; waited < 20 && machines[2].in != 1; waited++)
+		run(1);
+	CHECK(machines[2].in == 1, "another player joins: in %d", machines[2].in);
+	run(40);
+	CHECK(machines[1].hosting && machines[1].players == 2 && machines[1].search.state == P2P_MM_HOSTING,
+		"the member hosts them on: state %d", machines[1].search.state);
+	machines[2].in = -1;
+	machines[2].quit = 1;
+	machines[1].players--;
+	run(2);
+	CHECK(!machines[1].hosting, "and stops once they have gone");
+
+	party_world(3, 3);
+	party_start(3, P2P_MM_4V4, 2);
+	fail_join = 2;
+	run(125);
+	CHECK(machines[1].hosting && machines[0].in == 1, "the leader joins its member's game");
+	run(30);
+	CHECK(parties[0].notice == P2P_PARTY_NOTICE_COULD_NOT_JOIN && !machines[1].hosting, "a member cannot: the party leaves");
+	fail_join = -1;
+	run(140);
+	CHECK(machines[1].hosting && machines[0].in == 1 && machines[2].in == 1,
+		"the member hosts again and the party joins: in %d %d", machines[0].in, machines[2].in);
+}
+
 static void check_party_journeys(void)
 {
 	check_e24_leader_cancels();
@@ -3067,6 +3119,7 @@ static void check_party_journeys(void)
 	check_e47_big_strict_leader();
 	check_e25_big_follow_count();
 	check_e75_member_keeps_hosting();
+	check_e76_party_stays_together();
 	check_e25_follow_big();
 	check_e29_cannot_follow();
 }

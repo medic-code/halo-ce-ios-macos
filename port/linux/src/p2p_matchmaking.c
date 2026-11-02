@@ -517,6 +517,27 @@ void mm_game_left(struct mm_search *search, unsigned long now)
 	search->left_game = 1;
 }
 
+void mm_forget_game(struct mm_search *search, const unsigned char *key)
+{
+	unsigned char key_hash[P2P_KEY_HASH_SIZE];
+	int index;
+
+	if (!key_hash_of(key, key_hash))
+		return;
+	if (!memcmp(search->failed_game, key_hash, P2P_KEY_HASH_SIZE))
+		memset(search->failed_game, 0, P2P_KEY_HASH_SIZE);
+	for (index = 0; index < MM_MAXIMUM_UNITS; index++)
+	{
+		struct mm_peer *peer = &search->peers[index];
+
+		if (peer->used && peer->record.kind == MM_KIND_HOSTING &&
+			!memcmp(peer->record.key_hash, key_hash, P2P_KEY_HASH_SIZE))
+		{
+			peer->used = 0;
+		}
+	}
+}
+
 void mm_follow(struct mm_search *search, const unsigned char *seed, const struct p2p_mm_choice *choice,
 	const unsigned char *leader, int players, unsigned long now, unsigned long unix_now)
 {
