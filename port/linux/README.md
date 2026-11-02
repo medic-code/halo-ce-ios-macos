@@ -634,7 +634,7 @@ the setting for one start of the game. It has priority over the file.
 | `network.browser_maps` | `"yes"` | `HALO_NET_BROWSER_MAPS` | `"yes"`: the server browser lists the games on maps this computer does not have. `"no"`: it does not. `"downloadable"`: only those of a Custom Edition map that the host shares. |
 | `network.browser_gametype` | `"any"` | `HALO_NET_BROWSER_GAMETYPE` | The server browser lists the games of one kind only: `"any"`, `"ctf"`, `"slayer"`, `"oddball"`, `"king"` or `"race"` (the Filters screen). |
 | `network.browser_sort` | `"servers"` | `HALO_NET_BROWSER_SORT` | The server browser's order. `"servers"`: dedicated servers first, then by players. `"players"`, `"name"`, `"map"`, `"type"` or `"locked"` (games with a password first). A `-` before one reverses it (`"-players"`). A column's title sorts by it, and again the other way. |
-| `network.matchmaking_region` | `""` | `HALO_NET_MATCHMAKING_REGION` | A server region (`"eu"`, `"na-east"`): MATCHMAKING's big sizes take only that region's dedicated servers, before any game a player hosts. Empty: a game a player hosts under 200 ms comes first. |
+| `network.matchmaking_region` | `""` | `HALO_NET_MATCHMAKING_REGION` | A server region (`"eu"`, `"na-east"`, `"na-west"`, `"oce"`): MATCHMAKING's big sizes take only that region's dedicated servers, before any game a player hosts. Empty: the region of the machine's UTC offset. `"any"`, or an offset with no region: a game a player hosts under 200 ms comes first. |
 | `server.enabled` | `false` | `HALO_SERVER` | `true`: run as a dedicated server, as `halo --server` does. Refer to "Dedicated server". The `server.*` settings are written to `config.toml` only by a dedicated server. |
 | `server.name` | `"OpenCE Server"` | `HALO_SERVER_NAME` | The game's name in the lobby and the server browser: 15 characters of printable ASCII. |
 | `server.max_players` | `16` | `HALO_SERVER_MAX_PLAYERS` | The most players (2 to 127). |
@@ -1214,7 +1214,7 @@ master servers, or only the brokers.
   browser, for example `2 OF 2`). The PING and TEAMPLAY OPTIONS rows of
   Custom Edition are not on the Filters screen.
 - A dedicated server's row shows the dedicated icon of Custom Edition.
-  Instead of a ping, a dedicated server shows its region (EU, NA-E),
+  Instead of a ping, a dedicated server shows its region (EU, NA-EAST),
   because the browser does not ping the servers that the master servers
   list. The row shows JOINING while a join runs. A game of another network
   version stays in the list in grey, after the other games, with NEWER or

@@ -5061,7 +5061,7 @@ static void text_to_wide(char const *text, wchar_t *wide, short size)
 	wide[index] = 0;
 }
 
-/* a master server's region label as shown, in capitals (EU, NA-E) */
+/* a master server's region label as shown, in capitals (EU, NA-EAST) */
 static void region_to_wide(char const *region, wchar_t *wide, short size)
 {
 	short index;
@@ -6007,7 +6007,7 @@ enum
 enum
 {
 	_matchmaking_help_size,
-	_matchmaking_help_no_ffa = _matchmaking_help_size + NUMBER_OF_P2P_MM_SMALL_SIZES,
+	_matchmaking_help_no_ffa = _matchmaking_help_size + NUMBER_OF_P2P_MM_SIZES,
 	_matchmaking_help_playlist,
 	_matchmaking_help_search = _matchmaking_help_playlist + NUMBER_OF_P2P_MM_PLAYLISTS,
 	_matchmaking_help_none = _matchmaking_help_search + MATCHMAKING_ONE_PLAYER + 1,
@@ -6024,7 +6024,9 @@ static struct
 
 static short matchmaking_size_after(unsigned playlists, short size)
 {
-	return mm_playlist_has_size(playlists, size) ? size : P2P_MM_2V2;
+	if (mm_playlist_has_size(playlists, size))
+		return size;
+	return size == P2P_MM_BIG_FFA ? P2P_MM_BIG_TEAM : P2P_MM_2V2;
 }
 
 static short matchmaking_search_allowed(unsigned playlists, short local_players)
@@ -6095,7 +6097,7 @@ static void matchmaking_screen_update(struct widget_instance *list)
 		if (playlist && playlist->parameters.list.selected_index)
 			playlists |= 1u << index;
 	}
-	shown = (short)PIN(spinner->parameters.list.selected_index, 0, NUMBER_OF_P2P_MM_SMALL_SIZES - 1);
+	shown = (short)PIN(spinner->parameters.list.selected_index, 0, NUMBER_OF_P2P_MM_SIZES - 1);
 	size = mm_playlist_has_size(playlists, shown) ? shown :
 		matchmaking_size_after(playlists, matchmaking_screen.size);
 	if (list->focused_child != spinner->parent)
@@ -6145,7 +6147,7 @@ static boolean matchmaking_screen_search(void)
 		return FALSE;
 	choice.playlists = matchmaking_screen.playlists;
 	choice.size = matchmaking_screen.size;
-	snprintf(choice.region, sizeof(choice.region), "%s", config_string("network.matchmaking_region"));
+	snprintf(choice.region, sizeof(choice.region), "%s", p2p_mm_region(config_string("network.matchmaking_region")));
 	p2p_mm_search(&choice);
 	ui_play_audio_feedback_sound(SOUND_FORWARD);
 	return TRUE;
@@ -6161,8 +6163,8 @@ static boolean matchmaking_screen_back(struct widget_instance *widget, boolean *
 
 static wchar_t const *const matchmaking_playlist_words[NUMBER_OF_P2P_MM_PLAYLISTS] =
 	{ L"SLAYER", L"CTF", L"KING OF THE HILL", L"ODDBALL", L"RACE" };
-static wchar_t const *const matchmaking_size_words[NUMBER_OF_P2P_MM_SMALL_SIZES] =
-	{ L"1V1", L"2V2", L"3V3", L"4V4", L"FFA 6" };
+static wchar_t const *const matchmaking_size_words[NUMBER_OF_P2P_MM_SIZES] =
+	{ L"1V1", L"2V2", L"3V3", L"4V4", L"FFA 6", L"BIG TEAM", L"BIG FFA" };
 
 static wchar_t const *const matchmaking_dots[] = { L"   ", L".  ", L".. ", L"..." };
 
@@ -6170,15 +6172,21 @@ static void matchmaking_lines(const struct p2p_mm_status *status, wchar_t *title
 	wchar_t *notice, short size)
 {
 	wchar_t const *playlist = matchmaking_playlist_words[PIN(status->playlist, 0, NUMBER_OF_P2P_MM_PLAYLISTS - 1)];
-	wchar_t const *game_size = matchmaking_size_words[PIN(status->size, 0, NUMBER_OF_P2P_MM_SMALL_SIZES - 1)];
+	wchar_t const *game_size = matchmaking_size_words[PIN(status->size, 0, NUMBER_OF_P2P_MM_SIZES - 1)];
 	int missing = status->needed - status->count;
+	int big = p2p_mm_size_big(status->size);
 
 	title[0] = count[0] = help[0] = notice[0] = 0;
-	switch (status->state)
+	switch (big && status->state == P2P_MM_QUEUED ? P2P_MM_LOOKING : status->state)
 	{
 	case P2P_MM_LOOKING:
 		usnprintf(title, size - 1, L"LOOKING FOR A GAME");
-		usnprintf(help, size - 1, L"Checking %d public games...", status->games_checked);
+		if (!big)
+			usnprintf(help, size - 1, L"Checking %d public games...", status->games_checked);
+		else if (status->state == P2P_MM_LOOKING || status->can_host > 0)
+			usnprintf(help, size - 1, L"Looking for the best big game near you.\r\nIf none fits, you host one.");
+		else
+			usnprintf(help, size - 1, L"Looking for the best big game near you.\r\nYour router cannot host.");
 		break;
 	case P2P_MM_QUEUED:
 		usnprintf(title, size - 1, L"SEARCHING%ls", matchmaking_dots[system_milliseconds() / 500 % 4]);
@@ -6195,15 +6203,27 @@ static void matchmaking_lines(const struct p2p_mm_status *status, wchar_t *title
 		if (status->hosts)
 		{
 			usnprintf(title, size - 1, L"%ls %ls", playlist, game_size);
-			usnprintf(help, size - 1, L"Searchers join you.");
+			usnprintf(help, size - 1, big ? L"START NOW starts it" : L"Searchers join you.");
 			break;
 		}
 		usnprintf(title, size - 1, L"MATCH FOUND");
+		if (big)
+		{
+			wchar_t where[P2P_LISTING_REGION_SIZE + 1] = L"";
+
+			if (status->region[0])
+				region_to_wide(status->region, where, NUMBEROF(where));
+			else if (status->ping >= 0)
+				usnprintf(where, NUMBEROF(where) - 1, L"%d ms", status->ping);
+			usnprintf(help, size - 1, L"Joining %ls %ls\r\n%d of %d players%ls%ls", playlist, game_size,
+				status->players, status->most_players, where[0] ? L", " : L"", where);
+			break;
+		}
 		usnprintf(count, size - 1, L"%d of %d matched", status->players, status->most_players);
 		if (status->ping >= 0)
-			usnprintf(help, size - 1, L"Joining the game: %ls %ls, %d ms", playlist, game_size, status->ping);
+			usnprintf(help, size - 1, L"Joining the game:\r\n%ls %ls, %d ms", playlist, game_size, status->ping);
 		else
-			usnprintf(help, size - 1, L"Joining the game: %ls %ls", playlist, game_size);
+			usnprintf(help, size - 1, L"Joining the game:\r\n%ls %ls", playlist, game_size);
 		break;
 	default:
 		usnprintf(title, size - 1, L"SEARCH CANCELLED");
@@ -6228,6 +6248,11 @@ static short matchmaking_search_slots(struct p2p_mm_status const *status, short 
 {
 	boolean in_game = status->state == P2P_MM_FOUND || status->state == P2P_MM_HOSTING;
 
+	if (p2p_mm_size_big(chosen_size))
+	{
+		*filled = 1;
+		return 1;
+	}
 	*filled = (short)PIN(in_game ? status->players : MAX(status->count, 1), 1, SEARCH_SLOTS);
 	return (short)PIN(status->state == P2P_MM_OFF ? 1 : in_game ? status->most_players :
 		status->needed ? status->needed : p2p_mm_size_players(chosen_size), *filled, SEARCH_SLOTS);
