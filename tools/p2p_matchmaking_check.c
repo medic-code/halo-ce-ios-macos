@@ -2879,6 +2879,52 @@ static void check_member_stays_in_game(void)
 	listing_count = 0;
 }
 
+/* the leader is refused the game the pool chose; the member gets in */
+static void leader_refused_start(void)
+{
+	int index;
+
+	party_world(2, 4);
+	fail_join = 0;
+	party_start(2, P2P_MM_2V2, 0);
+	for (index = 2; index < 4; index++)
+		start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	for (index = 0; index < 300 && machines[1].in < 0; index++)
+		run(0.1);
+	CHECK(machines[1].in >= 0 && machines[0].in < 0, "the member reached the game, the leader did not: %d, %d",
+		machines[1].in, machines[0].in);
+}
+
+static void check_e77_leader_follows_member(void)
+{
+	int index;
+
+	case_name = "e77_leader_follows_member";
+	leader_refused_start();
+	fail_join = -1;
+	run(4);
+	CHECK(machines[0].in == machines[1].in && !parties[0].following_member, "the leader takes the member's game: %d",
+		machines[0].in);
+	CHECK(parties[0].notice == P2P_PARTY_NOTICE_NONE, "with no notice: %d", parties[0].notice);
+
+	leader_refused_start();
+	run(8);
+	CHECK(machines[0].search.state == P2P_MM_OFF && !parties[0].search.searching, "a second refusal stops the search: %d",
+		machines[0].search.state);
+	for (index = 0; index < 2; index++)
+		CHECK(parties[index].notice == P2P_PARTY_NOTICE_APART, "with a notice for %d: %d", index, parties[index].notice);
+	CHECK(machines[1].search.in_game && machines[1].in >= 0, "the member stays in its game");
+	parties[0].notice = P2P_PARTY_NOTICE_NONE;
+	party_start(2, P2P_MM_2V2, 0);
+	CHECK(!parties[0].search.stopped, "a new search clears it");
+
+	leader_refused_start();
+	parties[0].search.left = (parties[0].search.left + 1) & 255;
+	fail_join = -1;
+	run(3);
+	CHECK(machines[0].in < 0, "a game the party left is not followed: %d", machines[0].in);
+}
+
 static void check_party_journeys(void)
 {
 	check_e24_leader_cancels();
@@ -2891,6 +2937,7 @@ static void check_party_journeys(void)
 	check_e77_friend_joins_search();
 	check_e77_party_outgrows();
 	check_member_stays_in_game();
+	check_e77_leader_follows_member();
 	check_e25_follow_big();
 	check_e29_cannot_follow();
 }
@@ -2928,6 +2975,24 @@ static void check_party_record_search(void)
 	CHECK(parties[2].search.has_game && !strcmp(parties[2].search.invite, "halo://join/0123"),
 		"each member opens the invite sealed to it: %s", parties[2].search.invite);
 	CHECK(!parties[2].left_number && parties[2].followed_game == 3, "the first record heard leaves that search open");
+	strcpy(parties[1].game.invite, "halo://join/4567");
+	parties[1].game.left = 9;
+	parties[1].game.playlist = P2P_MM_CTF;
+	parties[1].game.size = P2P_MM_4V4;
+	parties[1].game.public_game = 1;
+	party_run(3, 7);
+	CHECK(!strcmp(parties[0].members[1].game.invite, "halo://join/4567") && parties[0].members[1].game.left == 9 &&
+		parties[0].members[1].game.playlist == P2P_MM_CTF && parties[0].members[1].game.size == P2P_MM_4V4 &&
+		parties[0].members[1].game.public_game, "the leader opens the game a member reached");
+	parties[1].game.playlist = NUMBER_OF_P2P_MM_PLAYLISTS;
+	parties[0].members[1].game.invite[0] = 0;
+	party_run(3, 7);
+	CHECK(!parties[0].members[1].game.invite[0], "a playlist out of range is dropped");
+	parties[1].game.playlist = P2P_MM_CTF;
+	parties[1].game.size = NUMBER_OF_P2P_MM_SIZES;
+	party_run(3, 7);
+	CHECK(!parties[0].members[1].game.invite[0], "a size out of range is dropped");
+	memset(&parties[1].game, 0, sizeof(parties[1].game));
 	for (index = 0; index < 4; index++)
 	{
 		int *const field = fields[index], good = *field;
@@ -3408,10 +3473,10 @@ static void check_party_wiring(void)
 	party_machine_hears(5, 0);
 	choice.size = P2P_MM_1V1;
 	p2p_mm_search(&choice);
-	CHECK(search->state == P2P_MM_OFF && p2p_party_too_big(), "SEARCH refuses a size the party does not fit");
+	CHECK(search->state == P2P_MM_OFF && (p2p_party_mm_notice() == P2P_MM_NOTICE_TOO_BIG), "SEARCH refuses a size the party does not fit");
 	choice.size = P2P_MM_2V2;
 	p2p_mm_search(&choice);
-	CHECK(search->state != P2P_MM_OFF && !p2p_party_too_big(), "one it fits goes, and the notice with it");
+	CHECK(search->state != P2P_MM_OFF && !(p2p_party_mm_notice() == P2P_MM_NOTICE_TOO_BIG), "one it fits goes, and the notice with it");
 	party_update_locked();
 	CHECK(search->party.count == 2, "a leader's search carries its member: %d", search->party.count);
 	p2p_mm_cancel();

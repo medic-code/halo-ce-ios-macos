@@ -218,6 +218,13 @@ void mm_invite_text(const unsigned char *key_hash, const unsigned char *token, c
 
 enum { MM_PARTY_NONE, MM_PARTY_LEADER, MM_PARTY_MEMBER };
 
+/* a game a member reached; invite empty: none */
+struct mm_party_game
+{
+	int left, playlist, size, public_game;
+	char invite[P2P_LINK_SIZE];
+};
+
 struct mm_party_member
 {
 	unsigned char key[P2P_KEY_SIZE], hash[P2P_KEY_HASH_SIZE];
@@ -226,6 +233,7 @@ struct mm_party_member
 	unsigned char signature[P2P_SIGNATURE_SIZE];
 	int signature_heard;
 	int searching, in_game, can_host, left_number;
+	struct mm_party_game game;
 };
 
 struct mm_party_gone
@@ -241,8 +249,8 @@ struct mm_party_search
 	int number, game, left;
 	int searching, widened, playlists, size;
 	int has_game, game_playlist, game_size, public_game;
-	/* the party grew too big for the search: it stopped, or goes on in its game without the friend */
-	int outgrown;
+	/* the notice of what stopped the search; TOO_BIG: or goes on in its game without the friend */
+	int stopped;
 	char invite[P2P_LINK_SIZE];
 };
 
@@ -266,6 +274,9 @@ struct mm_party
 	/* a member's: that first record was already searching, without it */
 	/* what this member's record tells the leader */
 	int in_game, can_host;
+	struct mm_party_game game;
+	/* the leader's: joining the game a member reached */
+	int following_member;
 	/* the leader's: since when members have had to follow */
 	unsigned long follow_since;
 	int follow_done;
@@ -305,7 +316,8 @@ void mm_party_search(struct mm_party *party, struct mm_search *search, unsigned 
 
 struct mm_search *p2p_mm_local(void);
 int p2p_party_is_member(void);
-int p2p_party_too_big(void);
+/* the P2P_MM_NOTICE_ of a party notice that stopped the search */
+int p2p_party_mm_notice(void);
 void p2p_party_search_begin(struct mm_search *search);
 void p2p_party_search_left(void);
 
