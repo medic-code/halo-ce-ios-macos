@@ -2066,6 +2066,12 @@ void p2p_signal_party_publish(const unsigned char *payload, int size)
 		publish_everywhere(signalling.party_topic, payload, size);
 }
 
+void p2p_signal_party_publish_on(const char *topic, const unsigned char *payload, int size)
+{
+	if (topic[0] && size <= MAXIMUM_PUBLISH_SIZE)
+		publish_everywhere(topic, payload, size);
+}
+
 void p2p_signal_host(const unsigned char *token)
 {
 	if (!signalling.has_nonce_key)
