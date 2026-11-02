@@ -2638,6 +2638,36 @@ static void check_party_leaked_link(void)
 	CHECK(strcmp(parties[1].members[0].name, "FAKE") != 0, "E42: the leader's key without its signature is ignored");
 }
 
+static void check_party_leaves(void)
+{
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE], late[MM_MAXIMUM_RECORD_SIZE];
+	char topic[P2P_PARTY_TOPIC_SIZE];
+	struct mm_party copy;
+	int size, late_size;
+
+	case_name = "e61_leave_party";
+	party_form(3);
+	strcpy(topic, parties[2].topic);
+	copy = parties[2];
+	copy.sent = party_now - 3000;
+	late_size = mm_party_step(&copy, party_now, late);
+	CHECK(mm_party_leave(&parties[0], bytes) == 0, "the leader has no LEAVE PARTY");
+	size = mm_party_leave(&parties[2], bytes);
+	party_send(3, topic, bytes, size);
+	CHECK(parties[2].role == MM_PARTY_NONE && !parties[2].topic[0] && parties[2].notice == P2P_PARTY_NOTICE_NONE,
+		"E61: the member is solo");
+	CHECK(parties[0].count == 2 && !party_lists(&parties[0], "KAT"), "E61: the leader's party is smaller at once");
+	CHECK(parties[0].notice == P2P_PARTY_NOTICE_LEFT && !strcmp(parties[0].notice_name, "KAT"), "KAT LEFT THE PARTY");
+	party_run(3, 6);
+	CHECK(parties[1].count == 2 && !party_lists(&parties[1], "KAT"), "E61: the others' lists within 3 s");
+	party_send(3, topic, late, late_size);
+	CHECK(parties[0].count == 2, "a copy that comes late from another broker brings nobody back");
+	party_seed(2, seed);
+	CHECK(mm_party_join(&parties[2], seed, parties[0].link, party_now), "Kat comes back");
+	party_run(3, 6);
+	CHECK(parties[0].count == 3 && party_lists(&parties[0], "KAT"), "a member who left may join again");
+}
+
 static void check_party_expiry(void)
 {
 	unsigned long heard;
@@ -2765,6 +2795,7 @@ int main(int argc, char **argv)
 	check_party_link();
 	check_party_status();
 	check_party_leaked_link();
+	check_party_leaves();
 	check_party_expiry();
 	check_party_sealed();
 	check_party_copies();

@@ -190,6 +190,12 @@ struct mm_party_member
 	unsigned long sequence, heard;
 };
 
+struct mm_party_gone
+{
+	unsigned char hash[P2P_KEY_HASH_SIZE];
+	unsigned long sequence;
+};
+
 struct mm_party
 {
 	unsigned char seed[P2P_SEED_SIZE], key[P2P_KEY_SIZE], hash[P2P_KEY_HASH_SIZE], seal[P2P_SHA256_SIZE];
@@ -200,6 +206,8 @@ struct mm_party
 	int count;
 	char topic[P2P_PARTY_TOPIC_SIZE], link[P2P_PARTY_LINK_SIZE];
 	unsigned long sequence, sent;
+	struct mm_party_gone gone[P2P_PARTY_MAXIMUM];
+	int gone_count;
 	int notice;
 	char notice_name[P2P_PARTY_NAME_SIZE + 1];
 };
@@ -217,6 +225,7 @@ int mm_party_link_held(const char *text);
 int mm_party_join(struct mm_party *party, const unsigned char *seed, const char *text, unsigned long now);
 /* each returns the size of a record to publish on the topic held before the call, 0 if none */
 int mm_party_step(struct mm_party *party, unsigned long now, unsigned char *bytes);
+int mm_party_leave(struct mm_party *party, unsigned char *bytes);
 /* opens a record and screens copies from other brokers, before any signature check; 1 if mm_party_verify should see it */
 int mm_party_read(struct mm_party *party, const unsigned char *payload, int size, struct mm_party_record *record);
 int mm_party_verify(const struct mm_party_record *record);
