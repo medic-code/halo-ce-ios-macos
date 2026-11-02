@@ -7,6 +7,11 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
+#ifdef _WIN32
+#define strcasecmp _stricmp
+#else
+#include <strings.h>
+#endif
 #include <time.h>
 
 void platform_log(const char *format, ...);
@@ -748,6 +753,8 @@ static int pick_game(struct mm_search *search, unsigned long now, struct mm_out 
 		waiting += p2p_lobby_pick_unpinged(games, count, &wanted);
 		waiting += wanted.big && !p2p_lobby_masters_were_heard();
 		found = p2p_lobby_pick(games, count, &wanted);
+		/* the brokers' games arrive after the masters' list, and a player's game beats a server when no region is set */
+		waiting += found >= 0 && games[found].dedicated && !wanted.region[0];
 		if (found < 0)
 			continue;
 		better = index < 0;
@@ -1297,6 +1304,31 @@ static void browse_for(int size)
 	if (p2p_mm_size_big(size))
 		master_list_refresh();
 	p2p_lobby_browse(1);
+}
+
+const char *p2p_mm_region(const char *setting)
+{
+	/* inclusive, in minutes east of UTC */
+	static const struct { int from, to; const char *region; } regions[] = {
+		{ -10 * 60, -7 * 60, "na-west" },
+		{ -6 * 60, -4 * 60, "na-east" },
+		{ -1 * 60, 4 * 60, "eu" },
+		{ 8 * 60, 14 * 60, "oce" },
+	};
+	time_t now = time(NULL);
+	/* mktime reads gmtime's fields as local standard time: daylight saving
+	stays out, so a machine keeps its region all year */
+	long offset = (long)difftime(now, mktime(gmtime(&now))) / 60;
+	size_t index;
+
+	if (setting[0])
+		return strcasecmp(setting, "any") ? setting : "";
+	for (index = 0; index < sizeof(regions) / sizeof(regions[0]); index++)
+	{
+		if (offset >= regions[index].from && offset <= regions[index].to)
+			return regions[index].region;
+	}
+	return "";
 }
 
 void p2p_mm_search(const struct p2p_mm_choice *choice)

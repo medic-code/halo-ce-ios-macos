@@ -1020,7 +1020,9 @@ topic, `hceu/3/mm/<network version>/<playlist>/<size>`, on which a search
 publishes signed searching, hosting and cancel records every 3 s, at most
 four records a second. A record's signature is the run's key, and a held
 game's token is sealed to each member of its pool. A queue is ordered by key
-hash, so every machine elects the same host.
+hash, so every machine elects the same host. A big size has no searching
+records: its topic carries big hosts' records, and a lone big host joins
+another it hears there.
 
 ## Testing
 

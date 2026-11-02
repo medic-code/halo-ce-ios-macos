@@ -2078,16 +2078,18 @@ def _join4(base: str) -> list:
 
 
 # in p2p.h's P2P_MM_* order; MATCHMAKING_HELP in menu_functions.c's _matchmaking_help_* order
-MATCHMAKING_SIZES = ["1V1", "2V2", "3V3", "4V4", "FFA 6"]
+MATCHMAKING_SIZES = ["1V1", "2V2", "3V3", "4V4", "FFA 6", "BIG TEAM", "BIG FFA"]
 MATCHMAKING_PLAYLISTS = ["SLAYER", "CTF", "KING OF THE HILL", "ODDBALL", "RACE"]
 MATCHMAKING_HELP = [
     *(f"Players a side. {size} is two teams\\nof {count}. Required."
       for size, count in zip(MATCHMAKING_SIZES, ["one", "two", "three", "four"])),
     "Six players, every one for\\nthemselves. Required.",
+    "Two big teams. Joins a big game\\nnear you, or hosts one at once.",
+    "A big free for all. Joins a game\\nnear you, or hosts one at once.",
     "CTF has no free for all. Set another\\nplaylist to YES for this size.",
     "Slayer games: the most kills wins.", "Capture the Flag games.", "King of the Hill games.", "Oddball games.",
     "Race games.",
-    "Search for a game of a playlist at\\nYES, at this game size.",
+    "Search for a game of a playlist at\\nYES. A big search lists your name.",
     "CHOOSE A PLAYLIST: SET ONE\\nTO YES.", "ONE PLAYER A MACHINE FOR\\nMATCHMAKING.",
     "",
 ]
