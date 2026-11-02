@@ -5806,8 +5806,11 @@ static void matchmaking_lines(const struct p2p_mm_status *status, wchar_t *title
 				region_to_wide(status->region, where, NUMBEROF(where));
 			else if (status->ping >= 0)
 				usnprintf(where, NUMBEROF(where) - 1, L"%d ms", status->ping);
-			usnprintf(help, size - 1, L"Joining %ls %ls\r\n%d of %d players%ls%ls", playlist, game_size,
-				status->players, status->most_players, where[0] ? L", " : L"", where);
+			if (status->most_players)
+				usnprintf(help, size - 1, L"Joining %ls %ls\r\n%d of %d players%ls%ls", playlist, game_size,
+					status->players, status->most_players, where[0] ? L", " : L"", where);
+			else
+				usnprintf(help, size - 1, L"Joining %ls %ls\r\n%ls", playlist, game_size, where);
 			break;
 		}
 		usnprintf(count, size - 1, L"%d of %d matched", status->players, status->most_players);

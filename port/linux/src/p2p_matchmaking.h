@@ -29,7 +29,7 @@ enum
 	MM_MEMBER_SIZE = P2P_KEY_SIZE + P2P_SIGNATURE_SIZE,
 	MM_MAXIMUM_PARTY_SIZE = MM_HEADER_SIZE + 1 + (MM_MAXIMUM_PARTY - 1) * MM_MEMBER_SIZE + P2P_SIGNATURE_SIZE,
 	MM_SEALED_INVITE_SIZE = P2P_LINK_SIZE + P2P_SEAL_OVERHEAD,
-	MM_PARTY_SEARCH_SIZE = 6,
+	MM_PARTY_SEARCH_SIZE = 7,
 	MM_MAXIMUM_LEADER_SIZE = 1 + P2P_KEY_SIZE + 4 + P2P_PARTY_NAME_SIZE + 1 + (MM_MAXIMUM_PARTY - 1) * P2P_KEY_HASH_SIZE +
 		MM_PARTY_SEARCH_SIZE + 2 + (MM_MAXIMUM_PARTY - 1) * MM_SEALED_INVITE_SIZE + P2P_SIGNATURE_SIZE + P2P_SEAL_OVERHEAD,
 	MM_MAXIMUM_SEARCH_SIZE = MM_MAXIMUM_HOSTING_SIZE > MM_MAXIMUM_PARTY_SIZE ? MM_MAXIMUM_HOSTING_SIZE :
@@ -144,6 +144,9 @@ struct mm_search_party
 	unsigned char keys[MM_MAXIMUM_PARTY - 1][P2P_KEY_SIZE];
 	unsigned char signatures[MM_MAXIMUM_PARTY - 1][P2P_SIGNATURE_SIZE];
 	int member_hosts;
+	/* a member: the leader's search decides, and this machine publishes none of its own */
+	int following;
+	unsigned char leader[P2P_KEY_SIZE], leader_hash[P2P_KEY_HASH_SIZE];
 };
 
 struct mm_search
@@ -201,6 +204,10 @@ int mm_cancel(struct mm_search *search, struct mm_out *out, int out_size);
 void mm_game_lost(struct mm_search *search, unsigned long now);
 void mm_host_gave_up(struct mm_search *search, unsigned long now);
 void mm_set_party(struct mm_search *search, const struct mm_search_party *party, unsigned long now);
+void mm_follow(struct mm_search *search, const unsigned char *seed, const struct p2p_mm_choice *choice,
+	const unsigned char *leader, int players, unsigned long now, unsigned long unix_now);
+void mm_follow_game(struct mm_search *search, const char *invite, int playlist, int size, int public_game,
+	unsigned long now);
 void mm_invite_text(const unsigned char *key_hash, const unsigned char *token, char *text);
 
 enum { MM_PARTY_NONE, MM_PARTY_LEADER, MM_PARTY_MEMBER };
@@ -226,7 +233,7 @@ struct mm_party_search
 {
 	/* rises with each SEARCH; left: with each game the party gives up */
 	int number, game, left;
-	int searching, widened, playlists, size;
+	int searching, widened, playlists, size, host;
 	int has_game, game_playlist, game_size, public_game;
 	char invite[P2P_LINK_SIZE];
 };
@@ -280,5 +287,13 @@ int mm_party_read(struct mm_party *party, const unsigned char *payload, int size
 int mm_party_verify(const struct mm_party_record *record);
 void mm_party_heard(struct mm_party *party, const struct mm_party_record *record, unsigned long now);
 void mm_party_status(const struct mm_party *party, struct p2p_party_status *status);
+void mm_party_search_begin(struct mm_party *party, struct mm_search *search, unsigned long now);
+void mm_party_search_left(struct mm_party *party, unsigned long now);
+void mm_party_search(struct mm_party *party, struct mm_search *search, unsigned long now, unsigned long unix_now);
+
+struct mm_search *p2p_mm_local(void);
+int p2p_party_is_member(void);
+void p2p_party_search_begin(struct mm_search *search);
+void p2p_party_search_left(void);
 
 #endif
