@@ -5736,15 +5736,14 @@ static void matchmaking_party_words(const struct p2p_party_status *party, const 
 	if (view->asking == _matchmaking_ask_leave)
 		usnprintf(help, size - 1, L"Leave %ls's party?", leader);
 	else if (view->asking == _matchmaking_ask_remove)
-		usnprintf(help, size - 1, L"Remove %ls from the party?", name);
+		usnprintf(help, size - 1, L"Remove %ls\r\nfrom the party?", name);
 	else if (matchmaking_party_member(party))
 	{
 		if (leader[0])
-			usnprintf(help, size - 1, L"%ls chooses and searches\r\nfor the party. You join %ls's\r\nmatch, on %ls's team.",
-				leader, leader, leader);
+			usnprintf(help, size - 1, L"%ls searches for you.\r\nYou join %ls's team.", leader, leader);
 	}
 	else if (view->focused > 0)
-		usnprintf(help, size - 1, L"X removes %ls from the party\r\nand makes a new party link.", name);
+		usnprintf(help, size - 1, L"X removes %ls from\r\nthe party and makes a new link.", name);
 	else if (view->size_focused && party->count > 1 && first < (short)NUMBEROF(skipped))
 		usnprintf(help, size - 1, L"A party of %d plays %ls or larger:\r\n%ls skipped.", party->count,
 			matchmaking_size_words[first], skipped[first]);
@@ -5753,7 +5752,7 @@ static void matchmaking_party_words(const struct p2p_party_status *party, const 
 	if (matchmaking_party_member(party))
 	{
 		if (leader[0] && view->asking != _matchmaking_ask_leave)
-			usnprintf(line, size - 1, L"Waiting for %ls to search.", leader);
+			usnprintf(line, size - 1, L"Waiting for %ls\r\nto search.", leader);
 	}
 	else if (view->invited)
 		usnprintf(line, size - 1, L"Party link copied%ls", view->discord ? L", and on\r\nDiscord's INVITE." : L".");
@@ -6317,7 +6316,7 @@ static void matchmaking_lines(const struct p2p_mm_status *status, const struct p
 		wchar_t leader[P2P_PARTY_NAME_SIZE + 1];
 
 		mods_wide_text(party->members[0].name, leader, P2P_PARTY_NAME_SIZE + 1);
-		usnprintf(help, size - 1, L"%ls searches for the party.\r\nYou follow %ls into the game.", leader, leader);
+		usnprintf(help, size - 1, L"%ls searches for you.\r\nYou follow them into the game.", leader);
 	}
 	title[size - 1] = count[size - 1] = help[size - 1] = notice[size - 1] = 0;
 }

@@ -2103,7 +2103,7 @@ def _matchmaking() -> list:
     party_texts = [("notice", 35, 74, 570, 16, gold, None, None), ("title", 340, 92, 200, 18, "#FF2896FF", None, "PARTY"),
                    ("count", 340, 92, 265, 18, "#FFFFFFFF", "right", None),
                    ("line", 340, 284, 265, 36, "#FFFFFFFF", None, None),
-                   ("help", 373, 357, 232, 40, "#FFFFFFFF", None, None)]
+                   ("help", 340, 357, 265, 40, "#FFFFFFFF", None, None)]
     lines = _widget(f"{MT}/multiplayer_type_matchmaking_item",
                     [("type", "text"), ("left", 51), ("width", 232), ("height", 32), ("bitmap", "bitmaps/list_item_bkd"),
                      ("string_list", f"{MT}/multiplayer_options"), ("string_index", 8), ("font", "ui\\large_ui"),
@@ -2122,7 +2122,7 @@ def _matchmaking() -> list:
         lines += _widget(f"{base}/party_{key}", [("type", "text"), ("controller", 1), ("left", left), ("top", top),
                                                  ("width", width), ("height", height), ("text", text),
                                                  ("font", "ui\\small_ui"), ("color", color), ("align", align)], [])
-    lines += _widget(f"{base}/help", [("type", "text"), ("controller", 1), ("left", 373), ("top", 357), ("width", 232),
+    lines += _widget(f"{base}/help", [("type", "text"), ("controller", 1), ("left", 340), ("top", 357), ("width", 265),
                                       ("height", 40), ("string_list", f"{base}/help_strings"), ("font", "ui\\small_ui"),
                                       ("color", "#FFFFFFFF")], [])
     rows = [("size", 104)] + [(f"playlist_{index}", 136 + 23 * index) for index in range(len(MATCHMAKING_PLAYLISTS))]
@@ -2141,7 +2141,7 @@ def _matchmaking() -> list:
                       '<on event="left_mouse" run="mouse emit accept event"/>',
                       f'<child widget="{base}/party_slot_name" x="24"/>',
                       f'<child widget="{base}/party_slot_mark" x="145"/>'])
-    lines += _widget(f"{base}/party_slot_name", [("type", "text"), ("controller", 1), ("width", 120),
+    lines += _widget(f"{base}/party_slot_name", [("type", "text"), ("controller", 1), ("width", 134),
                                                  ("height", SEARCH_SLOT_SIZE[1]), ("font", "ui\\small_ui"),
                                                  ("color", "#FFFFFFFF"), ("text_y", 1)], [])
     lines += _widget(f"{base}/party_slot_mark", [("type", "text"), ("controller", 1), ("width", 112),
