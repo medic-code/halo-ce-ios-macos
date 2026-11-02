@@ -226,6 +226,7 @@ int mm_party_join(struct mm_party *party, const unsigned char *seed, const char 
 /* each returns the size of a record to publish on the topic held before the call, 0 if none */
 int mm_party_step(struct mm_party *party, unsigned long now, unsigned char *bytes);
 int mm_party_leave(struct mm_party *party, unsigned char *bytes);
+int mm_party_remove(struct mm_party *party, int index, const unsigned char *secret, unsigned long now, unsigned char *bytes);
 /* opens a record and screens copies from other brokers, before any signature check; 1 if mm_party_verify should see it */
 int mm_party_read(struct mm_party *party, const unsigned char *payload, int size, struct mm_party_record *record);
 int mm_party_verify(const struct mm_party_record *record);

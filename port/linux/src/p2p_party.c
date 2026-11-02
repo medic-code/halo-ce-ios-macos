@@ -17,7 +17,9 @@ enum
 	PARTY_HEADER_SIZE = 1 + P2P_KEY_SIZE + 4,
 	PARTY_MEMBER_RECORD = 1,
 	PARTY_LEADER_RECORD,
+	PARTY_LINK_RECORD,
 	PARTY_FLAG_LEAVING = 1,
+	SEALED_SECRET_SIZE = P2P_PARTY_SECRET_SIZE + P2P_SEAL_OVERHEAD,
 };
 
 static int elapsed(unsigned long since, unsigned long now, unsigned long time)
@@ -228,6 +230,19 @@ static int write_leader(struct mm_party *party, unsigned char *bytes)
 	return record_finish(party, plain, size, bytes);
 }
 
+/* what the leader and a member (other: the other's Ed25519 key) seal a new link's secret with */
+static int pair_key(const struct mm_party *party, const unsigned char *other, unsigned char *key)
+{
+	unsigned char own[P2P_KEY_SIZE], public_key[P2P_KEY_SIZE], x25519[P2P_KEY_SIZE], shared[P2P_KEY_SIZE];
+
+	if (!p2p_ed25519_to_x25519(other, x25519))
+		return 0;
+	p2p_ed25519_public(party->seed, public_key, own);
+	p2p_x25519(shared, own, x25519);
+	p2p_hmac_sha256(shared, P2P_KEY_SIZE, "party-link", 10, key);
+	return 1;
+}
+
 static void remember_gone(struct mm_party *party, const struct mm_party_member *member, unsigned long sequence)
 {
 	struct mm_party_gone *gone = &party->gone[party->gone_count++ % P2P_PARTY_MAXIMUM];
@@ -239,6 +254,41 @@ static void remember_gone(struct mm_party *party, const struct mm_party_member *
 static void drop_member(struct mm_party *party, struct mm_party_member *member)
 {
 	memmove(member, member + 1, (size_t)(party->members + --party->count - member) * sizeof(*member));
+}
+
+int mm_party_remove(struct mm_party *party, int index, const unsigned char *secret, unsigned long now, unsigned char *bytes)
+{
+	unsigned char plain[MM_MAXIMUM_RECORD_SIZE];
+	struct mm_party_member *removed;
+	int size, count_at, count = 0, other, out;
+
+	if (party->role != MM_PARTY_LEADER || index < 1 || index >= party->count)
+		return 0;
+	removed = &party->members[index];
+	size = record_start(party, PARTY_LINK_RECORD, plain);
+	memcpy(plain + size, removed->hash, P2P_KEY_HASH_SIZE);
+	size += P2P_KEY_HASH_SIZE;
+	count_at = size++;
+	for (other = 1; other < party->count; other++)
+	{
+		unsigned char key[P2P_SHA256_SIZE];
+
+		if (other == index || !pair_key(party, party->members[other].key, key))
+			continue;
+		memcpy(plain + size, party->members[other].hash, P2P_KEY_HASH_SIZE);
+		size += P2P_KEY_HASH_SIZE;
+		size += p2p_seal(key, secret, P2P_PARTY_SECRET_SIZE, plain + size);
+		count++;
+	}
+	plain[count_at] = (unsigned char)count;
+	out = record_finish(party, plain, size, bytes);
+	remember_gone(party, removed, removed->sequence);
+	drop_member(party, removed);
+	set_secret(party, secret);
+	for (other = 1; other < party->count; other++)
+		party->members[other].heard = now;
+	party->sent = now - PARTY_INTERVAL;
+	return out;
 }
 
 int mm_party_leave(struct mm_party *party, unsigned char *bytes)
@@ -328,7 +378,8 @@ int mm_party_read(struct mm_party *party, const unsigned char *payload, int size
 	if (record->kind == PARTY_LEADER_RECORD)
 		return body_size > P2P_PARTY_NAME_SIZE && body[P2P_PARTY_NAME_SIZE] < P2P_PARTY_MAXIMUM &&
 			body_size == P2P_PARTY_NAME_SIZE + 1 + body[P2P_PARTY_NAME_SIZE] * P2P_KEY_HASH_SIZE;
-	return 0;
+	return record->kind == PARTY_LINK_RECORD && body_size > P2P_KEY_HASH_SIZE &&
+		body_size == P2P_KEY_HASH_SIZE + 1 + body[P2P_KEY_HASH_SIZE] * (P2P_KEY_HASH_SIZE + SEALED_SECRET_SIZE);
 }
 
 int mm_party_verify(const struct mm_party_record *record)
@@ -406,6 +457,29 @@ static void heard_leader(struct mm_party *party, const struct mm_party_record *r
 	}
 }
 
+static void heard_link(struct mm_party *party, const struct mm_party_record *record)
+{
+	const unsigned char *entry = record->body + P2P_KEY_HASH_SIZE + 1;
+	int count = record->body[P2P_KEY_HASH_SIZE], index;
+
+	if (!memcmp(record->body, party->hash, P2P_KEY_HASH_SIZE))
+	{
+		set_notice(party, P2P_PARTY_NOTICE_REMOVED, party->members[0].name);
+		clear_party(party);
+		return;
+	}
+	for (index = 0; index < count; index++, entry += P2P_KEY_HASH_SIZE + SEALED_SECRET_SIZE)
+	{
+		unsigned char key[P2P_SHA256_SIZE], secret[P2P_PARTY_SECRET_SIZE];
+
+		if (memcmp(entry, party->hash, P2P_KEY_HASH_SIZE) || !pair_key(party, party->members[0].key, key))
+			continue;
+		if (p2p_open(key, entry + P2P_KEY_HASH_SIZE, SEALED_SECRET_SIZE, secret) == P2P_PARTY_SECRET_SIZE)
+			set_secret(party, secret);
+		return;
+	}
+}
+
 void mm_party_heard(struct mm_party *party, const struct mm_party_record *record, unsigned long now)
 {
 	if (party->role == MM_PARTY_NONE)
@@ -422,6 +496,8 @@ void mm_party_heard(struct mm_party *party, const struct mm_party_record *record
 		get_name(record->body, party->members[0].name);
 		heard_leader(party, record);
 	}
+	else
+		heard_link(party, record);
 }
 
 void mm_party_status(const struct mm_party *party, struct p2p_party_status *status)

@@ -580,6 +580,8 @@ def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
 @pytest.mark.parametrize("fault,case", [
     (("memcmp(record->key, party->members[0].key, P2P_KEY_SIZE) ||\n", "0 ||\n"), "e42_leaked_link"),
     (("return p2p_ed25519_verify(record->key,", "return 1 || p2p_ed25519_verify(record->key,"), "e42_leaked_link"),
+    (("if (other == index || !pair_key(party, party->members[other].key, key))", "if (1)"), "e50_removed"),
+    (("p2p_x25519(shared, own, x25519);", "memset(shared, 0, P2P_KEY_SIZE);"), "e50_removed"),
     (("p2p_hmac_sha256(secret, P2P_PARTY_SECRET_SIZE, \"seal\", 4, party->seal);",
       "p2p_sha256(secret, P2P_PARTY_SECRET_SIZE, party->seal);"), "party sealed"),
     (("return sequence <= member->sequence;", "return 0;"), "party copies"),
