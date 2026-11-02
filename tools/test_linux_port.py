@@ -381,19 +381,25 @@ MATCHMAKING_SOURCES = ["port/linux/src/p2p_crypto.c", "port/third_party/monocyph
                        "port/third_party/monocypher/monocypher-ed25519.c"]
 
 
-def matchmaking_check(tmp_path, fault=None, *arguments):
+def matchmaking_check(tmp_path, fault=None, *arguments, party_fault=None):
     source = Path("port/linux/src/p2p_matchmaking.c").read_text()
     if fault:
         assert source.count(fault[0]) == 1, fault[0]
         source = source.replace(*fault)
     copy = tmp_path / "p2p_matchmaking.c"
     copy.write_text(source)
+    party = Path("port/linux/src/p2p_party.c").read_text()
+    if party_fault:
+        assert party.count(party_fault[0]) == 1, party_fault[0]
+        party = party.replace(*party_fault)
+    party_copy = tmp_path / "p2p_party.c"
+    party_copy.write_text(party)
     lobby = read("port/linux/src/p2p_lobby.c")
     (tmp_path / "lobby_pick.inc").write_text("\n".join(function(lobby, name) for name in
                                                       ("pick_fits", "p2p_lobby_pick", "p2p_lobby_pick_unpinged")))
     program = tmp_path / "p2p_matchmaking_check"
     built = subprocess.run(["clang", *platform_flags(), "-Iport/linux/src", f"-I{tmp_path}", "-O1", "-no-pie",
-                            "-Wl,--wrap=p2p_ed25519_verify", "-Wl,--unresolved-symbols=ignore-all", "-o", str(program), "tools/p2p_matchmaking_check.c", str(copy), *MATCHMAKING_SOURCES],
+                            "-Wl,--wrap=p2p_ed25519_verify", "-Wl,--unresolved-symbols=ignore-all", "-o", str(program), "tools/p2p_matchmaking_check.c", str(copy), str(party_copy), *MATCHMAKING_SOURCES],
                            capture_output=True, text=True)
     assert built.returncode == 0, built.stderr[-4000:]
     return subprocess.run([str(program), *arguments], capture_output=True, text=True, timeout=300).stdout
@@ -497,6 +503,27 @@ def test_p2p_matchmaking(tmp_path):
 ])
 def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
     output = matchmaking_check(tmp_path, fault)
+    assert f"FAIL {case}:" in output, output
+
+
+@linux_host_only
+@pytest.mark.parametrize("fault,case", [
+    (("memcmp(record->key, party->members[0].key, P2P_KEY_SIZE) ||\n", "0 ||\n"), "e42_leaked_link"),
+    (("return p2p_ed25519_verify(record->key,", "return 1 || p2p_ed25519_verify(record->key,"), "e42_leaked_link"),
+    (("if (other == index || !pair_key(party, party->members[other].key, key))", "if (1)"), "e50_removed"),
+    (("p2p_x25519(shared, own, x25519);", "memset(shared, 0, P2P_KEY_SIZE);"), "e50_removed"),
+    (("p2p_hmac_sha256(secret, P2P_PARTY_SECRET_SIZE, \"seal\", 4, party->seal);",
+      "p2p_sha256(secret, P2P_PARTY_SECRET_SIZE, party->seal);"), "party sealed"),
+    (("return sequence <= member->sequence;", "return 0;"), "party copies"),
+    (("&& sequence <= party->gone[index].sequence", "&& 0"), "e61_leave_party"),
+    (("remember_gone(party, member, record->sequence);", ""), "e61_leave_party"),
+    (("PARTY_EXPIRY = 10000", "PARTY_EXPIRY = 20000"), "member_expiry"),
+    (("party->count == P2P_PARTY_MAXIMUM", "party->count == P2P_PARTY_MAXIMUM + 1"), "party full"),
+    (("return !isxdigit((unsigned char)*text);", "return 1;"), "party link"),
+    (("!p2p_ed25519_to_x25519(leader, x25519) ||\n", "\n"), "party link"),
+])
+def test_p2p_party_negative_control(tmp_path, fault, case):
+    output = matchmaking_check(tmp_path, party_fault=fault)
     assert f"FAIL {case}:" in output, output
 
 
