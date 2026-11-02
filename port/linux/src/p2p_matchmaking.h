@@ -16,6 +16,8 @@ enum
 	MM_FLAG_CAN_HOST = 1,
 	MM_FLAG_UNDER_WAY = 2,
 	MM_FLAG_HELD = 4,
+	/* the leader cannot host: the first member named does */
+	MM_FLAG_MEMBER_HOSTS = 8,
 	MM_MAXIMUM_POOL = 8,
 	MM_MAXIMUM_PARTY = P2P_PARTY_MAXIMUM,
 	MM_MAXIMUM_UNITS = 256,
@@ -43,7 +45,7 @@ struct mm_record
 	unsigned long sequence;
 	/* tenths of a second until the next */
 	int interval;
-	int can_host, under_way, held;
+	int can_host, under_way, held, member_hosts;
 	int playlist, size;
 	unsigned char key[P2P_KEY_SIZE];
 	/* the hash of the key's X25519 form: an invite's host part */
@@ -128,6 +130,16 @@ struct mm_out
 	int size;
 };
 
+/* the leader's search speaks for these members */
+struct mm_search_party
+{
+	/* players, the leader among them */
+	int count;
+	unsigned char keys[MM_MAXIMUM_PARTY - 1][P2P_KEY_SIZE];
+	unsigned char signatures[MM_MAXIMUM_PARTY - 1][P2P_SIGNATURE_SIZE];
+	int member_hosts;
+};
+
 struct mm_search
 {
 	unsigned char seed[P2P_SEED_SIZE], key[P2P_KEY_SIZE], key_hash[P2P_KEY_HASH_SIZE];
@@ -160,6 +172,7 @@ struct mm_search
 	int games_checked;
 	unsigned char picked[P2P_IDENTIFIER_SIZE];
 	int picked_set;
+	struct mm_search_party party;
 };
 
 void mm_wanted(const struct mm_search *search, int queue, struct p2p_lobby_wanted *wanted);
@@ -178,6 +191,7 @@ void mm_host_now(struct mm_search *search);
 int mm_cancel(struct mm_search *search, struct mm_out *out, int out_size);
 void mm_game_lost(struct mm_search *search, unsigned long now);
 void mm_host_gave_up(struct mm_search *search, unsigned long now);
+void mm_set_party(struct mm_search *search, const struct mm_search_party *party, unsigned long now);
 
 enum { MM_PARTY_NONE, MM_PARTY_LEADER, MM_PARTY_MEMBER };
 
