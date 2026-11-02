@@ -108,59 +108,58 @@ int main(int argc, char **argv)
 	CASE("e46_region_first")
 	{
 		count = 0;
-		add("eu", 2, 9, 16, -1, 1, "EU");
+		add("eu", 2, 9, 16, -1, 1, "eu");
 		add("players", 2, 12, 16, 60, 0, "");
-		CHECK(!strcmp(picked_big("EU"), "eu"), "E46: %s", picked_big("EU"));
-		games[0].region[0] = 'e', games[0].region[1] = 'u';
+		CHECK(!strcmp(picked_big("eu"), "eu"), "E46: %s", picked_big("eu"));
 		CHECK(!strcmp(picked_big("EU"), "eu"), "a region matches in any case: %s", picked_big("EU"));
 	}
 	CASE("e52_e57_region_only")
 	{
 		count = 0;
-		add("na", 2, 12, 16, -1, 1, "NA-E");
-		add("eu", 2, 5, 16, -1, 1, "EU");
-		CHECK(!strcmp(picked_big("EU"), "eu"), "E52: %s", picked_big("EU"));
+		add("na", 2, 12, 16, -1, 1, "na-east");
+		add("eu", 2, 5, 16, -1, 1, "eu");
+		CHECK(!strcmp(picked_big("eu"), "eu"), "E52: %s", picked_big("eu"));
 		count = 0;
-		add("na", 2, 12, 16, -1, 1, "NA-E");
+		add("na", 2, 12, 16, -1, 1, "na-east");
 		add("players", 2, 6, 16, 90, 0, "");
-		CHECK(!strcmp(picked_big("EU"), "players"), "E57: %s", picked_big("EU"));
+		CHECK(!strcmp(picked_big("eu"), "players"), "E57: %s", picked_big("eu"));
 		count = 0;
-		add("na", 2, 12, 16, -1, 1, "NA-E");
-		CHECK(!strcmp(picked_big("EU"), "none"), "E57: only NA-E: %s", picked_big("EU"));
+		add("na", 2, 12, 16, -1, 1, "na-east");
+		CHECK(!strcmp(picked_big("eu"), "none"), "E57: only na-east: %s", picked_big("eu"));
 	}
 	CASE("e53_e58_no_region")
 	{
 		count = 0;
-		add("na", 2, 12, 16, -1, 1, "NA-E");
+		add("na", 2, 12, 16, -1, 1, "na-east");
 		add("players", 2, 6, 16, 90, 0, "");
 		CHECK(!strcmp(picked_big(""), "players"), "E53: %s", picked_big(""));
 		games[count - 1].ping = 250;
 		CHECK(!strcmp(picked_big(""), "na"), "E58: %s", picked_big(""));
 		count = 0;
-		add("a", 2, 4, 16, -1, 1, "EU");
-		add("b", 2, 9, 16, -1, 1, "NA-E");
+		add("a", 2, 4, 16, -1, 1, "eu");
+		add("b", 2, 9, 16, -1, 1, "na-east");
 		CHECK(!strcmp(picked_big(""), "b"), "the dedicated server with the most players: %s", picked_big(""));
 	}
 	CASE("e55_empty_dedicated")
 	{
 		count = 0;
-		add("empty", 2, 0, 16, -1, 1, "EU");
-		CHECK(!strcmp(picked_big("EU"), "empty"), "E55: %s", picked_big("EU"));
+		add("empty", 2, 0, 16, -1, 1, "eu");
+		CHECK(!strcmp(picked_big("eu"), "empty"), "E55: %s", picked_big("eu"));
 		count = 0;
 		add("empty_players", 2, 0, 16, 40, 0, "");
-		CHECK(!strcmp(picked_big("EU"), "none"), "an empty player-hosted game is passed over: %s", picked_big("EU"));
+		CHECK(!strcmp(picked_big("eu"), "none"), "an empty player-hosted game is passed over: %s", picked_big("eu"));
 	}
 	CASE("e54_no_masters")
 	{
 		count = 0;
 		add("players", 2, 10, 16, 70, 0, "");
-		CHECK(!strcmp(picked_big("EU"), "players"), "E54: %s", picked_big("EU"));
+		CHECK(!strcmp(picked_big("eu"), "players"), "E54: %s", picked_big("eu"));
 	}
 	CASE("small_unchanged")
 	{
 		count = 0;
 		add("three", 2, 3, 4, 180, 0, "");
-		add("dedicated", 2, 3, 4, -1, 1, "EU");
+		add("dedicated", 2, 3, 4, -1, 1, "eu");
 		add("large", 2, 46, 128, 40, 0, "");
 		CHECK(!strcmp(picked(), "three"), "a small search takes neither: %s", picked());
 	}

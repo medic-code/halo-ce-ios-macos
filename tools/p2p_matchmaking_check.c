@@ -508,6 +508,13 @@ static void check_big_look(void)
 	CHECK(search.decision.kind == P2P_MM_DECIDE_JOIN && search.decision.public_game,
 		"the masters having answered, a big search picks at once, and an unflagged game is public");
 	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1000);
+	add_listing("server", 2, 9, 16, -1);
+	listings[0].dedicated = listings[0].master = 1;
+	mm_step(&search, 3000, out, MM_MAXIMUM_OUT);
+	CHECK(search.decision.kind == P2P_MM_DECIDE_NONE, "E53: with no region a dedicated server waits out the look");
+	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
+	CHECK(search.decision.kind == P2P_MM_DECIDE_JOIN, "E53: at 6 s the dedicated server is taken");
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1000);
 	add_listing("big", 2, 2, 16, 70);
 	listings[0].big_game = 1;
 	mm_step(&search, 3000, out, MM_MAXIMUM_OUT);
@@ -517,7 +524,7 @@ static void check_big_look(void)
 	add_listing("server", 2, 8, 16, -1);
 	listings[0].dedicated = listings[0].master = 1;
 	strcpy(listings[0].region, "EU");
-	mm_step(&search, 3000, out, MM_MAXIMUM_OUT);
+	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
 	CHECK(!strcmp(search.joining_region, "EU"), "a dedicated server's region reaches the screens: %s",
 		search.joining_region);
 	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1000);
@@ -2171,6 +2178,29 @@ static void check_worlds(void)
 	check_big_ffa_no_ctf();
 }
 
+static void check_region(void)
+{
+	static const struct { const char *zone, *region; } offsets[] = {
+		{ "UTC+12", "" }, { "UTC+11", "" }, { "UTC+10", "na-west" }, { "UTC+7", "na-west" }, { "UTC+6", "na-east" },
+		{ "UTC+4", "na-east" }, { "UTC+3:30", "" }, { "UTC+2", "" }, { "UTC+1", "eu" }, { "UTC0", "eu" },
+		{ "UTC-4", "eu" }, { "UTC-4:30", "" }, { "UTC-5:30", "" }, { "UTC-7", "" }, { "UTC-8", "oce" }, { "UTC-14", "oce" },
+		/* standard +3, daylight saving +5, all year */
+		{ "AAA-3BBB-5,J1/0,J365/24", "eu" },
+	};
+	size_t index;
+
+	for (index = 0; index < sizeof(offsets) / sizeof(offsets[0]); index++)
+	{
+		setenv("TZ", offsets[index].zone, 1);
+		tzset();
+		CHECK(!strcmp(p2p_mm_region(""), offsets[index].region), "the region of %s: \"%s\"", offsets[index].zone, p2p_mm_region(""));
+	}
+	CHECK(!strcmp(p2p_mm_region("any"), "") && !strcmp(p2p_mm_region("ANY"), ""), "any is the worldwide path");
+	CHECK(!strcmp(p2p_mm_region("na-west"), "na-west"), "a set region stays");
+	unsetenv("TZ");
+	tzset();
+}
+
 static void check_faults(void)
 {
 	check_invited_twice();
@@ -2209,6 +2239,7 @@ int main(int argc, char **argv)
 	check_ffa_wanted();
 	check_widened_pick();
 	check_failed_pick();
+	check_region();
 	check_worlds();
 	check_faults();
 	if (argc > 1)

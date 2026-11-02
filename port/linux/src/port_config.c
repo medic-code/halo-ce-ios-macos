@@ -799,12 +799,14 @@ static const struct config_setting config_settings[] =
 		"MATCHMAKING's playlists, comma-separated: \"slayer\", \"ctf\",\n"
 		"\"king\", \"oddball\", \"race\"." },
 	{ "network.matchmaking_size", _config_string, "\"2v2\"", "HALO_NET_MATCHMAKING_SIZE", _environment_value, _platform_all,
-		"MATCHMAKING's game size: \"1v1\", \"2v2\", \"3v3\", \"4v4\" or \"ffa6\"." },
+		"MATCHMAKING's game size: \"1v1\", \"2v2\", \"3v3\", \"4v4\", \"ffa6\",\n"
+		"\"big-team\" or \"big-ffa\"." },
 	{ "network.matchmaking_region", _config_string, "\"\"", "HALO_NET_MATCHMAKING_REGION", _environment_value,
 		_platform_all,
-		"A server region (\"eu\", \"na-east\"): MATCHMAKING's big sizes take only that\n"
-		"region's dedicated servers, before any game a player hosts. Empty: a\n"
-		"game a player hosts under 200 ms comes first." },
+		"A server region (\"eu\", \"na-east\", \"na-west\", \"oce\"): MATCHMAKING's big\n"
+		"sizes take only that region's dedicated servers, before any game a\n"
+		"player hosts. Empty: the region of the machine's UTC offset. \"any\", or\n"
+		"an offset with no region: a game a player hosts under 200 ms comes first." },
 	{ "network.browser_show_empty", _config_boolean, "true", "HALO_NET_BROWSER_SHOW_EMPTY", _environment_value,
 		_platform_all,
 		"The server browser lists games with no player (its Filters screen)." },

@@ -54,6 +54,11 @@ static void ui_play_audio_feedback_sound(short sound)
 	last_sound = sound;
 }
 
+static char const *p2p_mm_region(char const *setting)
+{
+	return setting;
+}
+
 static void p2p_mm_search(const struct p2p_mm_choice *choice)
 {
 	searches++;

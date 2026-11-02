@@ -4639,7 +4639,7 @@ static void text_to_wide(char const *text, wchar_t *wide, short size)
 	wide[index] = 0;
 }
 
-/* a master server's region label as shown, in capitals (EU, NA-E) */
+/* a master server's region label as shown, in capitals (EU, NA-EAST) */
 static void region_to_wide(char const *region, wchar_t *wide, short size)
 {
 	short index;
@@ -5550,7 +5550,7 @@ enum
 enum
 {
 	_matchmaking_help_size,
-	_matchmaking_help_no_ffa = _matchmaking_help_size + NUMBER_OF_P2P_MM_SMALL_SIZES,
+	_matchmaking_help_no_ffa = _matchmaking_help_size + NUMBER_OF_P2P_MM_SIZES,
 	_matchmaking_help_playlist,
 	_matchmaking_help_search = _matchmaking_help_playlist + NUMBER_OF_P2P_MM_PLAYLISTS,
 	_matchmaking_help_none = _matchmaking_help_search + MATCHMAKING_ONE_PLAYER + 1,
@@ -5567,7 +5567,9 @@ static struct
 
 static short matchmaking_size_after(unsigned playlists, short size)
 {
-	return mm_playlist_has_size(playlists, size) ? size : P2P_MM_2V2;
+	if (mm_playlist_has_size(playlists, size))
+		return size;
+	return size == P2P_MM_BIG_FFA ? P2P_MM_BIG_TEAM : P2P_MM_2V2;
 }
 
 static short matchmaking_search_allowed(unsigned playlists, short local_players)
@@ -5630,9 +5632,9 @@ static boolean matchmaking_screen_load(struct widget_instance *widget, boolean d
 	setting_text("network.matchmaking_playlists", text, sizeof(text), defaults);
 	setting_text("network.matchmaking_size", size_text, sizeof(size_text), defaults);
 	playlists = matchmaking_playlists_read(text);
-	while (size < NUMBER_OF_P2P_MM_SMALL_SIZES && strcmp(size_text, p2p_mm_size_names[size]))
+	while (size < NUMBER_OF_P2P_MM_SIZES && strcmp(size_text, p2p_mm_size_names[size]))
 		size++;
-	size = matchmaking_size_after(playlists, size < NUMBER_OF_P2P_MM_SMALL_SIZES ? size : P2P_MM_2V2);
+	size = matchmaking_size_after(playlists, size < NUMBER_OF_P2P_MM_SIZES ? size : P2P_MM_2V2);
 	matchmaking_screen_show(widget, playlists, size);
 	if (!defaults)
 	{
@@ -5664,7 +5666,7 @@ static void matchmaking_screen_update(struct widget_instance *list)
 		if (playlist && playlist->parameters.list.selected_index)
 			playlists |= 1u << index;
 	}
-	shown = (short)PIN(spinner->parameters.list.selected_index, 0, NUMBER_OF_P2P_MM_SMALL_SIZES - 1);
+	shown = (short)PIN(spinner->parameters.list.selected_index, 0, NUMBER_OF_P2P_MM_SIZES - 1);
 	size = mm_playlist_has_size(playlists, shown) ? shown :
 		matchmaking_size_after(playlists, matchmaking_screen.size);
 	if (list->focused_child != spinner->parent)
@@ -5729,7 +5731,7 @@ static boolean matchmaking_screen_search(void)
 		return FALSE;
 	choice.playlists = matchmaking_screen.playlists;
 	choice.size = matchmaking_screen.size;
-	snprintf(choice.region, sizeof(choice.region), "%s", config_string("network.matchmaking_region"));
+	snprintf(choice.region, sizeof(choice.region), "%s", p2p_mm_region(config_string("network.matchmaking_region")));
 	p2p_mm_search(&choice);
 	ui_play_audio_feedback_sound(SOUND_FORWARD);
 	return TRUE;
@@ -5745,22 +5747,28 @@ static boolean matchmaking_screen_back(struct widget_instance *widget, boolean *
 
 static wchar_t const *const matchmaking_playlist_words[NUMBER_OF_P2P_MM_PLAYLISTS] =
 	{ L"SLAYER", L"CTF", L"KING OF THE HILL", L"ODDBALL", L"RACE" };
-static wchar_t const *const matchmaking_size_words[NUMBER_OF_P2P_MM_SMALL_SIZES] =
-	{ L"1V1", L"2V2", L"3V3", L"4V4", L"FFA 6" };
+static wchar_t const *const matchmaking_size_words[NUMBER_OF_P2P_MM_SIZES] =
+	{ L"1V1", L"2V2", L"3V3", L"4V4", L"FFA 6", L"BIG TEAM", L"BIG FFA" };
 
 static void matchmaking_lines(const struct p2p_mm_status *status, wchar_t *title, wchar_t *count, wchar_t *help,
 	wchar_t *notice, short size)
 {
 	wchar_t const *playlist = matchmaking_playlist_words[PIN(status->playlist, 0, NUMBER_OF_P2P_MM_PLAYLISTS - 1)];
-	wchar_t const *game_size = matchmaking_size_words[PIN(status->size, 0, NUMBER_OF_P2P_MM_SMALL_SIZES - 1)];
+	wchar_t const *game_size = matchmaking_size_words[PIN(status->size, 0, NUMBER_OF_P2P_MM_SIZES - 1)];
 	int missing = status->needed - status->count;
+	int big = p2p_mm_size_big(status->size);
 
 	title[0] = count[0] = help[0] = notice[0] = 0;
-	switch (status->state)
+	switch (big && status->state == P2P_MM_QUEUED ? P2P_MM_LOOKING : status->state)
 	{
 	case P2P_MM_LOOKING:
 		usnprintf(title, size - 1, L"LOOKING FOR A GAME");
-		usnprintf(help, size - 1, L"Checking %d public games...", status->games_checked);
+		if (!big)
+			usnprintf(help, size - 1, L"Checking %d public games...", status->games_checked);
+		else if (status->state == P2P_MM_LOOKING || status->can_host > 0)
+			usnprintf(help, size - 1, L"Looking for the best big game near you.\r\nIf none fits, you host one.");
+		else
+			usnprintf(help, size - 1, L"Looking for the best big game near you.\r\nYour router cannot host.");
 		break;
 	case P2P_MM_QUEUED:
 		usnprintf(title, size - 1, L"IN THE QUEUE");
@@ -5789,15 +5797,27 @@ static void matchmaking_lines(const struct p2p_mm_status *status, wchar_t *title
 		if (status->hosts)
 		{
 			usnprintf(title, size - 1, L"%ls %ls", playlist, game_size);
-			usnprintf(help, size - 1, L"Searchers join you.");
+			usnprintf(help, size - 1, big ? L"START NOW starts it" : L"Searchers join you.");
 			break;
 		}
 		usnprintf(title, size - 1, L"MATCH FOUND");
+		if (big)
+		{
+			wchar_t where[P2P_LISTING_REGION_SIZE + 1] = L"";
+
+			if (status->region[0])
+				region_to_wide(status->region, where, NUMBEROF(where));
+			else if (status->ping >= 0)
+				usnprintf(where, NUMBEROF(where) - 1, L"%d ms", status->ping);
+			usnprintf(help, size - 1, L"Joining %ls %ls\r\n%d of %d players%ls%ls", playlist, game_size,
+				status->players, status->most_players, where[0] ? L", " : L"", where);
+			break;
+		}
 		usnprintf(count, size - 1, L"%d of %d matched", status->players, status->most_players);
 		if (status->ping >= 0)
-			usnprintf(help, size - 1, L"Joining the game: %ls %ls, %d ms", playlist, game_size, status->ping);
+			usnprintf(help, size - 1, L"Joining the game:\r\n%ls %ls, %d ms", playlist, game_size, status->ping);
 		else
-			usnprintf(help, size - 1, L"Joining the game: %ls %ls", playlist, game_size);
+			usnprintf(help, size - 1, L"Joining the game:\r\n%ls %ls", playlist, game_size);
 		break;
 	default:
 		usnprintf(title, size - 1, L"SEARCH CANCELLED");
@@ -5814,10 +5834,12 @@ static void matchmaking_lines(const struct p2p_mm_status *status, wchar_t *title
 }
 
 /* seconds: as a countdown message rounds them down, NONE when none runs */
-static void matchmaking_lobby_line(short seconds, wchar_t *line, short size)
+static void matchmaking_lobby_line(short seconds, boolean big, short players, short most_players, wchar_t *line, short size)
 {
 	if (seconds >= 0)
 		usnprintf(line, size - 1, L"Game starts in %d", seconds + 1);
+	else if (big)
+		usnprintf(line, size - 1, L"%d of %d players", players, most_players);
 	else
 		usnprintf(line, size - 1, L"Waiting for players");
 	line[size - 1] = 0;
@@ -5842,7 +5864,7 @@ static void matchmaking_search_tracker_show(struct widget_instance *screen, stru
 {
 	struct widget_instance *widget;
 	short step, index, filled, slots;
-	boolean queued, strict, found;
+	boolean queued, strict, found, big = p2p_mm_size_big(matchmaking_screen.size);
 
 	queued = status->state == P2P_MM_QUEUED || (status->state == P2P_MM_FOUND &&
 		(status->seconds >= P2P_MM_LOOK_SECONDS || status->widened));
@@ -5856,7 +5878,7 @@ static void matchmaking_search_tracker_show(struct widget_instance *screen, stru
 		widget = named(screen, "search_step", index);
 		if (widget)
 		{
-			widget->visible = index < 3 || !strict;
+			widget->visible = !big && (index < 3 || !strict);
 			widget->animation.current_frame_index = (short)(index + 1 == step ? _search_step_current :
 				index + 1 < step ? _search_step_passed : _search_step_ahead);
 			widget->alpha_modifier = index + 1 <= step ? 1.0f : TAB_UNFOCUSED_ALPHA;
@@ -5869,14 +5891,16 @@ static void matchmaking_search_tracker_show(struct widget_instance *screen, stru
 		status->mark_seconds : 0, P2P_MM_WIDEN_SECONDS);
 	search_link_fill(named(screen, "search_link", 2), step > 3 ? P2P_MM_HOST_SECONDS : step == 3 ?
 		status->mark_seconds - P2P_MM_WIDEN_SECONDS : 0, P2P_MM_HOST_SECONDS - P2P_MM_WIDEN_SECONDS);
-	visible_set(named(screen, "search_link", 2), !strict);
-	visible_set(named(screen, "search_step_4_label", 0), !strict && step < 4);
-	visible_set(named(screen, "search_step_3_label", 0), step < 3);
-	visible_set(named(screen, "search_step_3_widened", 0), step == 3);
+	visible_set(named(screen, "search_link", 0), !big);
+	visible_set(named(screen, "search_link", 1), !big);
+	visible_set(named(screen, "search_link", 2), !big && !strict);
+	visible_set(named(screen, "search_step_4_label", 0), !big && !strict && step < 4);
+	visible_set(named(screen, "search_step_3_label", 0), !big && step < 3);
+	visible_set(named(screen, "search_step_3_widened", 0), !big && step == 3);
 	found = status->state == P2P_MM_FOUND && !status->hosts;
-	filled = (short)PIN(found ? status->players : status->widened ? status->all_sizes_count : MAX(status->count, 1), 1,
+	filled = (short)PIN(big ? 1 : found ? status->players : status->widened ? status->all_sizes_count : MAX(status->count, 1), 1,
 		SEARCH_SLOTS);
-	slots = (short)PIN(status->state == P2P_MM_OFF ? 1 : found ? status->most_players : status->widened ? filled :
+	slots = (short)PIN(big || status->state == P2P_MM_OFF ? 1 : found ? status->most_players : status->widened ? filled :
 		status->needed ? status->needed : p2p_mm_size_players(matchmaking_screen.size), filled, SEARCH_SLOTS);
 	profile_name_show(named(screen, "search_slot_you", 0));
 	for (index = 1; index < SEARCH_SLOTS; index++)
@@ -5904,6 +5928,7 @@ static void matchmaking_search_update(struct widget_instance *list)
 	wchar_t title[MATCHMAKING_TEXT_LENGTH], count[MATCHMAKING_TEXT_LENGTH], help[MATCHMAKING_TEXT_LENGTH];
 	wchar_t notice[MATCHMAKING_TEXT_LENGTH], text[MATCHMAKING_TEXT_LENGTH];
 	short index;
+	boolean big;
 
 	p2p_mm_get_status(&status);
 	matchmaking_lines(&status, title, count, help, notice, MATCHMAKING_TEXT_LENGTH);
@@ -5926,8 +5951,9 @@ static void matchmaking_search_update(struct widget_instance *list)
 	text_append(text, NUMBEROF(text), TICKER_SEPARATOR);
 	text_append(text, NUMBEROF(text), status.widened ? L"ANY SIZE" : matchmaking_size_words[matchmaking_screen.size]);
 	text_set_length(named(screen, "search_card_text", 0), text, MATCHMAKING_TEXT_LENGTH);
-	visible_set(named(bar, "search_button_widen", 0), status.state == P2P_MM_QUEUED && !status.widened);
-	visible_set(named(bar, "search_button_host", 0), status.state == P2P_MM_QUEUED);
+	big = p2p_mm_size_big(matchmaking_screen.size);
+	visible_set(named(bar, "search_button_widen", 0), !big && status.state == P2P_MM_QUEUED && !status.widened);
+	visible_set(named(bar, "search_button_host", 0), !big && status.state == P2P_MM_QUEUED);
 	if ((widget = named(bar, "search_button_host", 0)) != NULL)
 		widget->alpha_modifier = status.can_host <= 0 ? TAB_UNFOCUSED_ALPHA : 1.0f;
 	focus_off_hidden(bar);
@@ -6684,7 +6710,7 @@ static void lobby_update(struct widget_instance *list)
 		{
 			wchar_t line[MATCHMAKING_TEXT_LENGTH];
 
-			matchmaking_lobby_line(seconds, line, NUMBEROF(line));
+			matchmaking_lobby_line(seconds, matchmaking_hosts_big_game(), lobby_player_count, game->maximum_players, line, NUMBEROF(line));
 			usnprintf(text, NUMBEROF(text) - 1, L"%s\r\n%s\r\n\r\n%s", gametype, kind, line);
 			text[NUMBEROF(text) - 1] = 0;
 		}
@@ -6710,7 +6736,7 @@ static void lobby_update(struct widget_instance *list)
 
 			matchmaking_lines(&search, title, count, help, notice, MATCHMAKING_TEXT_LENGTH);
 			text_append(text, NUMBEROF(text), L"\r\n\r\n");
-			text_append(text, NUMBEROF(text), help);
+			text_append(text, NUMBEROF(text), matchmaking_hosts_big_game() && !start_now ? L"Waiting for players" : help);
 		}
 		if (global_network_game_server_get() && p2p_invite_link(link, sizeof(link)))
 		{

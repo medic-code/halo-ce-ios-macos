@@ -31,6 +31,12 @@ int main(int argc, char **argv)
 		CHECK(mm_playlist_has_size(0, P2P_MM_FFA_6), "no playlist: FFA 6 not greyed");
 		CHECK(matchmaking_size_after(0, P2P_MM_FFA_6) == P2P_MM_FFA_6, "no playlist: FFA 6 kept");
 		CHECK(mm_playlist_has_size(1u << P2P_MM_CTF | 1u << P2P_MM_KING, P2P_MM_FFA_6), "CTF and KING: FFA 6 offered");
+		CHECK(!mm_playlist_has_size(1u << P2P_MM_CTF, P2P_MM_BIG_FFA), "E64: only CTF: BIG FFA greyed");
+		CHECK(mm_playlist_has_size(1u << P2P_MM_CTF | 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA),
+			"E64: with Slayer, BIG FFA is offered");
+		CHECK(matchmaking_size_after(1u << P2P_MM_CTF, P2P_MM_BIG_FFA) == P2P_MM_BIG_TEAM,
+			"BIG FFA moves to BIG TEAM");
+		CHECK(matchmaking_size_after(1u << P2P_MM_CTF, P2P_MM_BIG_TEAM) == P2P_MM_BIG_TEAM, "BIG TEAM stays");
 	}
 	CASE("unknown_playlist")
 	{

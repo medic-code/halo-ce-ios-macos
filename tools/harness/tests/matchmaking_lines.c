@@ -3,9 +3,10 @@
 #include <wchar.h>
 #include "harness.h"
 #include "enums.inc"
+#define p2p_mm_size_big(size) ((size) >= P2P_MM_BIG_TEAM)
 #include "under_test.inc"
 
-static wchar_t title[64], count[64], help[128], notice[96];
+static wchar_t title[96], count[96], help[96], notice[96];
 
 static struct p2p_mm_status queued(int can_host)
 {
@@ -92,23 +93,72 @@ int main(int argc, char **argv)
 		matchmaking_lines(&status, title, count, help, notice, 64);
 		CHECK(!wcscmp(title, L"MATCH FOUND"), "title: %ls", title);
 		CHECK(!wcscmp(count, L"3 of 4 matched"), "count: %ls", count);
-		CHECK(!wcscmp(help, L"Joining the game: SLAYER 2V2, 48 ms"), "help: %ls", help);
+		CHECK(!wcscmp(help, L"Joining the game:\r\nSLAYER 2V2, 48 ms"), "help: %ls", help);
 		status.ping = -1;
 		matchmaking_lines(&status, title, count, help, notice, 64);
-		CHECK(!wcscmp(help, L"Joining the game: SLAYER 2V2"), "a matchmade game, not timed: %ls", help);
+		CHECK(!wcscmp(help, L"Joining the game:\r\nSLAYER 2V2"), "a matchmade game, not timed: %ls", help);
 		status.hosts = 1;
 		matchmaking_lines(&status, title, count, help, notice, 64);
 		CHECK(!wcscmp(help, L"Searchers join you."), "this machine hosts: %ls", help);
+	}
+	CASE("big_looking")
+	{
+		status = queued(1);
+		status.state = P2P_MM_LOOKING;
+		status.size = P2P_MM_BIG_TEAM;
+		matchmaking_lines(&status, title, count, help, notice, 96);
+		CHECK(!wcscmp(title, L"LOOKING FOR A GAME"), "title: %ls", title);
+		CHECK(!wcscmp(help, L"Looking for the best big game near you.\r\nIf none fits, you host one."), "help: %ls", help);
+		status.state = P2P_MM_QUEUED;
+		status.can_host = 0;
+		matchmaking_lines(&status, title, count, help, notice, 96);
+		CHECK(!wcscmp(title, L"LOOKING FOR A GAME") && !count[0], "a big size has no queue: %ls, %ls", title, count);
+		CHECK(wcsstr(help, L"Your router cannot host") && !wcsstr(help, L"you host one"), "strict: %ls", help);
+	}
+	CASE("big_hosting")
+	{
+		wchar_t line[32];
+
+		status = queued(1);
+		status.state = P2P_MM_HOSTING;
+		status.hosts = 1;
+		status.size = P2P_MM_BIG_FFA;
+		matchmaking_lines(&status, title, count, help, notice, 96);
+		CHECK(!wcscmp(title, L"SLAYER BIG FFA"), "title: %ls", title);
+		CHECK(!wcscmp(help, L"START NOW starts it"), "help: %ls", help);
+		matchmaking_lobby_line(-1, TRUE, 2, 128, line, 32);
+		CHECK(!wcscmp(line, L"2 of 128 players"), "the lobby: %ls", line);
+		matchmaking_lobby_line(2, TRUE, 2, 128, line, 32);
+		CHECK(!wcscmp(line, L"Game starts in 3"), "after START NOW: %ls", line);
+	}
+	CASE("big_found")
+	{
+		status = queued(1);
+		status.state = P2P_MM_FOUND;
+		status.size = P2P_MM_BIG_TEAM;
+		status.players = 9;
+		status.most_players = 16;
+		status.ping = -1;
+		strcpy(status.region, "eu");
+		matchmaking_lines(&status, title, count, help, notice, 96);
+		CHECK(!wcscmp(title, L"MATCH FOUND") && !count[0], "no pool to count: %ls, %ls", title, count);
+		CHECK(wcsstr(help, L"SLAYER BIG TEAM\r\n9 of 16 players, EU") != NULL, "a dedicated server's region: %ls", help);
+		status.region[0] = 0;
+		status.players = 47;
+		status.most_players = 128;
+		status.ping = 48;
+		matchmaking_lines(&status, title, count, help, notice, 96);
+		CHECK(wcsstr(help, L"SLAYER BIG TEAM\r\n47 of 128 players, 48 ms") != NULL, "a player's game: %ls", help);
 	}
 	CASE("lobby")
 	{
 		wchar_t line[32];
 
-		matchmaking_lobby_line(4, line, 32);
+		matchmaking_lobby_line(4, FALSE, 0, 0, line, 32);
 		CHECK(!wcscmp(line, L"Game starts in 5"), "the first message: %ls", line);
-		matchmaking_lobby_line(0, line, 32);
+		matchmaking_lobby_line(0, FALSE, 0, 0, line, 32);
 		CHECK(!wcscmp(line, L"Game starts in 1"), "the last message: %ls", line);
-		matchmaking_lobby_line(-1, line, 32);
+		matchmaking_lobby_line(-1, FALSE, 0, 0, line, 32);
 		CHECK(!wcscmp(line, L"Waiting for players"), "no countdown, no number: %ls", line);
 	}
 	CASE("notices")

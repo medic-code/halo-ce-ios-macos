@@ -466,6 +466,8 @@ struct p2p_mm_decision
 };
 
 /* these take p2p_lock: call from the game's thread, never the p2p thread */
+/* network.matchmaking_region as a search takes it: empty, the region of the machine's UTC offset; "any", none */
+const char *p2p_mm_region(const char *setting);
 void p2p_mm_search(const struct p2p_mm_choice *choice);
 void p2p_mm_widen_now(void);
 void p2p_mm_host_now(void);
