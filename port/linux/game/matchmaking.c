@@ -90,7 +90,7 @@ static struct
 	boolean map_set, player_added, start_now;
 	boolean public_game;
 	boolean reopen, party_stopped;
-	boolean party_joined, party_member, following;
+	boolean party_joined, party_member, party_full, following;
 	float team_seconds;
 	int team_asks;
 	byte host[6];
@@ -552,12 +552,21 @@ static void matchmaking_leave_game(void)
 	matchmaking.reopen = TRUE;
 }
 
-/* a member's screens follow the leader's search; a joiner's follow the party */
+/* not the client DIRECT LINK and the server browser keep to list games */
+static boolean matchmaking_client_in_game(void)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	short state_data;
+
+	return client && network_game_client_get_state(client, &state_data) != _client_state_searching;
+}
+
+/* a member's screens follow the leader's search; a joiner's follow the party, or tell of its being full */
 static void matchmaking_party_update(void)
 {
 	struct p2p_mm_status status;
 	struct p2p_party_status party;
-	boolean member, following;
+	boolean member, full, following;
 
 	p2p_party_get_status(&party);
 	if (party.count && !matchmaking.party_joined)
@@ -565,19 +574,21 @@ static void matchmaking_party_update(void)
 	matchmaking.party_joined = party.count > 0;
 	if (matchmaking.role == _matchmaking_joined)
 		matchmaking.following = FALSE;
-	if (matchmaking.role != _matchmaking_idle || !main_menu_is_loaded() || global_network_game_client_get() ||
+	if (matchmaking.role != _matchmaking_idle || !main_menu_is_loaded() || matchmaking_client_in_game() ||
 		global_network_game_server_get())
 	{
 		return;
 	}
 	p2p_mm_get_status(&status);
 	member = party.count && !party.members[0].you;
+	full = party.notice == P2P_PARTY_NOTICE_FULL;
 	following = member && status.state != P2P_MM_OFF;
 	if (following && !matchmaking.following)
 		matchmaking_reopen(4);
-	else if (member != matchmaking.party_member || (matchmaking.following && !following))
+	else if (member != matchmaking.party_member || (full && !matchmaking.party_full) || (matchmaking.following && !following))
 		matchmaking_reopen(3);
 	matchmaking.party_member = member;
+	matchmaking.party_full = full;
 	matchmaking.following = following;
 }
 
@@ -610,7 +621,7 @@ void matchmaking_update(float seconds)
 		matchmaking_update_joined(seconds);
 		break;
 	}
-	if (status.notice >= P2P_MM_NOTICE_TOO_BIG && !matchmaking.party_stopped && !global_network_game_client_get())
+	if (status.notice >= P2P_MM_NOTICE_TOO_BIG && !matchmaking.party_stopped && !matchmaking_client_in_game())
 		matchmaking.reopen = TRUE;
 	matchmaking.party_stopped = status.notice >= P2P_MM_NOTICE_TOO_BIG;
 	if (matchmaking.reopen && main_menu_is_loaded())

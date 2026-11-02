@@ -47,6 +47,16 @@ static wchar_t const *read_out(wchar_t const *text)
 	return out;
 }
 
+static void party_notice_is(int kind, char const *name, int searching, wchar_t const *expected)
+{
+	struct p2p_party_status party = party_of(0, 2);
+
+	party.notice = kind;
+	strcpy(party.notice_name, name);
+	matchmaking_party_notice(&party, searching, notice, 96);
+	CHECK(!wcscmp(notice, expected), "party notice %d: %ls", kind, notice);
+}
+
 static struct p2p_mm_status queued(int can_host)
 {
 	struct p2p_mm_status status;
@@ -248,6 +258,7 @@ int main(int argc, char **argv)
 		struct p2p_party_status party = party_of(1, 3);
 
 		status = queued(1);
+		status.party = 3;
 		lines_of(&status, &party);
 		CHECK(!wcscmp(title, L"IN THE QUEUE"), "E49: title: %ls", title);
 		CHECK(!wcscmp(count, L"3 searching"), "E49: the count: %ls", count);
@@ -365,6 +376,38 @@ int main(int argc, char **argv)
 		matchmaking_party_name_utf8(L"Ch\x00efef\x4e16", name, sizeof(name));
 		mods_wide_text(name, back, P2P_PARTY_NAME_SIZE + 1);
 		CHECK(!wcscmp(back, L"Ch\x00efef\x4e16"), "a name through UTF-8: %ls", back);
+	}
+	CASE("party_notices")
+	{
+		party_notice_is(P2P_PARTY_NOTICE_LEFT, "Kat", 2, L"KAT LEFT THE PARTY. SEARCHING FOR A PARTY OF 2.");
+		party_notice_is(P2P_PARTY_NOTICE_LEFT, "Kat", 0, L"KAT LEFT THE PARTY.");
+		party_notice_is(P2P_PARTY_NOTICE_LEFT_SEARCH, "Kat", 2, L"KAT LEFT THE SEARCH. SEARCHING FOR A PARTY OF 2.");
+		party_notice_is(P2P_PARTY_NOTICE_LEFT_SEARCH, "Kat", 0, L"KAT LEFT THE SEARCH.");
+		party_notice_is(P2P_PARTY_NOTICE_COULD_NOT_JOIN, "Kat", 2, L"KAT COULD NOT JOIN. THE PARTY LEFT THAT GAME.");
+		party_notice_is(P2P_PARTY_NOTICE_ENDED, "Chief", 0, L"THE PARTY ENDED: CHIEF LEFT.");
+		party_notice_is(P2P_PARTY_NOTICE_ENDED, "", 0, L"THE PARTY ENDED.");
+		party_notice_is(P2P_PARTY_NOTICE_REMOVED, "Chief", 0, L"CHIEF REMOVED YOU FROM THE PARTY.");
+		party_notice_is(P2P_PARTY_NOTICE_FULL, "", 0, L"THE PARTY IS FULL.");
+		party_notice_is(P2P_PARTY_NOTICE_TOO_BIG, "", 0, L"THE PARTY IS TOO BIG FOR THAT GAME. PICK A BIGGER GAME.");
+		party_notice_is(P2P_PARTY_NOTICE_APART, "", 0, L"COULD NOT GET THE PARTY INTO ONE GAME. SEARCH STOPPED.");
+		party_notice_is(P2P_PARTY_NOTICE_NONE, "", 0, L"");
+		{
+			struct p2p_party_status party = party_of(0, 2);
+
+			party.notice = P2P_PARTY_NOTICE_LEFT;
+			strcpy(party.notice_name, "Kat");
+			status = queued(1);
+			status.party = 2;
+			lines_of(&status, &party);
+			CHECK(!wcscmp(notice, L"KAT LEFT THE PARTY. SEARCHING FOR A PARTY OF 2."), "in the queue: %ls", notice);
+			status.notice = P2P_MM_NOTICE_HOST_LEFT;
+			lines_of(&status, &party);
+			CHECK(wcsstr(notice, L"THE HOST LEFT") != NULL, "the host's first: %ls", notice);
+			status = queued(1);
+			status.state = P2P_MM_FOUND;
+			lines_of(&status, &party);
+			CHECK(!notice[0], "found: no line: %ls", notice);
+		}
 	}
 	return 0;
 }

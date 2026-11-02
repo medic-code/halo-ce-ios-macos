@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
 CASES = ["looking", "queued", "widened", "hosting", "found", "big_looking", "big_hosting", "big_found", "lobby",
-         "notices", "member_view", "member_queue", "member_found", "party_sizes", "party_panel"]
+         "notices", "member_view", "member_queue", "member_found", "party_sizes", "party_panel", "party_notices"]
 
 NEGATIVE_CONTROLS = {
     "strict-offered-2:00": (("status->can_host > 0 ? L\"%d more", "1 ? L\"%d more"), "queued"),
@@ -70,7 +70,7 @@ def generated(fault=None):
                           "matchmaking_party_member", "matchmaking_party_size", "matchmaking_size_saved", "matchmaking_size_after",
                           "matchmaking_party_find", "matchmaking_party_bar", "matchmaking_search_bar",
                           "matchmaking_party_name_utf8", "matchmaking_party_mark", "matchmaking_party_words",
-                          "matchmaking_lines", "matchmaking_lobby_line"))])
+                          "matchmaking_party_notice", "matchmaking_lines", "matchmaking_lobby_line"))])
     if fault:
         code = mutated(code, *fault)
     return (("enums.inc", enums), ("under_test.inc", code + "\n"))
