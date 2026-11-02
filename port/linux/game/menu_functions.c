@@ -4199,6 +4199,28 @@ static void server_settings_private_set(boolean private_game)
 
 static void setting_options_each(struct widget_instance *list, boolean save);
 
+static void game_name_default(void)
+{
+	if (!multiplayer.game_name[0] && player_ui_get_active_player_profile_index(0) != NONE)
+	{
+		struct player_profile profile;
+
+		player_ui_get_active_player_profile(0, &profile);
+		ustrncpy(multiplayer.game_name, profile.player_name, NUMBEROF(multiplayer.game_name) - 1);
+	}
+}
+
+wchar_t const *pc_menu_game_name(void)
+{
+	game_name_default();
+	return multiplayer.game_name;
+}
+
+short pc_menu_maximum_players(void)
+{
+	return maximum_players[PIN(multiplayer.maximum_players_index, 0, NUMBEROF(maximum_players) - 1)];
+}
+
 /* "server settings init": the game's name (player 1's, else the one given
 last), the most players, the gametype's copy (once: the screen is made
 again on coming back from an option's screen) */
@@ -4209,13 +4231,7 @@ static boolean server_settings_initialize(struct widget_instance *list)
 	/* (co-op has no gametype to edit) */
 	if (!hosting_cooperative())
 		gametype_setup_begin();
-	if (!multiplayer.game_name[0] && player_ui_get_active_player_profile_index(0) != NONE)
-	{
-		struct player_profile profile;
-
-		player_ui_get_active_player_profile(0, &profile);
-		ustrncpy(multiplayer.game_name, profile.player_name, NUMBEROF(multiplayer.game_name) - 1);
-	}
+	game_name_default();
 	if (spinner)
 		spinner->parameters.list.selected_index = *server_settings_maximum_players_index();
 	/* (PUBLIC or PRIVATE: this game's; the screen is made again on coming
@@ -7052,7 +7068,7 @@ static void lobby_update(struct widget_instance *list)
 	}
 	lobby_join_help(list);
 	map_vote_lobby_check();
-	visible_set(named(list, "lobby_button_team", 0), game && game->variant.universal_variant.teams && !matchmaking_game_locked());
+	visible_set(named(list, "lobby_button_team", 0), game && game->variant.universal_variant.teams && !matchmaking_teams_locked());
 	visible_set(named(list, "lobby_button_start", 0), !matchmaking_game_locked());
 	visible_set(named(list, "lobby_button_add", 0), !matchmaking_game_locked());
 	/* (the buttons' focus, off Switch Team when it is hidden) */
@@ -7092,7 +7108,8 @@ static void lobby_update(struct widget_instance *list)
 		usnprintf(text, NUMBEROF(text) - 1, L"%s%s\r\n%s\r\n%d of %d players\r\n\r\n%s", name, gametype,
 			kind ? kind : engine_names[PIN(game->variant.game_engine_index, 0, 5)], lobby_player_count,
 			game->maximum_players,
-			seconds > 0 ? L"Starting in:" : game->machine_count < 2 || dedicated ? L"Waiting for players" : L"");
+			seconds > 0 ? L"Starting in:" : game->machine_count < 2 || dedicated ? L"Waiting for players" :
+			matchmaking_game_locked() && !matchmaking_teams_locked() ? L"The host starts it" : L"");
 		text[NUMBEROF(text) - 1] = 0;
 		if (seconds > 0)
 		{

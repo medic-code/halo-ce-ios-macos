@@ -51,15 +51,26 @@ const unsigned char *p2p_signing_key(void)
 }
 void p2p_signal_mm_topics(const char topics[][P2P_MM_TOPIC_SIZE], int count) { (void)topics; (void)count; }
 
-int lobby_games_unlocked(struct p2p_listing *games, int maximum_count) { return 0; }
-int p2p_lobby_pick(const struct p2p_listing *games, int count, const struct p2p_lobby_wanted *wanted) { return -1; }
+/* the lobby's own pick is matchmaking_pick's to check: here the first listing is taken */
+static struct p2p_listing listings[4];
+static int listing_count, browsing;
+
+int lobby_games_unlocked(struct p2p_listing *games, int maximum_count)
+{
+	int count = listing_count < maximum_count ? listing_count : maximum_count;
+
+	memcpy(games, listings, (size_t)count * sizeof(*games));
+	return count;
+}
+int p2p_lobby_pick(const struct p2p_listing *games, int count, const struct p2p_lobby_wanted *wanted) { return count ? 0 : -1; }
 int p2p_lobby_pick_unpinged(const struct p2p_listing *games, int count, const struct p2p_lobby_wanted *wanted) { return 0; }
 void lobby_mark_failed_unlocked(const unsigned char *identifier) { (void)identifier; }
-int p2p_lobby_masters_were_heard(void) { return 1; }
-void p2p_lobby_masters_forget(void) {}
-void master_list_refresh(void) {}
-int p2p_lobby_browsing(void) { return 0; }
-void p2p_lobby_browse(int on) { (void)on; }
+static int masters_heard = 1, masters_forgotten, masters_refreshed;
+int p2p_lobby_masters_were_heard(void) { return masters_heard; }
+void p2p_lobby_masters_forget(void) { masters_forgotten++; }
+void master_list_refresh(void) { masters_refreshed++; }
+int p2p_lobby_browsing(void) { return browsing; }
+void p2p_lobby_browse(int on) { browsing = on; }
 
 static unsigned char published[MM_MAXIMUM_RECORD_SIZE];
 static int published_size;
@@ -322,11 +333,22 @@ static void check_election(void)
 struct machine
 {
 	struct mm_search search;
-	int in, hosting, players, most, quit;
+	int in, hosting, players, most, quit, ping;
 };
 
 static struct machine machines[8];
 static int machine_count;
+
+int lobby_ping_unlocked(const unsigned char *key_hash)
+{
+	int index;
+
+	for (index = 0; index < machine_count; index++)
+		if (!memcmp(machines[index].search.key_hash, key_hash, P2P_KEY_HASH_SIZE))
+			return machines[index].ping;
+	return 0;
+}
+
 static unsigned long now_ms, now_unix;
 static int drop_percent;
 static int cancel_on_join, cancel_sent, never_joins = -1;
@@ -334,6 +356,7 @@ static int fail_join = -1, hosted_while_joining, joins_taken;
 static int ignore_first_host, ignore_only = -1, ignored = -1, fail_first_host, failed_host = -1;
 static int capture_from = -1, captured_count;
 static struct mm_out captured[256], quit_out[MM_MAXIMUM_OUT];
+static int published_kinds[MM_KIND_CANCEL + 1];
 
 struct in_flight
 {
@@ -366,6 +389,7 @@ static void publish(int from, const struct mm_out *out, int count)
 	{
 		if (from == capture_from && captured_count < 256)
 			captured[captured_count++] = out[index];
+		published_kinds[out[index].bytes[5]]++;
 		for (to = 0; to < machine_count; to++)
 		{
 			if (to == from || !subscribed(&machines[to].search, out[index].topic) || rand() % 100 < drop_percent ||
@@ -533,6 +557,7 @@ static void world(int count)
 	drop_percent = flight_count = captured_count = cancel_on_join = cancel_sent = 0;
 	never_joins = capture_from = fail_join = -1;
 	hosted_while_joining = joins_taken = 0;
+	memset(published_kinds, 0, sizeof(published_kinds));
 }
 
 static void start_searching(int index, unsigned playlists, int size, int can_host)
@@ -540,12 +565,24 @@ static void start_searching(int index, unsigned playlists, int size, int can_hos
 	struct p2p_mm_choice choice;
 	unsigned char seed[P2P_SEED_SIZE];
 
+	memset(&choice, 0, sizeof(choice));
 	choice.playlists = playlists;
 	choice.size = size;
 	seed_of(100 + index, seed);
 	mm_start(&machines[index].search, seed, &choice, now_ms, now_unix);
 	machines[index].search.state = P2P_MM_QUEUED;
 	machines[index].search.can_host = can_host;
+}
+
+static void start_big(int index, unsigned playlists, int size, int can_host)
+{
+	start_searching(index, playlists, size, can_host);
+	machines[index].search.state = P2P_MM_LOOKING;
+}
+
+static int host_record_open(const struct mm_search *search)
+{
+	return search->state == P2P_MM_HOSTING && search->held_until && (long)(now_ms - search->held_until) >= 0;
 }
 
 static int find_host(void)
@@ -701,6 +738,319 @@ static void check_fake_fuller_game(void)
 	CHECK(machines[0].search.state != P2P_MM_HOSTING, "a counted fuller game takes the lobby");
 }
 
+static void add_listing(const char *name, int players, int ping)
+{
+	struct p2p_listing *game = &listings[listing_count++];
+
+	memset(game, 0, sizeof(*game));
+	snprintf(game->invite, sizeof(game->invite), "halo://join/%s", name);
+	game->identifier[0] = (unsigned char)listing_count;
+	game->engine_type = 2;
+	game->player_count = (unsigned char)players;
+	game->maximum_player_count = 16;
+	game->ping = (short)ping;
+	game->network_version = HALO_PORT_NETWORK_VERSION;
+}
+
+static void big_start(struct mm_search *search)
+{
+	struct p2p_mm_choice choice;
+	unsigned char seed[P2P_SEED_SIZE];
+
+	memset(&choice, 0, sizeof(choice));
+	choice.playlists = 1u << P2P_MM_SLAYER;
+	choice.size = P2P_MM_BIG_TEAM;
+	listing_count = 0;
+	seed_of(30, seed);
+	mm_start(search, seed, &choice, 1000, 1800000000UL);
+}
+
+static void check_big_look(void)
+{
+	static struct mm_search search;
+	struct mm_out out[MM_MAXIMUM_OUT];
+
+	case_name = "big_look";
+	masters_heard = 0;
+	big_start(&search);
+	add_listing("players", 10, 70);
+	mm_step(&search, 3000, out, MM_MAXIMUM_OUT);
+	CHECK(search.state == P2P_MM_LOOKING && search.decision.kind == P2P_MM_DECIDE_NONE,
+		"a big search waits for the master servers: %d", search.state);
+	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
+	CHECK(search.decision.kind == P2P_MM_DECIDE_JOIN && search.decision.public_game,
+		"E54: at 6 s a player's unflagged game is taken without them, and is public");
+	masters_heard = 1;
+	big_start(&search);
+	add_listing("big", 2, 70);
+	listings[0].big_game = listings[0].master = 1;
+	strcpy(listings[0].region, "EU");
+	mm_step(&search, 3000, out, MM_MAXIMUM_OUT);
+	CHECK(search.decision.kind == P2P_MM_DECIDE_JOIN && !search.decision.public_game,
+		"the masters having answered, a big search picks at once, and a flagged listing is a big game");
+	CHECK(!search.joining_region[0], "a player's game has no region: %s", search.joining_region);
+	big_start(&search);
+	add_listing("server", 8, -1);
+	listings[0].dedicated = listings[0].master = 1;
+	strcpy(listings[0].region, "EU");
+	mm_step(&search, 3000, out, MM_MAXIMUM_OUT);
+	CHECK(!strcmp(search.joining_region, "EU"), "a dedicated server's region reaches the screens: %s",
+		search.joining_region);
+	listing_count = 0;
+}
+
+static void look_ends(void)
+{
+	pthread_mutex_lock(&p2p_lock);
+	clock_now += MM_LOOK_TIME;
+	p2p_mm_update(clock_now, 1, NULL);
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+static void check_big_listing(void)
+{
+	struct p2p_mm_choice big;
+	struct p2p_mm_decision decision;
+	struct p2p_mm_status status;
+	unsigned char token[P2P_TOKEN_SIZE] = { 1 };
+
+	case_name = "big_listing";
+	memset(&big, 0, sizeof(big));
+	big.playlists = 1u << P2P_MM_SLAYER;
+	big.size = P2P_MM_BIG_TEAM;
+	listing_count = 0;
+	masters_heard = 1;
+	p2p_mm_search(&big);
+	CHECK(!p2p_mm_hosts_big_game(), "a search hosts nothing yet");
+	look_ends();
+	CHECK(p2p_mm_take_decision(&decision) == P2P_MM_DECIDE_HOST && p2p_mm_hosts_big_game(),
+		"a big host says so from its first listing");
+	p2p_mm_host_gave_up();
+	CHECK(!p2p_mm_hosts_big_game(), "a big host that gave up hosts none");
+	add_listing("other", 2, 70);
+	look_ends();
+	CHECK(p2p_mm_take_decision(&decision) == P2P_MM_DECIDE_JOIN && !p2p_mm_hosts_big_game(),
+		"a big host gone back to the queue that joins a game hosts none");
+	listing_count = 0;
+	p2p_mm_cancel();
+	p2p_mm_search(&big);
+	look_ends();
+	CHECK(p2p_mm_take_decision(&decision) == P2P_MM_DECIDE_HOST, "a big host that searches again hosts again");
+	pthread_mutex_lock(&p2p_lock);
+	p2p_mm_update(clock_now, 1, token);
+	pthread_mutex_unlock(&p2p_lock);
+	p2p_mm_game(1, 16, 0);
+	p2p_mm_get_status(&status);
+	CHECK(status.state == P2P_MM_HOSTING && p2p_mm_hosts_big_game(), "a big host still says so once it hosts");
+	CHECK(browsing, "a lone big host keeps the browser open for the pings it merges by");
+	p2p_mm_game(2, 16, 0);
+	CHECK(!browsing, "a big host with a player leaves the browser as it was");
+	p2p_mm_cancel();
+	CHECK(!p2p_mm_hosts_big_game(), "a search cancelled hosts no big game");
+}
+
+static void check_big_lost(void)
+{
+	struct p2p_mm_choice choice;
+
+	case_name = "big_lost";
+	memset(&choice, 0, sizeof(choice));
+	choice.playlists = 1u << P2P_MM_SLAYER;
+	choice.size = P2P_MM_BIG_TEAM;
+	p2p_mm_search(&choice);
+	masters_forgotten = masters_refreshed = 0;
+	p2p_mm_game_lost();
+	CHECK(masters_forgotten == 1 && masters_refreshed == 1, "a restarted big search asks the masters again: %d %d",
+		masters_forgotten, masters_refreshed);
+	p2p_mm_cancel();
+}
+
+static void heard_big(struct mm_search *search, int machine, int kind, int most_players)
+{
+	struct mm_record record = searching(machine, 1), read_back;
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+
+	record.kind = kind;
+	record.size = P2P_MM_BIG_TEAM;
+	record.players = 10;
+	record.most_players = most_players;
+	seed_of(machine, seed);
+	if (mm_record_read(bytes, mm_record_write(&record, seed, bytes, sizeof(bytes)), &read_back))
+		mm_heard(search, &read_back, now_ms);
+}
+
+static int has_peer(const struct mm_search *search, int machine)
+{
+	struct mm_record record = searching(machine, 1);
+	int index;
+
+	for (index = 0; index < MM_MAXIMUM_UNITS; index++)
+		if (search->peers[index].used && !memcmp(search->peers[index].record.key, record.key, P2P_KEY_SIZE))
+			return 1;
+	return 0;
+}
+
+static void check_big_records(void)
+{
+	static struct mm_search search;
+
+	case_name = "big_records";
+	big_start(&search);
+	heard_big(&search, 31, MM_KIND_HOSTING, HALO_PORT_MAXIMUM_NETWORK_PLAYERS);
+	CHECK(has_peer(&search, 31), "a big host's MAX PLAYERS may reach the port's most");
+	heard_big(&search, 32, MM_KIND_HOSTING, HALO_PORT_MAXIMUM_NETWORK_PLAYERS + 1);
+	CHECK(!has_peer(&search, 32), "a big game past the port's most is a fake");
+	heard_big(&search, 33, MM_KIND_SEARCHING, 0);
+	CHECK(!has_peer(&search, 33), "big sizes never pool: a searching record is not heard");
+}
+
+static void check_big_hosts(void)
+{
+	char topic[P2P_MM_TOPIC_SIZE];
+	int index, on_topic = 0;
+
+	case_name = "e32_big_hosts";
+	world(2);
+	capture_from = 0;
+	start_big(0, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1);
+	run(5.5);
+	CHECK(!machines[0].hosting, "the look comes first");
+	run(1.0);
+	CHECK(machines[0].hosting && machines[0].search.hosting_size == P2P_MM_BIG_TEAM,
+		"E32: hosts within 6.5 s when nothing fits");
+	CHECK(host_record_open(&machines[0].search) && machines[0].search.most_players == 16, "E32: open, at MAX PLAYERS");
+	mm_topic(P2P_MM_SLAYER, P2P_MM_BIG_TEAM, topic, sizeof(topic));
+	for (index = 0; index < captured_count; index++)
+		on_topic += captured[index].bytes[5] == MM_KIND_HOSTING && !strcmp(captured[index].topic, topic);
+	CHECK(on_topic, "E32: its hosting record is on %s", topic);
+	start_big(1, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1);
+	run(7.0);
+	CHECK(machines[1].in == 0 && host_count() == 1, "E32: the next searcher joins it");
+	world(2);
+	machines[0].ping = 200;
+	start_big(0, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1);
+	run(6.5);
+	start_big(1, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1);
+	run(7.0);
+	CHECK(machines[1].in < 0 && host_count() == 2, "E58: a searcher hosts rather than join a host at 200 ms");
+	CHECK(!published_kinds[MM_KIND_SEARCHING], "E32: no searching record: %d", published_kinds[MM_KIND_SEARCHING]);
+	world(1);
+	start_big(0, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 0);
+	run(10.0);
+	CHECK(!machines[0].hosting && machines[0].search.state == P2P_MM_QUEUED, "a strict router never hosts");
+	world(1);
+	start_big(0, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, -1);
+	run(10.0);
+	CHECK(!machines[0].hosting, "no host until STUN has answered");
+	machines[0].search.can_host = 1;
+	run(1.0);
+	CHECK(machines[0].hosting, "STUN answered: hosts");
+}
+
+static void check_lone_merge(void)
+{
+	int higher, lower;
+
+	case_name = "e33_lone_merge";
+	world(2);
+	drop_percent = 100;
+	start_big(0, 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA, 1);
+	run(2.0);
+	start_big(1, 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA, 1);
+	higher = memcmp(machines[0].search.key_hash, machines[1].search.key_hash, P2P_KEY_HASH_SIZE) > 0 ? 0 : 1;
+	lower = !higher;
+	run(6.5);
+	CHECK(host_count() == 2, "both host, 2 s apart: %d", host_count());
+	drop_percent = 0;
+	run(15.0);
+	CHECK(machines[higher].in == lower && machines[lower].hosting && host_count() == 1,
+		"E33: the higher key hash, still alone, joins the other's game");
+	world(2);
+	start_big(0, 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA, 1);
+	start_big(1, 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA, 1);
+	run(6.5);
+	machines[0].players = machines[1].players = 2;
+	run(15.0);
+	CHECK(host_count() == 2, "E33: a host no longer alone stays: %d hosts", host_count());
+	world(2);
+	start_big(0, 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA, 1);
+	start_big(1, 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA, 1);
+	higher = memcmp(machines[0].search.key_hash, machines[1].search.key_hash, P2P_KEY_HASH_SIZE) > 0 ? 0 : 1;
+	lower = !higher;
+	machines[lower].ping = 250;
+	run(21.5);
+	CHECK(host_count() == 2, "E58: a host at 250 ms is not merged with: %d hosts", host_count());
+	machines[lower].ping = -1;
+	run(10.0);
+	CHECK(host_count() == 2, "E58: a host not yet pinged is not merged with: %d hosts", host_count());
+	machines[lower].ping = 199;
+	run(15.0);
+	CHECK(machines[higher].in == lower && host_count() == 1, "E58: at 199 ms the merge goes ahead");
+}
+
+static void check_big_hold(void)
+{
+	int order[3] = {0, 1, 2};
+	int best, middle, last, round, i, j;
+
+	for (round = 0; round < 2; round++)
+	{
+		case_name = "big_hold";
+		world(3);
+		for (i = 0; i < 3; i++)
+			start_big(i, 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA, 1);
+		for (i = 0; i < 3; i++)
+		{
+			for (j = i + 1; j < 3; j++)
+			{
+				if (memcmp(machines[order[i]].search.key_hash, machines[order[j]].search.key_hash,
+					P2P_KEY_HASH_SIZE) > 0)
+				{
+					int swap = order[i];
+
+					order[i] = order[j];
+					order[j] = swap;
+				}
+			}
+		}
+		best = order[0];
+		middle = order[1];
+		last = order[2];
+		machines[best].ping = -1;
+		run(20.0);
+		CHECK(host_count() == 3, "the last host waits for a better host still unpinged: %d hosts", host_count());
+		if (round)
+		{
+			machines[best].ping = 0;
+			run(15.0);
+			CHECK(machines[last].in == best && machines[middle].in == best && host_count() == 1,
+				"hosts who started together all reach the best host");
+		}
+		else
+		{
+			run(30.0);
+			CHECK(machines[last].in == middle, "a host that never answers a ping holds no one for long");
+		}
+	}
+}
+
+static void check_big_ffa_no_ctf(void)
+{
+	char slayer[P2P_MM_TOPIC_SIZE], ctf[P2P_MM_TOPIC_SIZE];
+
+	case_name = "e64_big_ffa_no_ctf";
+	CHECK(!mm_playlist_has_size(1u << P2P_MM_CTF, P2P_MM_BIG_FFA) &&
+		mm_playlist_has_size(1u << P2P_MM_CTF, P2P_MM_BIG_TEAM), "only CTF: BIG FFA greyed, BIG TEAM offered");
+	mm_topic(P2P_MM_SLAYER, P2P_MM_BIG_FFA, slayer, sizeof(slayer));
+	mm_topic(P2P_MM_CTF, P2P_MM_BIG_FFA, ctf, sizeof(ctf));
+	world(1);
+	start_big(0, 1u << P2P_MM_SLAYER | 1u << P2P_MM_CTF, P2P_MM_BIG_FFA, 1);
+	CHECK(subscribed(&machines[0].search, slayer) && !subscribed(&machines[0].search, ctf),
+		"E64: SLAYER and CTF: only Slayer's topic");
+	start_big(0, 1u << P2P_MM_CTF, P2P_MM_BIG_FFA, 1);
+	CHECK(!machines[0].search.queue_count, "E64: only CTF: no topic");
+}
+
 int main(void)
 {
 	check_pool();
@@ -714,6 +1064,14 @@ int main(void)
 	check_four();
 	check_replay();
 	check_return();
+	check_big_look();
+	check_big_listing();
+	check_big_lost();
+	check_big_records();
+	check_big_hosts();
+	check_lone_merge();
+	check_big_hold();
+	check_big_ffa_no_ctf();
 	printf(failures ? "FAILED %d\n" : "PASS\n", failures);
 	return failures != 0;
 }
