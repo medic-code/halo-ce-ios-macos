@@ -1203,6 +1203,8 @@ static void check_failed_join(void)
 		subscribed(&machines[0].search, ctf), "after a failed join both queues are searched again");
 }
 
+static int game_most_players = 4;
+
 static void hear_game(int host, int players, int held, unsigned long sequence, unsigned char *key_hash)
 {
 	struct mm_record record = searching(host, sequence), read_back;
@@ -1212,7 +1214,7 @@ static void hear_game(int host, int players, int held, unsigned long sequence, u
 	memset(token, host, sizeof(token));
 	record.kind = MM_KIND_HOSTING;
 	record.players = players;
-	record.most_players = 4;
+	record.most_players = game_most_players;
 	memcpy(record.token, token, P2P_TOKEN_SIZE);
 	if (held)
 	{
@@ -1394,6 +1396,32 @@ static void check_host_failed(void)
 			"host_failed: machine %d is in the one game", index);
 }
 
+static void check_fake_fuller_game(void)
+{
+	unsigned char key_hash[P2P_KEY_HASH_SIZE];
+	int sequence;
+
+	case_name = "fake_fuller_game";
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	machines[0].search.state = P2P_MM_HOSTING;
+	machines[0].search.players = 1;
+	machines[0].search.most_players = 4;
+	game_most_players = 16;
+	for (sequence = 1; sequence <= 3; sequence++)
+		hear_game(20, 3, 0, sequence, key_hash);
+	game_most_players = 4;
+	run(1.0);
+	CHECK(machines[0].search.state == P2P_MM_HOSTING, "a game claiming more players than its size is ignored");
+	hear_game(21, 3, 0, 1, key_hash);
+	run(1.0);
+	CHECK(machines[0].search.state == P2P_MM_HOSTING, "one record does not end a lobby");
+	hear_game(21, 3, 0, 2, key_hash);
+	hear_game(21, 3, 0, 3, key_hash);
+	run(1.0);
+	CHECK(machines[0].search.state != P2P_MM_HOSTING, "a counted fuller game takes the lobby");
+}
+
 static int elects_second(int first, int second)
 {
 	struct mm_unit units[2];
@@ -1474,6 +1502,7 @@ int main(void)
 	check_run_key();
 	check_joined_then_lost();
 	check_lost_in_verify();
+	check_fake_fuller_game();
 	check_look();
 	check_ffa_wanted();
 	check_failed_pick();
