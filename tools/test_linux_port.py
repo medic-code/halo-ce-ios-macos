@@ -583,6 +583,8 @@ def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
     (("p2p_hmac_sha256(secret, P2P_PARTY_SECRET_SIZE, \"seal\", 4, party->seal);",
       "p2p_sha256(secret, P2P_PARTY_SECRET_SIZE, party->seal);"), "party sealed"),
     (("return sequence <= member->sequence;", "return 0;"), "party copies"),
+    (("&& sequence <= party->gone[index].sequence", "&& 0"), "e61_leave_party"),
+    (("remember_gone(party, member, record->sequence);", ""), "e61_leave_party"),
     (("PARTY_EXPIRY = 10000", "PARTY_EXPIRY = 20000"), "member_expiry"),
     (("party->count == P2P_PARTY_MAXIMUM", "party->count == P2P_PARTY_MAXIMUM - 1"), "party full"),
     (("return !isxdigit((unsigned char)*text);", "return 1;"), "party link"),

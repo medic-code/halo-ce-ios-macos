@@ -17,6 +17,7 @@ enum
 	PARTY_HEADER_SIZE = 1 + P2P_KEY_SIZE + 4,
 	PARTY_MEMBER_RECORD = 1,
 	PARTY_LEADER_RECORD,
+	PARTY_FLAG_LEAVING = 1,
 };
 
 static int elapsed(unsigned long since, unsigned long now, unsigned long time)
@@ -103,6 +104,7 @@ static void begin_party(struct mm_party *party, const unsigned char *seed, int r
 	add_member(party, leader);
 	party->members[0].heard = now;
 	party->sent = now - PARTY_INTERVAL;
+	party->gone_count = 0;
 	set_notice(party, P2P_PARTY_NOTICE_NONE, "");
 }
 
@@ -226,9 +228,28 @@ static int write_leader(struct mm_party *party, unsigned char *bytes)
 	return record_finish(party, plain, size, bytes);
 }
 
+static void remember_gone(struct mm_party *party, const struct mm_party_member *member, unsigned long sequence)
+{
+	struct mm_party_gone *gone = &party->gone[party->gone_count++ % P2P_PARTY_MAXIMUM];
+
+	memcpy(gone->hash, member->hash, P2P_KEY_HASH_SIZE);
+	gone->sequence = sequence;
+}
+
 static void drop_member(struct mm_party *party, struct mm_party_member *member)
 {
 	memmove(member, member + 1, (size_t)(party->members + --party->count - member) * sizeof(*member));
+}
+
+int mm_party_leave(struct mm_party *party, unsigned char *bytes)
+{
+	int size;
+
+	if (party->role != MM_PARTY_MEMBER)
+		return 0;
+	size = write_member(party, PARTY_FLAG_LEAVING, bytes);
+	clear_party(party);
+	return size;
 }
 
 int mm_party_step(struct mm_party *party, unsigned long now, unsigned char *bytes)
@@ -263,11 +284,15 @@ int mm_party_step(struct mm_party *party, unsigned long now, unsigned char *byte
 static int member_record_stale(struct mm_party *party, const unsigned char *hash, unsigned long sequence)
 {
 	const struct mm_party_member *member = find_member(party, hash);
+	int index;
 
 	if (member)
 		return sequence <= member->sequence;
 	if (party->role != MM_PARTY_LEADER)
 		return 1;
+	for (index = 0; index < P2P_PARTY_MAXIMUM && index < party->gone_count; index++)
+		if (!memcmp(party->gone[index].hash, hash, P2P_KEY_HASH_SIZE) && sequence <= party->gone[index].sequence)
+			return 1;
 	return 0;
 }
 
@@ -328,6 +353,16 @@ static void heard_member(struct mm_party *party, const struct mm_party_record *r
 
 	hash_of(record->key, hash);
 	member = find_member(party, hash);
+	if (record->body[P2P_PARTY_NAME_SIZE] & PARTY_FLAG_LEAVING)
+	{
+		if (party->role == MM_PARTY_LEADER && member)
+		{
+			set_notice(party, P2P_PARTY_NOTICE_LEFT, member->name);
+			remember_gone(party, member, record->sequence);
+			drop_member(party, member);
+		}
+		return;
+	}
 	if (!member)
 	{
 		if (party->role != MM_PARTY_LEADER || party->count == P2P_PARTY_MAXIMUM)
