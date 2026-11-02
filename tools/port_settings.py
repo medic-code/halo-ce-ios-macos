@@ -2364,10 +2364,12 @@ def _matchmaking_search(base: str) -> list:
                       f'<child widget="{base}/search_button_bar" y="414"/>'])
     lines += _widget(f"{base}/search_button_bar", [("type", "column_list"), ("width", 640), ("height", 28),
                                                    ("flags", "pass_unhandled_to_focused_child left_right_tabs_items")],
-                     [f'<child widget="{base}/search_button_cancel" x="477" y="1"/>'])
-    run = "port matchmaking search back"
-    lines += _text_button(f"{base}/search_button_cancel", "CANCEL",
-                          [f'<on event="a" run="{run}"/>', f'<on event="start" run="{run}"/>'])
+                     [f'<child widget="{base}/search_button_cancel" x="477" y="1"/>',
+                      f'<child widget="{base}/search_button_leave" x="477" y="1"/>'])
+    for key, text in (("cancel", "CANCEL"), ("leave", "LEAVE SEARCH")):
+        run = "port matchmaking search back"
+        lines += _text_button(f"{base}/search_button_{key}", text,
+                              [f'<on event="a" run="{run}"/>', f'<on event="start" run="{run}"/>'])
     return lines
 
 
