@@ -1554,6 +1554,9 @@ long read_from_endpoint(
 				TRANSPORT_ENDPOINT_WINSOCK_FILE,
 				0x384,
 				err == _transport_error_none);
+			/* port: a failed connect leaves no socket, and a read of a
+			blocking one would stop the game thread */
+			set_endpoint_blocking(ep, FALSE);
 		}
 	}
 
