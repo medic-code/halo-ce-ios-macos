@@ -5762,6 +5762,58 @@ static void matchmaking_party_words(const struct p2p_party_status *party, const 
 	help[size - 1] = line[size - 1] = 0;
 }
 
+/* searching: the players the search is for, 0 with none running */
+static void matchmaking_party_notice(const struct p2p_party_status *party, int searching, wchar_t *notice, short size)
+{
+	wchar_t name[P2P_PARTY_NAME_SIZE + 1];
+	short index;
+
+	notice[0] = 0;
+	mods_wide_text(party->notice_name, name, P2P_PARTY_NAME_SIZE + 1);
+	for (index = 0; name[index]; index++)
+	{
+		if (name[index] >= L'a' && name[index] <= L'z')
+			name[index] -= L'a' - L'A';
+	}
+	switch (party->notice)
+	{
+	case P2P_PARTY_NOTICE_LEFT:
+		if (searching)
+			usnprintf(notice, size - 1, L"%ls LEFT THE PARTY. SEARCHING FOR A PARTY OF %d.", name, searching);
+		else
+			usnprintf(notice, size - 1, L"%ls LEFT THE PARTY.", name);
+		break;
+	case P2P_PARTY_NOTICE_LEFT_SEARCH:
+		if (searching)
+			usnprintf(notice, size - 1, L"%ls LEFT THE SEARCH. SEARCHING FOR A PARTY OF %d.", name, searching);
+		else
+			usnprintf(notice, size - 1, L"%ls LEFT THE SEARCH.", name);
+		break;
+	case P2P_PARTY_NOTICE_COULD_NOT_JOIN:
+		usnprintf(notice, size - 1, L"%ls COULD NOT JOIN. THE PARTY LEFT THAT GAME.", name);
+		break;
+	case P2P_PARTY_NOTICE_ENDED:
+		if (name[0])
+			usnprintf(notice, size - 1, L"THE PARTY ENDED: %ls LEFT.", name);
+		else
+			usnprintf(notice, size - 1, L"THE PARTY ENDED.");
+		break;
+	case P2P_PARTY_NOTICE_REMOVED:
+		usnprintf(notice, size - 1, L"%ls REMOVED YOU FROM THE PARTY.", name);
+		break;
+	case P2P_PARTY_NOTICE_FULL:
+		usnprintf(notice, size - 1, L"THE PARTY IS FULL.");
+		break;
+	case P2P_PARTY_NOTICE_TOO_BIG:
+		usnprintf(notice, size - 1, L"THE PARTY IS TOO BIG FOR THAT GAME. PICK A BIGGER GAME.");
+		break;
+	case P2P_PARTY_NOTICE_APART:
+		usnprintf(notice, size - 1, L"COULD NOT GET THE PARTY INTO ONE GAME. SEARCH STOPPED.");
+		break;
+	}
+	notice[size - 1] = 0;
+}
+
 static short matchmaking_search_allowed(unsigned playlists, short local_players)
 {
 	if (!playlists)
@@ -5907,7 +5959,10 @@ static boolean matchmaking_answer(struct widget_instance *widget, boolean yes)
 	bar->focused_child = matchmaking_screen.asked_button;
 	bar->parameters.list.selected_index = sibling_index(matchmaking_screen.asked_button);
 	if (yes && asking == _matchmaking_ask_leave)
+	{
 		p2p_party_leave();
+		p2p_party_notice_clear();
+	}
 	else if (yes && asking == _matchmaking_ask_remove)
 	{
 		p2p_party_get_status(&party);
@@ -6027,6 +6082,8 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 	text_set_length(named(screen, "party_line", 0), line, MATCHMAKING_TEXT_LENGTH);
 	usnprintf(text, MATCHMAKING_TEXT_LENGTH - 1, L"%d", shown);
 	text_set_length(named(screen, "party_count", 0), text, MATCHMAKING_TEXT_LENGTH);
+	matchmaking_party_notice(party, 0, text, MATCHMAKING_TEXT_LENGTH);
+	text_set_length(named(screen, "party_notice", 0), text, MATCHMAKING_TEXT_LENGTH);
 }
 
 /* the spinners are not under the list yet at "port matchmaking init", so the rows load at the first update */
@@ -6143,6 +6200,7 @@ static boolean matchmaking_screen_search(void)
 	choice.playlists = matchmaking_screen.playlists;
 	choice.size = matchmaking_screen.size;
 	snprintf(choice.region, sizeof(choice.region), "%s", p2p_mm_region(config_string("network.matchmaking_region")));
+	p2p_party_notice_clear();
 	p2p_mm_search(&choice);
 	ui_play_audio_feedback_sound(SOUND_FORWARD);
 	return TRUE;
@@ -6152,6 +6210,7 @@ static boolean matchmaking_screen_back(struct widget_instance *widget, boolean *
 {
 	if (matchmaking_screen.asking)
 		return matchmaking_answer(widget, FALSE);
+	p2p_party_notice_clear();
 	p2p_mm_cancel();
 	ui_widget_port_go_back(widget);
 	*widget_deleted = TRUE;
@@ -6245,6 +6304,8 @@ static void matchmaking_lines(const struct p2p_mm_status *status, const struct p
 		usnprintf(notice, size - 1, L"THE PARTY IS TOO BIG FOR THAT GAME. PICK A BIGGER GAME.");
 	else if (status->notice == P2P_MM_NOTICE_APART)
 		usnprintf(notice, size - 1, L"COULD NOT GET THE PARTY INTO ONE GAME. SEARCH STOPPED.");
+	else if (status->state == P2P_MM_LOOKING || status->state == P2P_MM_QUEUED)
+		matchmaking_party_notice(party, status->party, notice, size);
 	if (matchmaking_party_member(party) && (status->state == P2P_MM_LOOKING || status->state == P2P_MM_QUEUED))
 	{
 		wchar_t leader[P2P_PARTY_NAME_SIZE + 1];

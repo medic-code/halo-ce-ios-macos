@@ -59,6 +59,10 @@ static char const *p2p_mm_region(char const *setting)
 	return setting;
 }
 
+static void p2p_party_notice_clear(void)
+{
+}
+
 static void p2p_mm_search(const struct p2p_mm_choice *choice)
 {
 	searches++;

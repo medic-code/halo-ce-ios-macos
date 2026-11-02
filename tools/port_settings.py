@@ -2100,7 +2100,7 @@ def _matchmaking() -> list:
     base = f"{MT}/matchmaking"
     screen = f"{base}/matchmaking_screen"
     gold = f"#FF{MATCHMAKING_GOLD[1:].upper()}"
-    party_texts = [("title", 340, 92, 200, 18, "#FF2896FF", None, "PARTY"),
+    party_texts = [("notice", 35, 74, 570, 16, gold, None, None), ("title", 340, 92, 200, 18, "#FF2896FF", None, "PARTY"),
                    ("count", 340, 92, 265, 18, "#FFFFFFFF", "right", None),
                    ("line", 340, 284, 265, 36, "#FFFFFFFF", None, None),
                    ("help", 373, 357, 232, 40, "#FFFFFFFF", None, None)]

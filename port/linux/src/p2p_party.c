@@ -1209,6 +1209,13 @@ void p2p_party_leave(void)
 	pthread_mutex_unlock(&p2p_lock);
 }
 
+void p2p_party_notice_clear(void)
+{
+	pthread_mutex_lock(&p2p_lock);
+	set_notice(&local.party, P2P_PARTY_NOTICE_NONE, "");
+	pthread_mutex_unlock(&p2p_lock);
+}
+
 void p2p_party_get_status(struct p2p_party_status *status)
 {
 	pthread_mutex_lock(&p2p_lock);

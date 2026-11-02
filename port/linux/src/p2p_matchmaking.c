@@ -1930,6 +1930,7 @@ void p2p_mm_get_status(struct p2p_mm_status *status)
 		status->widened = search->widened;
 		status->games_checked = search->games_checked;
 		status->can_host = search->can_host;
+		status->party = party_players(search);
 		for (index = 0; index < search->queue_count; index++)
 		{
 			int count = searchers_counted(search->queues[index][0], search->queues[index][1]);
