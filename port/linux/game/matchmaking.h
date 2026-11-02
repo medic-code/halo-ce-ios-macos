@@ -7,6 +7,11 @@
 
 void matchmaking_update(float seconds);
 boolean matchmaking_game_locked(void);
+struct network_game;
+/* the team a machine's new player takes in a matchmade game with parties, NONE for the smaller team */
+long matchmaking_team(
+	struct network_game const *game,
+	short machine_index);
 boolean matchmaking_can_start_now(void);
 void matchmaking_start_now(void);
 

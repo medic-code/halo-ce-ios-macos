@@ -550,7 +550,7 @@ static unsigned long get_long(
 		(unsigned long)bytes[3] << 24;
 }
 
-static unsigned long network_order(
+unsigned long network_order(
 	unsigned long value)
 {
 	byte bytes[4];
