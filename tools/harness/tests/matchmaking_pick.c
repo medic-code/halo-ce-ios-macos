@@ -34,9 +34,11 @@ static const char *picked_big(const char *region)
 	return index < 0 ? "none" : games[index].name;
 }
 
+static int wanted_players = 4, wanted_teams = 1, wanted_party;
+
 static const char *picked(void)
 {
-	struct p2p_lobby_wanted wanted = { 1u << 2, 4, 1 };
+	struct p2p_lobby_wanted wanted = { 1u << 2, wanted_players, wanted_teams, 0, "", wanted_party };
 	int index = p2p_lobby_pick(games, count, &wanted);
 
 	return index < 0 ? "none" : games[index].name;
@@ -162,6 +164,65 @@ int main(int argc, char **argv)
 		add("dedicated", 2, 3, 4, -1, 1, "eu");
 		add("large", 2, 46, 128, 40, 0, "");
 		CHECK(!strcmp(picked(), "three"), "a small search takes neither: %s", picked());
+	}
+	CASE("e28_room")
+	{
+		CHECK(!game_has_room(2, 1, 4, 1, 2), "E28: 1 and 1: passed over");
+		CHECK(game_has_room(2, 2, 4, 1, 2), "E28: 2 on red: blue has room");
+		CHECK(game_has_room(3, 1, 6, 1, 2), "or 1 and 2 of 6: red has");
+		CHECK(!game_has_room(2, 0, 4, 1, 2), "no red count hides the short team");
+		CHECK(game_has_room(2, 0, 4, 1, 1), "a solo fits without a red count");
+		CHECK(game_has_room(0, 0, 4, 1, 2), "no players, no team to be short");
+		CHECK(game_has_room(2, 1, 4, 1, 1), "a solo fits 1 and 1");
+		CHECK(!game_has_room(3, 3, 4, 1, 2), "no more than the game holds");
+		CHECK(game_has_room(4, 0, 6, 0, 2), "free for all: 2 free");
+		CHECK(!game_has_room(5, 0, 6, 0, 2), "free for all: 1 free");
+		CHECK(!game_has_room(4, 2, 4, 1, 1), "a full game has none");
+	}
+	CASE("public_room")
+	{
+		wanted_party = 2;
+		count = 0;
+		add("three_free", 2, 1, 4, 40, 0, "");
+		CHECK(!strcmp(picked(), "three_free"), "a party of 2 takes 3 free: %s", picked());
+		count = 0;
+		add("two_free", 2, 2, 4, 40, 0, "");
+		CHECK(!strcmp(picked(), "none"), "the free slots may be 1 and 1: %s", picked());
+		wanted_party = 4;
+		wanted_players = 8;
+		count = 0;
+		add("seven_free", 2, 1, 8, 40, 0, "");
+		CHECK(!strcmp(picked(), "seven_free"), "a party of 4 takes 7 free: %s", picked());
+		count = 0;
+		add("six_free", 2, 2, 8, 40, 0, "");
+		CHECK(!strcmp(picked(), "none"), "and not 6: %s", picked());
+		wanted_party = 2;
+		wanted_players = 6;
+		wanted_teams = 0;
+		count = 0;
+		add("ffa_two", 2, 4, 6, 40, 0, "");
+		games[count - 1].has_teams = 0;
+		CHECK(!strcmp(picked(), "ffa_two"), "free for all takes N free: %s", picked());
+		count = 0;
+		add("ffa_one", 2, 5, 6, 40, 0, "");
+		games[count - 1].has_teams = 0;
+		CHECK(!strcmp(picked(), "none"), "and not N-1: %s", picked());
+		wanted_party = 0;
+		wanted_players = 4;
+		wanted_teams = 1;
+		count = 0;
+		add("solo", 2, 3, 4, 40, 0, "");
+		CHECK(!strcmp(picked(), "solo"), "a solo takes the last slot: %s", picked());
+	}
+	CASE("in_progress")
+	{
+		count = 0;
+		add("under_way", 2, 1, 4, 40, 0, "");
+		games[count - 1].in_progress = 1;
+		wanted_party = 2;
+		CHECK(!strcmp(picked(), "none"), "a party cannot ask for a team in a game in progress: %s", picked());
+		wanted_party = 1;
+		CHECK(!strcmp(picked(), "under_way"), "a solo may still join: %s", picked());
 	}
 	return 0;
 }

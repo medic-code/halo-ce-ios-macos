@@ -16,6 +16,9 @@ enum
 	MM_FLAG_CAN_HOST = 1,
 	MM_FLAG_UNDER_WAY = 2,
 	MM_FLAG_HELD = 4,
+	/* the flags' top four bits: a hosting record's players on red */
+	MM_FLAG_RED_SHIFT = 4,
+	MM_RED_MAXIMUM = 15,
 	MM_MAXIMUM_POOL = 8,
 	MM_MAXIMUM_PARTY = P2P_PARTY_MAXIMUM,
 	MM_MAXIMUM_UNITS = 256,
@@ -56,7 +59,7 @@ struct mm_record
 	unsigned char key[P2P_KEY_SIZE];
 	/* the hash of the key's X25519 form: an invite's host part */
 	unsigned char key_hash[P2P_KEY_HASH_SIZE];
-	int players, most_players;
+	int players, red_players, most_players;
 	int pool_count;
 	unsigned char pool[MM_MAXIMUM_POOL][P2P_KEY_HASH_SIZE];
 	unsigned char sealed[MM_MAXIMUM_POOL][MM_SEALED_TOKEN_SIZE];
@@ -176,7 +179,7 @@ struct mm_search
 	unsigned char pool[MM_MAXIMUM_POOL][P2P_KEY_HASH_SIZE];
 	int pool_count, pool_playlist, pool_size;
 	unsigned long pool_since;
-	int hosting_playlist, hosting_size, players, most_players, under_way;
+	int hosting_playlist, hosting_size, players, red_players, most_players, under_way;
 	unsigned char token[P2P_TOKEN_SIZE];
 	unsigned long held_until, next_hosting_record;
 	unsigned char joining[P2P_KEY_HASH_SIZE];
@@ -203,8 +206,8 @@ void mm_start(struct mm_search *search, const unsigned char *seed, const struct 
 /* the record must already be verified (mm_record_read) */
 void mm_heard(struct mm_search *search, const struct mm_record *record, unsigned long now);
 int mm_step(struct mm_search *search, unsigned long now, struct mm_out *out, int out_size);
-void mm_hosted(struct mm_search *search, const unsigned char *token, int players, int most_players, int under_way,
-	unsigned long now);
+void mm_hosted(struct mm_search *search, const unsigned char *token, int players, int red_players, int most_players,
+	int under_way, unsigned long now);
 void mm_joined(struct mm_search *search, int ok, unsigned long now);
 void mm_widen_now(struct mm_search *search);
 void mm_host_now(struct mm_search *search);

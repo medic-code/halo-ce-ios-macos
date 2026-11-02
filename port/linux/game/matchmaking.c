@@ -178,6 +178,17 @@ static void matchmaking_end_host(void)
 	matchmaking.role = _matchmaking_idle;
 }
 
+static int red_players(
+	struct network_game const *game)
+{
+	long index;
+	int count = 0;
+
+	for (index = 0; index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS; index++)
+		count += network_player_is_valid(&game->players[index]) && game->players[index].team_index == 0;
+	return count;
+}
+
 static void matchmaking_update_host(float seconds)
 {
 	struct network_game_server *server = global_network_game_server_get();
@@ -219,7 +230,7 @@ static void matchmaking_update_host(float seconds)
 	if (game->player_count)
 		/* a machine joining a game that is over waits out the whole join */
 		p2p_mm_game(game_engine_running() && !game_engine_can_score() ? game->maximum_players : game->player_count,
-			game->maximum_players, state != SERVER_PREGAME);
+			red_players(game), game->maximum_players, state != SERVER_PREGAME);
 	else if (matchmaking_host_gave_up(matchmaking.seconds, game->player_count))
 	{
 		p2p_mm_host_gave_up();
