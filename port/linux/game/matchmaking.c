@@ -42,6 +42,8 @@ void platform_log(char const *format, ...);
 
 /* at most a pool's units and the party joining, each of two players or more */
 #define MATCHMAKING_MOST_WAITING 9
+/* a host that has started refuses a move, and one that balances undoes it */
+#define MATCHMAKING_MOST_TEAM_ASKS 3
 
 struct team_party
 {
@@ -88,6 +90,8 @@ static struct
 	boolean map_set, player_added, start_now;
 	boolean public_game;
 	boolean reopen, party_stopped;
+	float team_seconds;
+	int team_asks;
 	byte host[6];
 } matchmaking;
 
@@ -406,6 +410,7 @@ static void matchmaking_begin_join(struct p2p_mm_decision const *decision)
 	matchmaking.role = _matchmaking_joining;
 	matchmaking.public_game = decision->public_game != 0;
 	matchmaking.size = (short)decision->size;
+	matchmaking.team_asks = 0;
 	matchmaking.seconds = 0.0f;
 }
 
@@ -455,7 +460,89 @@ static void matchmaking_reopen_search(void)
 	}
 }
 
-static void matchmaking_update_joined(void)
+static boolean player_named(
+	wchar_t const *wide,
+	char const *name)
+{
+	char text[P2P_PARTY_NAME_SIZE + 1];
+	short at = 0;
+
+	for (; *wide && at < (short)sizeof(text) - 3; wide++)
+	{
+		unsigned long character = (unsigned short)*wide;
+
+		if (character < 0x80)
+			text[at++] = (char)character;
+		else if (character < 0x800)
+		{
+			text[at++] = (char)(0xC0 | (character >> 6));
+			text[at++] = (char)(0x80 | (character & 0x3F));
+		}
+		else
+		{
+			text[at++] = (char)(0xE0 | (character >> 12));
+			text[at++] = (char)(0x80 | ((character >> 6) & 0x3F));
+			text[at++] = (char)(0x80 | (character & 0x3F));
+		}
+	}
+	text[at] = 0;
+	return !strcmp(text, name);
+}
+
+/* the team to ask for: NONE once on the leader's, or with no leader in sight */
+static long leader_team(
+	struct network_game const *game,
+	long machine_index,
+	char const *leader_name)
+{
+	long index, own_team = NONE, team = NONE;
+
+	if (!game->variant.universal_variant.teams)
+		return NONE;
+	for (index = 0; index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS; index++)
+	{
+		struct network_player const *player = &game->players[index];
+
+		if (!network_player_is_valid(player))
+			continue;
+		if (player->machine_index == machine_index)
+			own_team = player->team_index;
+		else if (player_named(player->name, leader_name))
+			team = player->team_index;
+	}
+	return team != own_team ? team : NONE;
+}
+
+/* the host of a public game knows no party, so a member moves itself */
+static void matchmaking_follow_leader(
+	float seconds)
+{
+	struct p2p_party_status party;
+	long index, team;
+
+	matchmaking.team_seconds += seconds;
+	if (matchmaking.team_seconds < 1.0f || (!matchmaking.public_game && !p2p_mm_size_big(matchmaking.size)) ||
+		matchmaking.team_asks >= MATCHMAKING_MOST_TEAM_ASKS)
+		return;
+	matchmaking.team_seconds = 0.0f;
+	p2p_party_get_status(&party);
+	for (index = 0; index < party.count; index++)
+	{
+		if (party.members[index].leader && !party.members[index].you)
+		{
+			team = leader_team(network_game_client_get_game(global_network_game_client_get()),
+				network_game_client_get_local_machine_index(), party.members[index].name);
+			if (team != NONE)
+			{
+				matchmaking.team_asks++;
+				network_game_client_set_team((char)team);
+			}
+		}
+	}
+}
+
+static void matchmaking_update_joined(
+	float seconds)
 {
 	if (network_game_client_port_connection_ended())
 	{
@@ -463,7 +550,10 @@ static void matchmaking_update_joined(void)
 		matchmaking.reopen = TRUE;
 	}
 	else if (global_network_game_client_get())
+	{
+		matchmaking_follow_leader(seconds);
 		return;
+	}
 	else
 		p2p_mm_cancel();
 	matchmaking.role = _matchmaking_idle;
@@ -505,7 +595,7 @@ void matchmaking_update(float seconds)
 		matchmaking_update_join(seconds);
 		break;
 	case _matchmaking_joined:
-		matchmaking_update_joined();
+		matchmaking_update_joined(seconds);
 		break;
 	}
 	if (status.notice >= P2P_MM_NOTICE_TOO_BIG && !matchmaking.party_stopped && !global_network_game_client_get())
