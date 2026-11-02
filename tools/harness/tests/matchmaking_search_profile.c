@@ -49,6 +49,10 @@ static void ui_play_audio_feedback_sound(short sound)
 	last_sound = sound;
 }
 
+static void p2p_party_notice_clear(void)
+{
+}
+
 static void p2p_mm_search(const struct p2p_mm_choice *choice)
 {
 	searches++;
