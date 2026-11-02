@@ -452,7 +452,7 @@ def matchmaking_check(tmp_path, fault=None):
     copy.write_text(source)
     program = tmp_path / "p2p_matchmaking_check"
     built = subprocess.run(["clang", *platform_flags(), "-Iport/linux/src", "-O1", "-no-pie",
-                            "-Wl,--unresolved-symbols=ignore-all", "-o", str(program),
+                            "-Wl,--wrap=p2p_ed25519_verify", "-Wl,--unresolved-symbols=ignore-all", "-o", str(program),
                             "tools/p2p_matchmaking_check.c", str(copy), *MATCHMAKING_SOURCES],
                            capture_output=True, text=True)
     assert built.returncode == 0, built.stderr[-4000:]
@@ -478,6 +478,7 @@ def test_p2p_matchmaking(tmp_path):
     (("if (record->kind == MM_KIND_CANCEL)", "if (0)"), "e43_replay"),
     (("record->sequence <= peer->record.sequence", "0"), "e43_replay"),
     (("elapsed_ms(started) >= VERIFY_BUDGET", "0"), "verify_budget"),
+    (("elapsed_ms(started) >= VERIFY_BUDGET", "0"), "verify_budget_party"),
     (("record->most_players <= p2p_mm_size_players(record->size)", "1"), "fake_fuller_game"),
     (("record->most_players <= HALO_PORT_MAXIMUM_NETWORK_PLAYERS", "1"), "big_records"),
     (("record->kind != MM_KIND_SEARCHING && ", ""), "big_records"),
@@ -510,6 +511,21 @@ def test_p2p_matchmaking(tmp_path):
     (("p2p_mm_size_big(best->size) &&\n\t\tbetter_host_settling(search, best)", "0"), "big_hold"),
     (("(ping < 0 && peer->refreshes < MM_REFRESHES_PINGED)", "ping < 0"), "big_hold"),
     (("size != P2P_MM_FFA_6 && size != P2P_MM_BIG_FFA", "size != P2P_MM_FFA_6"), "e64_big_ffa_no_ctf"),
+    (("party * 2 <= p2p_mm_size_players(size)", "party <= p2p_mm_size_players(size)"), "e22_sizes"),
+    (("!mm_party_size_allowed(record->party, record->size) ||\n\t\t\tsize", "size"), "e22_sizes"),
+    (("!mm_party_size_allowed(record->party, record->size) ||\n\t\t\tsize", "size"), "party_no_signature"),
+    (("!p2p_ed25519_verify(record->member_keys[member - 1], message, size, record->member_signatures[member - 1])", "0"),
+     "e42_member_signatures"),
+    (("if (other < member ||\n\t\t\t!p2p", "if (!p2p"), "e42_member_signatures"),
+    (("memcpy(hashes[0], record->key_hash, P2P_KEY_HASH_SIZE);", "memset(hashes[0], 0, P2P_KEY_HASH_SIZE);"),
+     "e42_member_signatures"),
+    (("record->kind != MM_KIND_SEARCHING || size < at + 1", "size < at + 1"), "e42_member_signatures"),
+    (("record->party < 2 || ", ""), "e42_member_signatures"),
+    (("memcmp(hashes[other], hashes[member], P2P_KEY_HASH_SIZE)",
+      "memcmp(other ? record->member_keys[other - 1] : record->key, record->member_keys[member - 1], P2P_KEY_SIZE)"),
+     "e42_member_signatures"),
+    (("if (!key_hash_of(record->member_keys[member - 1], hashes[member]))\n\t\t\treturn 0;",
+      "key_hash_of(record->member_keys[member - 1], hashes[member]);"), "e42_member_signatures"),
 ])
 def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
     output = matchmaking_check(tmp_path, fault)
