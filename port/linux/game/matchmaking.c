@@ -339,11 +339,23 @@ static void matchmaking_update_joined(void)
 	matchmaking.role = _matchmaking_idle;
 }
 
+static void matchmaking_leave_game(void)
+{
+	if (matchmaking.role == _matchmaking_hosting)
+		matchmaking_end_host();
+	dispose_global_network_game_client();
+	dispose_global_network_game_server();
+	matchmaking.role = _matchmaking_idle;
+	matchmaking.reopen = TRUE;
+}
+
 void matchmaking_update(float seconds)
 {
 	struct p2p_mm_status status;
 	struct p2p_mm_decision decision;
 
+	if (p2p_mm_take_left_game())
+		matchmaking_leave_game();
 	p2p_mm_get_status(&status);
 	/* the search is off while joined: a joined game must not end here */
 	if (status.state == P2P_MM_OFF && (matchmaking.role == _matchmaking_hosting || matchmaking.role == _matchmaking_joining))

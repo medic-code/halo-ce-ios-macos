@@ -18,6 +18,7 @@ enum
 {
 	PARTY_INTERVAL = 3000,
 	PARTY_EXPIRY = 10000,
+	PARTY_FOLLOW_WAIT = 20000,
 	PARTY_HEADER_SIZE = 1 + P2P_KEY_SIZE + 4,
 	PARTY_MEMBER_RECORD = 1,
 	PARTY_LEADER_RECORD,
@@ -705,6 +706,18 @@ static void leader_search(struct mm_party *party, struct mm_search *search, unsi
 		party->search = said;
 		party->sent = now - PARTY_INTERVAL;
 	}
+	if (!late)
+		party->follow_done = 1;
+	if (party->search.has_game && !party->follow_done && late && elapsed(party->follow_since, now, PARTY_FOLLOW_WAIT))
+	{
+		set_notice(party, P2P_PARTY_NOTICE_COULD_NOT_JOIN, late->name);
+		party->search.left = (party->search.left + 1) & 255;
+		party->search.has_game = 0;
+		party->sent = now - PARTY_INTERVAL;
+		for (index = 1; index < party->count; index++)
+			party->members[index].in_game = 0;
+		mm_game_left(search, now);
+	}
 }
 
 static int invited_to_own_game(const struct mm_search *search, const char *invite)
@@ -752,6 +765,12 @@ static void member_search(struct mm_party *party, struct mm_search *search, unsi
 		wanted.count = party->count;
 		wanted.member_hosts = hosts;
 		mm_set_party(search, &wanted, now);
+	}
+	if (said->left != party->left_seen)
+	{
+		party->left_seen = said->left;
+		if (search->in_game || search->state == P2P_MM_FOUND || search->state == P2P_MM_HOSTING)
+			mm_game_left(search, now);
 	}
 	if (said->widened)
 		mm_widen_now(search);

@@ -184,6 +184,8 @@ struct mm_search
 	struct mm_search_party party;
 	/* joined: the search is off, and the party still follows it */
 	int in_game;
+	int left_game;
+	unsigned char failed_game[P2P_KEY_HASH_SIZE];
 };
 
 void mm_wanted(const struct mm_search *search, int queue, struct p2p_lobby_wanted *wanted);
@@ -207,6 +209,7 @@ void mm_follow(struct mm_search *search, const unsigned char *seed, const struct
 	const unsigned char *leader, int players, unsigned long now, unsigned long unix_now);
 void mm_follow_game(struct mm_search *search, const char *invite, int playlist, int size, int public_game,
 	unsigned long now);
+void mm_game_left(struct mm_search *search, unsigned long now);
 void mm_invite_text(const unsigned char *key_hash, const unsigned char *token, char *text);
 
 enum { MM_PARTY_NONE, MM_PARTY_LEADER, MM_PARTY_MEMBER };

@@ -607,10 +607,12 @@ def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
     (("mm_party_step(&local.party, p2p_now(), bytes)", "mm_party_step(&local.party, started, bytes)"),
      "party verify window"),
     ((" || memcmp(record->seal, party->seal, sizeof(party->seal))", ""), "party verify window"),
+    (("PARTY_FOLLOW_WAIT = 20000", "PARTY_FOLLOW_WAIT = 2000000"), "e29_cannot_follow"),
     (("party->left_number = party->search.number;\n\tparty->sent", "party->sent"), "e60_member_b"),
     (("if (member->can_host && !wanted->member_hosts && search->can_host <= 0)", "if (0)"), "e47_strict_leader"),
     (("if (!said->searching)\n\t{\n\t\tmm_cancel(search, NULL, 0);", "if (0)\n\t{\n\t\tmm_cancel(search, NULL, 0);"), "e24_leader_cancels"),
     (("else if (search->party.following)\n\t\tmm_cancel(search, NULL, 0);", ""), "e30_leader_quits"),
+    (("mm_game_left(search, now);\n\t}\n}\n\nstatic int invited", "}\n}\n\nstatic int invited"), "e29_cannot_follow"),
     (("search->has_game = pair_key(party, party->members[0].key, key) &&", "search->has_game = 0 &&"), "party_record_search"),
 ])
 def test_p2p_party_negative_control(tmp_path, fault, case):
