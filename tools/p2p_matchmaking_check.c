@@ -3001,6 +3001,12 @@ static void check_party_journeys(void)
 
 static void check_party_record_search(void)
 {
+	struct mm_party_search *said = &parties[0].search;
+	int *const fields[] = { &said->game_playlist, &said->game_size, &said->size, &said->playlists };
+	const int bad[] = { NUMBER_OF_P2P_MM_PLAYLISTS, NUMBER_OF_P2P_MM_SIZES, NUMBER_OF_P2P_MM_SIZES,
+		1 << NUMBER_OF_P2P_MM_PLAYLISTS };
+	int index;
+
 	case_name = "party_record_search";
 	party_form(3);
 	party_run(3, 7);
@@ -3026,6 +3032,18 @@ static void check_party_record_search(void)
 	CHECK(parties[2].search.has_game && !strcmp(parties[2].search.invite, "halo://join/0123"),
 		"each member opens the invite sealed to it: %s", parties[2].search.invite);
 	CHECK(parties[2].left_number == 7 && parties[2].followed_game == 3, "the first record heard takes no action");
+	for (index = 0; index < 4; index++)
+	{
+		int *const field = fields[index], good = *field;
+
+		*field = bad[index];
+		parties[0].search.number++;
+		party_run(3, 7);
+		CHECK(parties[1].search.number != parties[0].search.number, "out of range field %d is dropped", index);
+		*field = good;
+		party_run(3, 7);
+		CHECK(parties[1].search.number == parties[0].search.number, "the fixed record is read: field %d", index);
+	}
 }
 
 static int party_lists(const struct mm_party *party, const char *name)

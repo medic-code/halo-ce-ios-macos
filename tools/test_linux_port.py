@@ -614,6 +614,10 @@ def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
     (("else if (search->party.following)\n\t\tmm_cancel(search, NULL, 0);", ""), "e30_leader_quits"),
     (("mm_game_left(search, now);\n\t}\n}\n\nstatic int invited", "}\n}\n\nstatic int invited"), "e29_cannot_follow"),
     (("search->has_game = pair_key(party, party->members[0].key, key) &&", "search->has_game = 0 &&"), "party_record_search"),
+    ((" && body[base] < NUMBER_OF_P2P_MM_PLAYLISTS", ""), "party_record_search"),
+    (("&&\n\t\t\tbody[base + 1] < NUMBER_OF_P2P_MM_SIZES", ""), "party_record_search"),
+    ((" || block[5] >= NUMBER_OF_P2P_MM_SIZES", ""), "party_record_search"),
+    ((" || block[4] >= 1u << NUMBER_OF_P2P_MM_PLAYLISTS", ""), "party_record_search"),
 ])
 def test_p2p_party_negative_control(tmp_path, fault, case):
     output = matchmaking_check(tmp_path, party_fault=fault)
