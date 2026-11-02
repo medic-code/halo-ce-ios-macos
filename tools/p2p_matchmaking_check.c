@@ -300,7 +300,8 @@ static void verify_budget_of(int members, int queue_size, double limit_ms)
 	CHECK(passes > 1 || first_pass_ms < 2.5, "a pass of %.1f ms past the budget stopped early: %d passes", first_pass_ms, passes);
 	CHECK(!left, "the queue drains over later passes: %d left", left);
 	p2p_mm_get_status(&status);
-	CHECK(status.count == 22, "64 kept, all verified into the search: %d searchers counted, 21 and this machine", status.count);
+	CHECK(status.count == 1 + 21 * (members + 1), "64 kept, all verified into the search: %d searchers counted, 21 and this machine",
+		status.count);
 	p2p_mm_cancel();
 }
 
@@ -2324,6 +2325,136 @@ static int party_refused(const struct mm_record *record)
 	return !mm_record_read(bytes, size, &read_back);
 }
 
+static void heard_strict(struct mm_search *search, int machine, unsigned long sequence)
+{
+	struct mm_record record = searching(machine, sequence), read_back;
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+
+	record.playlist = P2P_MM_SLAYER;
+	record.size = P2P_MM_2V2;
+	record.can_host = 0;
+	seed_of(machine, seed);
+	if (mm_record_read(bytes, mm_record_write(&record, seed, bytes, sizeof(bytes)), &read_back))
+		mm_heard(search, &read_back, now_ms);
+}
+
+static void set_party(struct mm_search *search, const struct mm_record *record, int member_hosts)
+{
+	struct mm_search_party party;
+
+	memset(&party, 0, sizeof(party));
+	party.count = record->party;
+	party.member_hosts = member_hosts;
+	memcpy(party.keys, record->member_keys, sizeof(party.keys));
+	memcpy(party.signatures, record->member_signatures, sizeof(party.signatures));
+	mm_set_party(search, &party, now_ms);
+}
+
+static void check_party_search(void)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct mm_record read_back, keys, flags = { 0 };
+	int count, index, hosts = 0;
+
+	case_name = "party_search";
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_4V4, 1);
+	keys = party_of(100, 3, 1);
+	set_party(&machines[0].search, &keys, 0);
+	count = mm_step(&machines[0].search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(count == 1 && mm_record_read(out[0].bytes, out[0].size, &read_back) && read_back.party == 4 &&
+		!memcmp(read_back.member_keys, keys.member_keys, 3 * P2P_KEY_SIZE),
+		"the leader's search is a format 2 record of its 4 players");
+	keys = party_of(100, 1, 1);
+	set_party(&machines[0].search, &keys, 0);
+	CHECK(machines[0].search.next_record == now_ms, "a smaller party is told at once, start kept");
+	mm_step(&machines[0].search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(machines[0].search.started == now_unix, "the start kept");
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_4V4, 1);
+	keys = party_of(100, 3, 1);
+	set_party(&machines[0].search, &keys, 0);
+	mm_widen_now(&machines[0].search);
+	CHECK(machines[0].search.queue_count == 1 && machines[0].search.queues[0][1] == P2P_MM_4V4,
+		"a party of 4 widens to no size it cannot fit: %d queues", machines[0].search.queue_count);
+
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 0);
+	keys = party_of(100, 1, 1);
+	set_party(&machines[0].search, &keys, 1);
+	mm_step(&machines[0].search, now_ms, out, MM_MAXIMUM_OUT);
+	for (index = 0; index < 16; index++)
+	{
+		now_ms += 500;
+		heard_strict(&machines[0].search, 301, 300 + (unsigned long)index);
+		heard_strict(&machines[0].search, 302, 300 + (unsigned long)index);
+		count = mm_step(&machines[0].search, now_ms, out, MM_MAXIMUM_OUT);
+		hosts += machines[0].search.decided == P2P_MM_DECIDE_HOST;
+		if (count && mm_record_read(out[0].bytes, out[0].size, &read_back) && read_back.kind == MM_KIND_SEARCHING)
+			flags = read_back;
+	}
+	CHECK(flags.can_host, "a strict leader's party can host through its member");
+	CHECK(machines[0].search.pool_count == 3, "the party of 2 and two others fill 2V2: pool of %d",
+		machines[0].search.pool_count);
+	CHECK(!hosts, "a strict leader never takes the party's host");
+}
+
+static int pool_names(const struct mm_record *record, const unsigned char *key)
+{
+	unsigned char x25519[P2P_KEY_SIZE], hash[P2P_KEY_HASH_SIZE];
+	int index;
+
+	p2p_ed25519_to_x25519(key, x25519);
+	p2p_key_hash(x25519, hash);
+	for (index = 0; index < record->pool_count; index++)
+		if (!memcmp(record->pool[index], hash, P2P_KEY_HASH_SIZE))
+			return index + 1;
+	return 0;
+}
+
+static void check_party_pool_invited(void)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct mm_record read_back, heard, own, other = party_of(200, 1, 300);
+	struct mm_search *search;
+	unsigned char token[P2P_TOKEN_SIZE], seed[P2P_SEED_SIZE], opened[P2P_TOKEN_SIZE];
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+	int count, index, found = 0;
+
+	case_name = "party_pool_invited";
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_3V3, 1);
+	own = party_of(100, 1, 1);
+	set_party(search, &own, 0);
+	memset(token, 7, sizeof(token));
+	for (index = 0; index < 3; index++)
+		heard_party(search, 200, 1, 300 + (unsigned long)index, P2P_MM_SLAYER, P2P_MM_3V3);
+	memcpy(search->pool[0], search->key_hash, P2P_KEY_HASH_SIZE);
+	other.playlist = P2P_MM_SLAYER;
+	other.size = P2P_MM_3V3;
+	seed_of(200, seed);
+	CHECK(mm_record_read(bytes, mm_record_write(&other, seed, bytes, sizeof(bytes)), &heard), "read");
+	memcpy(search->pool[1], heard.key_hash, P2P_KEY_HASH_SIZE);
+	search->pool_count = 2;
+	search->hosting_playlist = P2P_MM_SLAYER;
+	search->hosting_size = P2P_MM_3V3;
+	search->state = P2P_MM_FOUND;
+	search->decided = P2P_MM_DECIDE_HOST;
+	mm_hosted(search, token, 1, 6, 0, now_ms);
+	count = mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	for (index = 0; index < count; index++)
+		found |= mm_record_read(out[index].bytes, out[index].size, &read_back) && read_back.kind == MM_KIND_HOSTING;
+	CHECK(found && read_back.pool_count == 3, "the host's own member and the other party's two are invited: %d",
+		read_back.pool_count);
+	CHECK(pool_names(&read_back, own.member_keys[0]) && pool_names(&read_back, other.key) &&
+		pool_names(&read_back, other.member_keys[0]), "each by its own key");
+	seed_of(201, seed);
+	index = pool_names(&read_back, other.member_keys[0]) - 1;
+	CHECK(index >= 0 && mm_open_token(seed, read_back.key, read_back.sealed[index], opened) &&
+		!memcmp(opened, token, P2P_TOKEN_SIZE), "the other party's member opens its own token");
+}
+
 static void check_party_records(void)
 {
 	enum { HEADER = MM_HEADER_SIZE + 1 };
@@ -3045,6 +3176,8 @@ int main(int argc, char **argv)
 	check_failed_pick();
 	check_region();
 	check_party_pool();
+	check_party_search();
+	check_party_pool_invited();
 	check_party_sizes();
 	check_party_records();
 	check_party_link();

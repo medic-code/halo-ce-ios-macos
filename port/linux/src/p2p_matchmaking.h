@@ -129,6 +129,15 @@ struct mm_out
 	int size;
 };
 
+struct mm_search_party
+{
+	/* players, the leader among them */
+	int count;
+	unsigned char keys[MM_MAXIMUM_PARTY - 1][P2P_KEY_SIZE];
+	unsigned char signatures[MM_MAXIMUM_PARTY - 1][P2P_SIGNATURE_SIZE];
+	int member_hosts;
+};
+
 struct mm_search
 {
 	unsigned char seed[P2P_SEED_SIZE], key[P2P_KEY_SIZE], key_hash[P2P_KEY_HASH_SIZE];
@@ -162,6 +171,7 @@ struct mm_search
 	int games_checked;
 	unsigned char picked[P2P_IDENTIFIER_SIZE];
 	int picked_set;
+	struct mm_search_party party;
 };
 
 void mm_wanted(const struct mm_search *search, int queue, struct p2p_lobby_wanted *wanted);
@@ -180,6 +190,7 @@ void mm_host_now(struct mm_search *search);
 int mm_cancel(struct mm_search *search, struct mm_out *out, int out_size);
 void mm_game_lost(struct mm_search *search, unsigned long now);
 void mm_host_gave_up(struct mm_search *search, unsigned long now);
+void mm_set_party(struct mm_search *search, const struct mm_search_party *party, unsigned long now);
 
 enum { MM_PARTY_NONE, MM_PARTY_LEADER, MM_PARTY_MEMBER };
 
