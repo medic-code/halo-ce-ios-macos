@@ -3676,6 +3676,90 @@ static void check_party_verify_window(void)
 	CHECK(status.count == 2, "a record being checked when its sender is removed does not bring them back: %d", status.count);
 }
 
+static void wiring_hears_leader(void)
+{
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+	int size;
+
+	parties[0].sent = clock_now - 3000;
+	size = mm_party_step(&parties[0], clock_now, bytes);
+	p2p_party_heard(bytes, size);
+	clock_now += 3000;
+	party_update_locked();
+}
+
+static void wiring_leader_hears(void)
+{
+	party_send(1, parties[0].topic, party_published, party_published_size);
+}
+
+static void check_party_wiring(void)
+{
+	static const unsigned char secret[P2P_PARTY_SECRET_SIZE] = { 9 };
+	static struct mm_search leading;
+	struct p2p_mm_choice choice = { 1u << P2P_MM_SLAYER, P2P_MM_2V2 };
+	struct mm_search *search = p2p_mm_local();
+	unsigned char seed[P2P_SEED_SIZE];
+	char link[P2P_PARTY_LINK_SIZE];
+	int calls;
+
+	case_name = "party wiring";
+	party_machines = 0;
+	memset(parties, 0, sizeof(parties));
+	p2p_party_remove(1);
+	p2p_party_invite(link, sizeof(link));
+	party_seed(5, seed);
+	strcpy(parties[5].name, "EMILE");
+	mm_party_join(&parties[5], seed, link, clock_now);
+	party_machine_hears(5, 0);
+	p2p_mm_search(&choice);
+	party_update_locked();
+	CHECK(search->party.count == 2, "a leader's search carries its member: %d", search->party.count);
+	p2p_mm_cancel();
+	p2p_party_remove(1);
+
+	memset(parties, 0, sizeof(parties));
+	party_seed(0, seed);
+	strcpy(parties[0].name, "CHIEF");
+	mm_party_make(&parties[0], seed, secret, clock_now);
+	party_now = clock_now;
+	CHECK(party_link_locked(parties[0].link) && p2p_party_is_member(), "the machine joins as a member");
+	p2p_mm_search(&choice);
+	CHECK(search->state == P2P_MM_OFF, "a member cannot search: state %d", search->state);
+	clock_now += 3000;
+	party_update_locked();
+	wiring_leader_hears();
+	CHECK(parties[0].count == 2, "the leader lists the machine: %d", parties[0].count);
+	wiring_hears_leader();
+	party_seed(0, seed);
+	mm_start(&leading, seed, &choice, clock_now, 1);
+	mm_party_search_begin(&parties[0], &leading, clock_now);
+	wiring_hears_leader();
+	CHECK(search->party.following, "the member follows the leader's search");
+	party_published_size = 0;
+	p2p_mm_cancel();
+	party_update_locked();
+	wiring_leader_hears();
+	CHECK(parties[0].notice == P2P_PARTY_NOTICE_LEFT_SEARCH, "its cancel tells the leader: %d", parties[0].notice);
+
+	calls = browse_calls;
+	search->party.following = 1;
+	search->left_game = 1;
+	CHECK(p2p_mm_take_left_game() == 1 && !search->left_game, "the game thread takes the leaving");
+	CHECK(!p2p_mm_take_left_game(), "once");
+	CHECK(browse_calls == calls, "following, the browser is the leader's search's: %d", browse_calls - calls);
+	search->in_game = 1;
+	p2p_mm_game_lost();
+	CHECK(browse_calls == calls, "and a lost game does not hold it: %d", browse_calls - calls);
+	p2p_mm_cancel();
+	calls = browse_calls;
+	search->left_game = 1;
+	CHECK(p2p_mm_take_left_game() == 1 && browse_calls == calls + 1 && browsing, "searching alone, the browser restarts");
+	p2p_mm_cancel();
+	p2p_party_leave();
+	CHECK(!p2p_party_active(), "the machine is out of the party");
+}
+
 /* under loss two machines can elect themselves at once, so the lossy runs check only the end state */
 int main(int argc, char **argv)
 {
@@ -3720,6 +3804,7 @@ int main(int argc, char **argv)
 	check_party_flags();
 	check_party_machine();
 	check_party_verify_window();
+	check_party_wiring();
 	check_worlds();
 	check_faults();
 	if (argc > 1)

@@ -576,6 +576,13 @@ def test_p2p_matchmaking(tmp_path):
      "e42_member_signatures"),
     (("if (!key_hash_of(record->member_keys[member - 1], hashes[member]))\n\t\t\treturn 0;",
       "key_hash_of(record->member_keys[member - 1], hashes[member]);"), "e42_member_signatures"),
+    (("if (p2p_party_is_member())\n\t{\n\t\tpthread_mutex_unlock(&p2p_lock);\n\t\treturn;\n\t}", ""), "party wiring"),
+    (("p2p_party_search_begin(&mm.search);", ""), "party wiring"),
+    (("if (mm.search.party.following)\n\t\tp2p_party_search_left();", ""), "party wiring"),
+    (("left = mm.search.left_game;\n\tmm.search.left_game = 0;", "left = mm.search.left_game;"), "party wiring"),
+    (("restart = left && !mm.search.party.following;", "restart = left;"), "party wiring"),
+    (("restart = left && !mm.search.party.following;", "restart = 0;"), "party wiring"),
+    (("restarted = !mm.search.party.following;", "restarted = 1;"), "party wiring"),
 ])
 def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
     output = matchmaking_check(tmp_path, fault)
