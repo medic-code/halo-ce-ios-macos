@@ -22,6 +22,13 @@ enum
 	PARTY_LEADER_RECORD,
 	PARTY_LINK_RECORD,
 	PARTY_FLAG_LEAVING = 1,
+	PARTY_FLAG_CAN_HOST = 2,
+	PARTY_FLAG_IN_GAME = 4,
+	PARTY_SEARCHING = 1,
+	PARTY_WIDENED = 2,
+	PARTY_GAME = 4,
+	PARTY_PUBLIC = 8,
+	PARTY_MEMBER_SIZE = P2P_PARTY_NAME_SIZE + 2 + P2P_SIGNATURE_SIZE,
 	SEALED_SECRET_SIZE = P2P_PARTY_SECRET_SIZE + P2P_SEAL_OVERHEAD,
 	MAXIMUM_QUEUED = 32,
 	VERIFY_BUDGET = 2,
@@ -90,6 +97,8 @@ static void begin_party(struct mm_party *party, const unsigned char *seed, int r
 	party->members[0].heard = now;
 	party->sent = now - PARTY_INTERVAL;
 	party->gone_count = 0;
+	memset(&party->search, 0, sizeof(party->search));
+	party->search_heard = party->left_number = party->in_game = party->can_host = 0;
 	set_notice(party, P2P_PARTY_NOTICE_NONE, "");
 }
 
@@ -198,8 +207,42 @@ static int write_member(struct mm_party *party, int flags, unsigned char *bytes)
 	int size = record_start(party, PARTY_MEMBER_RECORD, plain);
 
 	size += put_name(party->name, plain + size);
-	plain[size++] = (unsigned char)flags;
+	plain[size++] = (unsigned char)(flags | (party->can_host ? PARTY_FLAG_CAN_HOST : 0) |
+		(party->in_game ? PARTY_FLAG_IN_GAME : 0));
+	plain[size++] = (unsigned char)party->left_number;
+	mm_party_sign(party->seed, party->members[0].key, plain + size);
+	size += P2P_SIGNATURE_SIZE;
 	return record_finish(party, plain, size, bytes);
+}
+
+/* forward: the leader and a member (other: the other's Ed25519 key) seal a game's invite with it */
+static int pair_key(const struct mm_party *party, const unsigned char *other, unsigned char *key);
+
+static int write_search(struct mm_party *party, unsigned char *plain)
+{
+	const struct mm_party_search *search = &party->search;
+	unsigned char key[P2P_SHA256_SIZE];
+	int size = 0, index;
+
+	plain[size++] = (unsigned char)((search->searching ? PARTY_SEARCHING : 0) | (search->widened ? PARTY_WIDENED : 0) |
+		(search->has_game ? PARTY_GAME : 0) | (search->public_game ? PARTY_PUBLIC : 0));
+	plain[size++] = (unsigned char)search->number;
+	plain[size++] = (unsigned char)search->game;
+	plain[size++] = (unsigned char)search->left;
+	plain[size++] = (unsigned char)search->playlists;
+	plain[size++] = (unsigned char)search->size;
+	if (!search->has_game)
+		return size;
+	plain[size++] = (unsigned char)search->game_playlist;
+	plain[size++] = (unsigned char)search->game_size;
+	for (index = 1; index < party->count; index++)
+	{
+		memset(plain + size, 0, MM_SEALED_INVITE_SIZE);
+		if (pair_key(party, party->members[index].key, key))
+			p2p_seal(key, search->invite, P2P_LINK_SIZE, plain + size);
+		size += MM_SEALED_INVITE_SIZE;
+	}
+	return size;
 }
 
 static int write_leader(struct mm_party *party, unsigned char *bytes)
@@ -215,6 +258,7 @@ static int write_leader(struct mm_party *party, unsigned char *bytes)
 		memcpy(plain + size, party->members[index].hash, P2P_KEY_HASH_SIZE);
 		size += P2P_KEY_HASH_SIZE;
 	}
+	size += write_search(party, plain + size);
 	return record_finish(party, plain, size, bytes);
 }
 
@@ -357,7 +401,8 @@ int mm_party_read(struct mm_party *party, const unsigned char *payload, int size
 	if (record->kind == PARTY_MEMBER_RECORD)
 	{
 		p2p_key_hash(record->key, hash);
-		return body_size == P2P_PARTY_NAME_SIZE + 1 && !member_record_stale(party, hash, record->sequence);
+		memcpy(record->leader, party->members[0].key, P2P_KEY_SIZE);
+		return body_size == PARTY_MEMBER_SIZE && !member_record_stale(party, hash, record->sequence);
 	}
 	if (party->role != MM_PARTY_MEMBER || memcmp(record->key, party->members[0].key, P2P_KEY_SIZE) ||
 		record->sequence <= party->members[0].sequence)
@@ -365,8 +410,16 @@ int mm_party_read(struct mm_party *party, const unsigned char *payload, int size
 		return 0;
 	}
 	if (record->kind == PARTY_LEADER_RECORD)
-		return body_size > P2P_PARTY_NAME_SIZE && body[P2P_PARTY_NAME_SIZE] < P2P_PARTY_MAXIMUM &&
-			body_size == P2P_PARTY_NAME_SIZE + 1 + body[P2P_PARTY_NAME_SIZE] * P2P_KEY_HASH_SIZE;
+	{
+		int count, base;
+
+		if (body_size <= P2P_PARTY_NAME_SIZE || body[P2P_PARTY_NAME_SIZE] >= P2P_PARTY_MAXIMUM)
+			return 0;
+		count = body[P2P_PARTY_NAME_SIZE];
+		base = P2P_PARTY_NAME_SIZE + 1 + count * P2P_KEY_HASH_SIZE + MM_PARTY_SEARCH_SIZE;
+		return body_size >= base && body_size == base +
+			(body[base - MM_PARTY_SEARCH_SIZE] & PARTY_GAME ? 2 + count * MM_SEALED_INVITE_SIZE : 0);
+	}
 	return record->kind == PARTY_LINK_RECORD && body_size > P2P_KEY_HASH_SIZE &&
 		body_size == P2P_KEY_HASH_SIZE + 1 + body[P2P_KEY_HASH_SIZE] * (P2P_KEY_HASH_SIZE + SEALED_SECRET_SIZE);
 }
@@ -375,6 +428,11 @@ int mm_party_verify(const struct mm_party_record *record)
 {
 	unsigned char message[sizeof(record_label) + MM_MAXIMUM_RECORD_SIZE];
 
+	if (record->kind == PARTY_MEMBER_RECORD &&
+		!mm_party_signed(record->key, record->leader, record->body + P2P_PARTY_NAME_SIZE + 2))
+	{
+		return 0;
+	}
 	signed_message(record->plain, record->size, message);
 	return p2p_ed25519_verify(record->key, message, (int)sizeof(record_label) - 1 + record->size,
 		record->plain + record->size);
@@ -390,10 +448,11 @@ static void heard_member(struct mm_party *party, const struct mm_party_record *r
 {
 	unsigned char hash[P2P_KEY_HASH_SIZE];
 	struct mm_party_member *member;
+	const int flags = record->body[P2P_PARTY_NAME_SIZE];
 
 	p2p_key_hash(record->key, hash);
 	member = find_member(party, hash);
-	if (record->body[P2P_PARTY_NAME_SIZE] & PARTY_FLAG_LEAVING)
+	if (flags & PARTY_FLAG_LEAVING)
 	{
 		if (party->role == MM_PARTY_LEADER && member)
 		{
@@ -413,6 +472,49 @@ static void heard_member(struct mm_party *party, const struct mm_party_record *r
 	get_name(record->body, member->name);
 	member->sequence = record->sequence;
 	member->heard = now;
+	member->can_host = !!(flags & PARTY_FLAG_CAN_HOST);
+	member->in_game = !!(flags & PARTY_FLAG_IN_GAME);
+	member->left_number = record->body[P2P_PARTY_NAME_SIZE + 1];
+	memcpy(member->signature, record->body + P2P_PARTY_NAME_SIZE + 2, P2P_SIGNATURE_SIZE);
+	member->signature_heard = 1;
+}
+
+static void heard_search(struct mm_party *party, const unsigned char *block, int count, const unsigned char *hashes)
+{
+	struct mm_party_search *search = &party->search;
+	const unsigned char *sealed = block + MM_PARTY_SEARCH_SIZE + 2;
+	unsigned char key[P2P_SHA256_SIZE];
+	int index;
+
+	search->searching = !!(block[0] & PARTY_SEARCHING);
+	search->widened = !!(block[0] & PARTY_WIDENED);
+	search->public_game = !!(block[0] & PARTY_PUBLIC);
+	search->number = block[1];
+	search->game = block[2];
+	search->left = block[3];
+	search->playlists = block[4];
+	search->size = block[5];
+	search->has_game = 0;
+	if (!party->search_heard)
+	{
+		party->search_heard = 1;
+		party->left_number = search->number;
+		party->left_seen = search->left;
+		party->followed_game = search->game;
+	}
+	if (!(block[0] & PARTY_GAME))
+		return;
+	search->game_playlist = block[MM_PARTY_SEARCH_SIZE];
+	search->game_size = block[MM_PARTY_SEARCH_SIZE + 1];
+	for (index = 0; index < count; index++)
+	{
+		if (memcmp(hashes + index * P2P_KEY_HASH_SIZE, party->hash, P2P_KEY_HASH_SIZE))
+			continue;
+		search->has_game = pair_key(party, party->members[0].key, key) &&
+			p2p_open(key, sealed + index * MM_SEALED_INVITE_SIZE, MM_SEALED_INVITE_SIZE,
+				(unsigned char *)search->invite) == P2P_LINK_SIZE;
+		search->invite[P2P_LINK_SIZE - 1] = 0;
+	}
 }
 
 static void heard_leader(struct mm_party *party, const struct mm_party_record *record)
@@ -444,6 +546,7 @@ static void heard_leader(struct mm_party *party, const struct mm_party_record *r
 		if (listed == party->count && memcmp(old[index].hash, party->hash, P2P_KEY_HASH_SIZE))
 			set_notice(party, P2P_PARTY_NOTICE_LEFT, old[index].name);
 	}
+	heard_search(party, hashes + count * P2P_KEY_HASH_SIZE, count, hashes);
 }
 
 static void heard_link(struct mm_party *party, const struct mm_party_record *record)

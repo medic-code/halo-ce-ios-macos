@@ -2714,6 +2714,35 @@ static void party_form(int machines)
 	party_run(machines, 12);
 }
 
+static void check_party_record_search(void)
+{
+	case_name = "party_record_search";
+	party_form(3);
+	party_run(3, 7);
+	CHECK(parties[0].members[1].signature_heard && parties[0].members[2].signature_heard,
+		"each member's record carries its signature for the leader's search");
+	CHECK(mm_party_signed(parties[0].members[1].key, parties[0].key, parties[0].members[1].signature),
+		"signed over the leader's key");
+	parties[1].can_host = 1;
+	parties[0].search.number = 7;
+	parties[0].search.searching = 1;
+	parties[0].search.playlists = 1 << P2P_MM_CTF;
+	parties[0].search.size = P2P_MM_4V4;
+	parties[0].search.has_game = 1;
+	parties[0].search.game = 3;
+	parties[0].search.game_playlist = P2P_MM_CTF;
+	parties[0].search.game_size = P2P_MM_4V4;
+	strcpy(parties[0].search.invite, "halo://join/0123");
+	parties[2].search_heard = 0;
+	party_run(3, 7);
+	CHECK(parties[0].members[1].can_host && !parties[0].members[2].can_host, "the member's can-host bit");
+	CHECK(parties[1].search.searching && parties[1].search.number == 7 && parties[1].search.size == P2P_MM_4V4,
+		"the member reads the search");
+	CHECK(parties[2].search.has_game && !strcmp(parties[2].search.invite, "halo://join/0123"),
+		"each member opens the invite sealed to it: %s", parties[2].search.invite);
+	CHECK(parties[2].left_number == 7 && parties[2].followed_game == 3, "the first record heard takes no action");
+}
+
 static int party_lists(const struct mm_party *party, const char *name)
 {
 	struct p2p_party_status status;
@@ -2955,7 +2984,7 @@ static void check_party_copies(void)
 	verifies = 0;
 	party_send(2, parties[1].topic, bytes, size);
 	party_send(2, parties[1].topic, bytes, size);
-	CHECK(verifies == 1, "a member's record too: %d", verifies);
+	CHECK(verifies == 2, "a member's record too, with its search signature: %d", verifies);
 }
 
 static void check_party_full(void)
@@ -3176,6 +3205,7 @@ int main(int argc, char **argv)
 	check_region();
 	check_party_pool();
 	check_party_search();
+	check_party_record_search();
 	check_party_pool_invited();
 	check_party_sizes();
 	check_party_records();
