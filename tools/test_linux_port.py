@@ -633,6 +633,7 @@ def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
     (("member->searching = party->search.searching && !(flags & PARTY_FLAG_IN_GAME);", ""), "e77_friend_joins_search"),
     ((" && !(flags & PARTY_FLAG_IN_GAME);", ";"), "e77_friend_joins_search"),
     (("party->search_heard = 1;\n", "party->search_heard = 1;\n\t\tparty->left_number = search->number;\n"), "party flags"),
+    (("if (search->in_game || search->state == P2P_MM_HOSTING", "if (search->state == P2P_MM_HOSTING"), "member_stays_in_game"),
     (("if (in_game != party->in_game)\n\t\tparty->sent = now - PARTY_INTERVAL;", ""), "party flags"),
     (("party->follow_done = 0;\n\tfor (index = 1; index < party->count; index++)\n\t\tparty->members[index].in_game = 0;\n}",
       "party->follow_done = 0;\n}"), "party flags"),

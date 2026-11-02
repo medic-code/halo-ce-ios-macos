@@ -759,10 +759,10 @@ static int other_members_in_game(const struct mm_party *party)
 	return count;
 }
 
-/* a member hosting keeps its game, which goes on as its own: the players in it stay */
+/* a member hosting or in a game keeps it: the leader leaving does not take it out */
 static void stop_following(struct mm_search *search)
 {
-	if (search->state == P2P_MM_HOSTING || (search->state == P2P_MM_FOUND && search->decided == P2P_MM_DECIDE_HOST))
+	if (search->in_game || search->state == P2P_MM_HOSTING || (search->state == P2P_MM_FOUND && search->decided == P2P_MM_DECIDE_HOST))
 		memset(&search->party, 0, sizeof(search->party));
 	else
 		mm_cancel(search, NULL, 0);
