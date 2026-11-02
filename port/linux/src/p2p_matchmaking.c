@@ -1907,6 +1907,14 @@ static int searchers_counted(int playlist, int size)
 	return count;
 }
 
+void p2p_mm_set_choice(const struct p2p_mm_choice *choice)
+{
+	pthread_mutex_lock(&p2p_lock);
+	if (mm.search.state == P2P_MM_OFF)
+		mm.search.choice = *choice;
+	pthread_mutex_unlock(&p2p_lock);
+}
+
 void p2p_mm_get_status(struct p2p_mm_status *status)
 {
 	const struct mm_search *search = &mm.search;

@@ -86,6 +86,7 @@ static struct
 	boolean map_set, player_added, start_now;
 	boolean public_game;
 	boolean reopen, party_stopped;
+	boolean party_joined, party_member;
 	float team_seconds;
 	int team_asks;
 	byte host[6];
@@ -433,7 +434,8 @@ static void matchmaking_update_join(float seconds)
 	}
 }
 
-static void matchmaking_reopen_search(void)
+/* screen_count: through MATCHMAKING 3, through its search screen 4 */
+static void matchmaking_reopen(short screen_count)
 {
 	static char const *const screens[] = {
 		"pc\\main_menu\\main_menu",
@@ -445,7 +447,7 @@ static void matchmaking_reopen_search(void)
 	short index;
 
 	ui_widgets_close_all();
-	for (index = 0; index < NUMBEROF(screens); index++)
+	for (index = 0; index < screen_count; index++)
 	{
 		if (!ui_widget_load_by_name_or_tag(screens[index], NONE, NULL, NONE, previous, NONE, NONE))
 			return;
@@ -458,27 +460,8 @@ static boolean player_named(
 	char const *name)
 {
 	char text[P2P_PARTY_NAME_SIZE + 1];
-	short at = 0;
 
-	for (; *wide && at < (short)sizeof(text) - 3; wide++)
-	{
-		unsigned long character = (unsigned short)*wide;
-
-		if (character < 0x80)
-			text[at++] = (char)character;
-		else if (character < 0x800)
-		{
-			text[at++] = (char)(0xC0 | (character >> 6));
-			text[at++] = (char)(0x80 | (character & 0x3F));
-		}
-		else
-		{
-			text[at++] = (char)(0xE0 | (character >> 12));
-			text[at++] = (char)(0x80 | ((character >> 6) & 0x3F));
-			text[at++] = (char)(0x80 | (character & 0x3F));
-		}
-	}
-	text[at] = 0;
+	matchmaking_party_name_utf8(wide, text, sizeof(text));
 	return !strcmp(text, name);
 }
 
@@ -562,6 +545,27 @@ static void matchmaking_leave_game(void)
 	matchmaking.reopen = TRUE;
 }
 
+/* a joiner's screens follow the party */
+static void matchmaking_party_update(void)
+{
+	struct p2p_party_status party;
+	boolean member;
+
+	p2p_party_get_status(&party);
+	if (party.count && !matchmaking.party_joined)
+		matchmaking_party_name_update();
+	matchmaking.party_joined = party.count > 0;
+	if (matchmaking.role != _matchmaking_idle || !main_menu_is_loaded() || global_network_game_client_get() ||
+		global_network_game_server_get())
+	{
+		return;
+	}
+	member = party.count && !party.members[0].you;
+	if (member != matchmaking.party_member)
+		matchmaking_reopen(3);
+	matchmaking.party_member = member;
+}
+
 void matchmaking_update(float seconds)
 {
 	struct p2p_mm_status status;
@@ -601,8 +605,9 @@ void matchmaking_update(float seconds)
 		p2p_mm_get_status(&status);
 		matchmaking.reopen = FALSE;
 		if (status.state != P2P_MM_OFF || status.notice >= P2P_MM_NOTICE_TOO_BIG)
-			matchmaking_reopen_search();
+			matchmaking_reopen(4);
 	}
+	matchmaking_party_update();
 	if ((matchmaking.role == _matchmaking_idle || matchmaking.role == _matchmaking_hosting) &&
 		status.state != P2P_MM_OFF && main_menu_is_loaded())
 	{
