@@ -666,6 +666,7 @@ static void *list_thread_main(void *argument)
 				taken = take_list(fetched.body, fetched.size, digest);
 
 				answered++;
+				p2p_lobby_master_answered();
 				platform_log("server browser: %s lists %d server%s", urls[index], taken, taken == 1 ? "" : "s");
 			}
 			free(fetched.body);

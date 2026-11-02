@@ -403,10 +403,22 @@ static void lobby_checks(void)
 		"a game whose password is taken off is listed open");
 }
 
+static void masters_checks(void)
+{
+	p2p_lobby_masters_forget();
+	p2p_lobby_masters_heard();
+	check(!p2p_lobby_masters_were_heard(), "a round beginning is not an answer");
+	p2p_lobby_master_answered();
+	check(p2p_lobby_masters_were_heard(), "a master's answer is");
+	p2p_lobby_masters_forget();
+	check(!p2p_lobby_masters_were_heard(), "a new search forgets it");
+}
+
 int main(void)
 {
 	crypto_checks();
 	lobby_checks();
+	masters_checks();
 	printf("%s (%d failures)\n", failures ? "FAIL" : "PASS", failures);
 	return failures != 0;
 }

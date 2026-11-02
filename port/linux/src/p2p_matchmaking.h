@@ -142,6 +142,7 @@ struct mm_search
 	unsigned char joining[P2P_KEY_HASH_SIZE];
 	unsigned long joining_since;
 	int joining_players, joining_most_players, joining_ping;
+	char joining_region[P2P_LISTING_REGION_SIZE + 1];
 	struct p2p_mm_decision decision;
 	int decided;
 	int games_checked;

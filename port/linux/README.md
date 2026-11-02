@@ -623,6 +623,7 @@ the setting for one start of the game. It has priority over the file.
 | `network.browser_sort` | `"servers"` | `HALO_NET_BROWSER_SORT` | The server browser's order. `"servers"`: dedicated servers first, then by players. `"players"`, `"name"`, `"map"`, `"type"` or `"locked"` (games with a password first). A `-` before one reverses it (`"-players"`). A column's title sorts by it, and again the other way. |
 | `network.matchmaking_playlists` | `"slayer"` | `HALO_NET_MATCHMAKING_PLAYLISTS` | MATCHMAKING's playlists, comma-separated: `"slayer"`, `"ctf"`, `"king"`, `"oddball"`, `"race"`. |
 | `network.matchmaking_size` | `"2v2"` | `HALO_NET_MATCHMAKING_SIZE` | MATCHMAKING's game size: `"1v1"`, `"2v2"`, `"3v3"`, `"4v4"` or `"ffa6"`. |
+| `network.matchmaking_region` | `""` | `HALO_NET_MATCHMAKING_REGION` | A server region (`"eu"`, `"na-east"`): MATCHMAKING's big sizes take only that region's dedicated servers, before any game a player hosts. Empty: a game a player hosts under 200 ms comes first. |
 | `server.enabled` | `false` | `HALO_SERVER` | `true`: run as a dedicated server, as `halo --server` does. Refer to "Dedicated server". The `server.*` settings are written to `config.toml` only by a dedicated server. |
 | `server.name` | `"OpenCE Server"` | `HALO_SERVER_NAME` | The game's name in the lobby and the server browser: 15 characters of printable ASCII. |
 | `server.max_players` | `16` | `HALO_SERVER_MAX_PLAYERS` | The most players (2 to 127). |

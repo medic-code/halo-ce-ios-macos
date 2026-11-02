@@ -66,6 +66,10 @@ int lobby_games_unlocked(struct p2p_listing *games, int maximum_count)
 	memcpy(games, listings, (size_t)count * sizeof(*games));
 	return count;
 }
+static int masters_heard = 1;
+int p2p_lobby_masters_were_heard(void) { return masters_heard; }
+void p2p_lobby_masters_forget(void) {}
+void master_list_refresh(void) {}
 static unsigned char marked[P2P_IDENTIFIER_SIZE];
 static int marked_count;
 
@@ -414,6 +418,56 @@ static void check_look(void)
 	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
 	CHECK(search.decision.kind == P2P_MM_DECIDE_JOIN && !strcmp(search.decision.invite, "halo://join/quick"),
 		"at 6 s the timed fit is taken");
+	listing_count = 0;
+}
+
+static void check_big_look(void)
+{
+	static struct mm_search search;
+	struct mm_out out[MM_MAXIMUM_OUT];
+
+	case_name = "big_look";
+	masters_heard = 0;
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1000);
+	add_listing("players", 2, 10, 16, 70);
+	mm_step(&search, 3000, out, MM_MAXIMUM_OUT);
+	CHECK(search.state == P2P_MM_LOOKING && search.decision.kind == P2P_MM_DECIDE_NONE,
+		"a big search waits for the master servers: %d", search.state);
+	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
+	CHECK(search.decision.kind == P2P_MM_DECIDE_JOIN && !strcmp(search.decision.invite, "halo://join/players") &&
+		search.decision.size == P2P_MM_BIG_TEAM, "E54: at 6 s the player-hosted game is taken without them");
+	CHECK(!search.joining_region[0], "a player's game has no region: %s", search.joining_region);
+	masters_heard = 1;
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1000);
+	add_listing("players", 2, 10, 16, 70);
+	mm_step(&search, 3000, out, MM_MAXIMUM_OUT);
+	CHECK(search.decision.kind == P2P_MM_DECIDE_JOIN, "the masters having answered, a big search picks at once");
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1000);
+	add_listing("server", 2, 8, 16, -1);
+	listings[0].dedicated = listings[0].master = 1;
+	strcpy(listings[0].region, "EU");
+	mm_step(&search, 3000, out, MM_MAXIMUM_OUT);
+	CHECK(!strcmp(search.joining_region, "EU"), "a dedicated server's region reaches the screens: %s",
+		search.joining_region);
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1000);
+	add_listing("swat", 2, 12, 16, -1);
+	add_listing("plain", 2, 8, 16, -1);
+	listings[0].dedicated = listings[0].master = listings[1].dedicated = listings[1].master = 1;
+	listings[0].kind = 1;
+	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
+	CHECK(search.decision.kind == P2P_MM_DECIDE_JOIN && !strcmp(search.decision.invite, "halo://join/plain"),
+		"a big search passes over a dedicated server of another game kind: %s", search.decision.invite);
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1000);
+	add_listing("listed player", 2, 8, 16, 70);
+	listings[0].master = 1;
+	strcpy(listings[0].region, "EU");
+	mm_step(&search, 3000, out, MM_MAXIMUM_OUT);
+	CHECK(!search.joining_region[0], "a player's game on a master server has no region: %s", search.joining_region);
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1000);
+	mm_widen_now(&search);
+	add_listing("large", 2, 46, 128, 40);
+	mm_step(&search, 7100, out, MM_MAXIMUM_OUT);
+	CHECK(search.decision.kind == P2P_MM_DECIDE_NONE, "E34: a widened search never takes a big game");
 	listing_count = 0;
 }
 

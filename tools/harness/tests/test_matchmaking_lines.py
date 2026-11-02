@@ -24,6 +24,7 @@ def generated(fault=None):
     source = read("port/linux/game/menu_functions.c")
     header = read("port/linux/src/p2p.h")
     enums = "\n".join(["#define usnprintf swprintf", "#define PIN(x, lo, hi) ((x) < (lo) ? (lo) : (x) > (hi) ? (hi) : (x))",
+                       "#define P2P_LISTING_REGION_SIZE 16",
                        enum_with(header, "P2P_MM_SLAYER"), enum_with(header, "P2P_MM_1V1"),
                        enum_with(header, "P2P_MM_LOOKING"), enum_with(header, "P2P_MM_NOTICE_HOST_LEFT"),
                        structure(header, "p2p_mm_status")]) + "\n"

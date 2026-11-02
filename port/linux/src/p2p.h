@@ -214,6 +214,8 @@ struct p2p_lobby_wanted
 	unsigned engines;
 	int players;
 	int teams;
+	int big;
+	char region[P2P_LISTING_REGION_SIZE + 1];
 };
 int p2p_lobby_pick(const struct p2p_listing *games, int count, const struct p2p_lobby_wanted *wanted);
 /* the master servers' (port/linux/src/master_list.c, server_master.c): a
@@ -229,6 +231,9 @@ int p2p_public_address(char *text, int size);
 int p2p_lobby_take_master_listing(const unsigned char *payload, int size, const char *publisher, const char *region,
 	int network_version_shown, int dedicated, const unsigned char *master_key_id);
 void p2p_lobby_masters_heard(void);
+int p2p_lobby_masters_were_heard(void);
+void p2p_lobby_masters_forget(void);
+void p2p_lobby_master_answered(void);
 /* how many hosts list a game of a newer network version, which is not
 shown (an old build sees none of the games) */
 int p2p_lobby_newer_games(void);
@@ -415,9 +420,12 @@ enum
 	P2P_MM_4V4,
 	P2P_MM_FFA_6,
 	NUMBER_OF_P2P_MM_SMALL_SIZES,
-	NUMBER_OF_P2P_MM_SIZES = NUMBER_OF_P2P_MM_SMALL_SIZES
+	P2P_MM_BIG_TEAM = NUMBER_OF_P2P_MM_SMALL_SIZES,
+	P2P_MM_BIG_FFA,
+	NUMBER_OF_P2P_MM_SIZES
 };
 int p2p_mm_size_players(int size);
+int p2p_mm_size_big(int size);
 /* CTF has no free-for-all variant; playlists has a bit per playlist */
 int mm_playlist_has_size(unsigned playlists, int size);
 
@@ -429,6 +437,7 @@ struct p2p_mm_choice
 {
 	unsigned playlists;
 	int size;
+	char region[P2P_LISTING_REGION_SIZE + 1];
 };
 enum
 {
@@ -470,8 +479,9 @@ struct p2p_mm_status
 	/* counts include this machine */
 	int playlist, size, count, needed, all_sizes_count;
 	int games_checked;
-	/* FOUND and HOSTING only; ping -1: not timed */
+	/* FOUND and HOSTING only; ping -1: not timed; region: a dedicated server's */
 	int hosts, players, most_players, ping;
+	char region[P2P_LISTING_REGION_SIZE + 1];
 	int notice;
 };
 enum { P2P_MM_NOTICE_NONE, P2P_MM_NOTICE_HOST_LEFT, P2P_MM_NOTICE_HOST_UNREACHED, P2P_MM_NOTICE_HOST_FAILED };
