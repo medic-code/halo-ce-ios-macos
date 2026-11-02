@@ -183,5 +183,26 @@ int main(int argc, char **argv)
 		matchmaking_lines(&status, title, count, help, notice, 64);
 		CHECK(!notice[0], "none: %ls", notice);
 	}
+	CASE("party_sizes")
+	{
+		static short const offered[] = { P2P_MM_3V3, P2P_MM_4V4, P2P_MM_FFA_6, P2P_MM_BIG_TEAM, P2P_MM_BIG_FFA };
+		short index;
+
+		CHECK(matchmaking_party_size(P2P_MM_3V3, P2P_MM_2V2, 3) == P2P_MM_BIG_FFA, "E22: left of 3V3");
+		CHECK(matchmaking_party_size(P2P_MM_BIG_FFA, P2P_MM_1V1, 3) == P2P_MM_3V3, "E22: right of BIG FFA");
+		CHECK(matchmaking_party_size(P2P_MM_1V1, P2P_MM_1V1, 3) == P2P_MM_3V3, "E22: a saved 1V1 goes up");
+		CHECK(matchmaking_party_size(P2P_MM_1V1, P2P_MM_1V1, 2) == P2P_MM_2V2, "a party of 2: a saved 1V1");
+		CHECK(matchmaking_party_size(P2P_MM_4V4, P2P_MM_FFA_6, 4) == P2P_MM_BIG_TEAM, "a party of 4: past FFA 6");
+		CHECK(matchmaking_party_size(P2P_MM_1V1, P2P_MM_1V1, 5) == P2P_MM_BIG_TEAM, "a party of 5: BIG TEAM");
+		CHECK(matchmaking_party_size(P2P_MM_BIG_TEAM, P2P_MM_FFA_6, 5) == P2P_MM_BIG_FFA, "a party of 5: left of BIG TEAM");
+		CHECK(matchmaking_size_after(1u << P2P_MM_CTF, P2P_MM_BIG_FFA, 5) == P2P_MM_BIG_TEAM, "no BIG FFA for CTF: BIG TEAM");
+		for (index = 0; index < (short)(sizeof(offered) / sizeof(offered[0])); index++)
+			CHECK(matchmaking_party_size(P2P_MM_1V1, offered[index], 3) == offered[index], "E22: offered: %d", index);
+		CHECK(matchmaking_size_after(1u << P2P_MM_CTF, P2P_MM_FFA_6, 3) == P2P_MM_3V3, "E22: no FFA for CTF: the party's size");
+		CHECK(matchmaking_size_after(1u << P2P_MM_CTF, P2P_MM_FFA_6, 1) == P2P_MM_2V2, "alone: as ever");
+		CHECK(!matchmaking_size_saved(P2P_MM_2V2, P2P_MM_3V3, 3), "a size the party forced is not saved");
+		CHECK(!matchmaking_size_saved(P2P_MM_3V3, P2P_MM_3V3, 3), "a playlist change leaves the saved size");
+		CHECK(matchmaking_size_saved(P2P_MM_3V3, P2P_MM_4V4, 3), "a size the leader stepped to is saved");
+	}
 	return 0;
 }

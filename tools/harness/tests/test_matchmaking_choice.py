@@ -27,13 +27,16 @@ def generated(fault=None):
     header = read("port/linux/src/p2p.h")
     names = re.search(r"^const char \*const p2p_mm_playlist_names\[.*$", read("port/linux/src/p2p_matchmaking.c"),
                       re.M).group(0)
-    code = "\n".join([function(read("port/linux/src/p2p_matchmaking.c"), "mm_playlist_has_size")] +
+    search = read("port/linux/src/p2p_matchmaking.c")
+    code = "\n".join([function(search, name) for name in ("mm_playlist_has_size", "p2p_mm_size_players",
+                                                          "mm_party_size_allowed")] +
                      [function(source, name) for name in
                       ("matchmaking_size_after", "matchmaking_search_allowed",
                        "matchmaking_playlists_read")])
     if fault:
         code = mutated(code, *fault)
     return (("under_test.inc", "\n".join([enum_with(header, "P2P_MM_SLAYER"), enum_with(header, "P2P_MM_1V1"),
+                                          "#define MM_MAXIMUM_PARTY 8",
                                           enum_with(source, "MATCHMAKING_SEARCH"), names, code]) + "\n"),)
 
 
