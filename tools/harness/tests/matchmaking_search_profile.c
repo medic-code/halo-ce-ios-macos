@@ -13,7 +13,7 @@ SEARCH with player 1's profile (menu_functions.c).
 #define NUMBEROF(array) ((short)(sizeof(array) / sizeof((array)[0])))
 
 struct player_profile { wchar_t player_name[12]; };
-struct p2p_mm_choice { unsigned playlists; int size; };
+struct p2p_mm_choice { unsigned playlists; int size; char region[17]; };
 
 static struct
 {
@@ -25,6 +25,11 @@ static struct
 static boolean has_profile, name_valid;
 static int searches, sounds, last_sound;
 static wchar_t const *error_text;
+
+static char const *config_string(char const *name)
+{
+	return "";
+}
 
 static boolean player_ui_local_player_wants_to_play_multiplayer(short controller)
 {
