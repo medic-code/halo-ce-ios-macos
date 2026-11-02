@@ -27,6 +27,7 @@ enum
 	SEALED_SECRET_SIZE = P2P_PARTY_SECRET_SIZE + P2P_SEAL_OVERHEAD,
 	MAXIMUM_QUEUED = 32,
 	VERIFY_BUDGET = 2,
+	LINK_RESEND = 10000,
 };
 
 static int elapsed(unsigned long since, unsigned long now, unsigned long time)
@@ -370,6 +371,7 @@ int mm_party_read(struct mm_party *party, const unsigned char *payload, int size
 	record->key = record->plain + 1;
 	record->sequence = get_long(record->plain + 1 + P2P_KEY_SIZE);
 	record->body = body;
+	memcpy(record->seal, party->seal, sizeof(record->seal));
 	if (!memcmp(record->key, party->key, P2P_KEY_SIZE))
 		return 0;
 	if (record->kind == PARTY_MEMBER_RECORD)
@@ -489,7 +491,9 @@ static void heard_link(struct mm_party *party, const struct mm_party_record *rec
 
 void mm_party_heard(struct mm_party *party, const struct mm_party_record *record, unsigned long now)
 {
-	if (party->role == MM_PARTY_NONE)
+	/* (the lock is released while a signature is checked: a removal in that
+	time changes the seal, and a removed member's record must not add them back) */
+	if (party->role == MM_PARTY_NONE || memcmp(record->seal, party->seal, sizeof(party->seal)))
 		return;
 	if (record->kind == PARTY_MEMBER_RECORD)
 	{
@@ -541,6 +545,11 @@ static struct
 	char topic[P2P_PARTY_TOPIC_SIZE];
 	char offered[P2P_PARTY_LINK_SIZE];
 	int offered_count;
+	/* the last new link's record, sent again on the old topic for members who missed it */
+	char link_topic[P2P_PARTY_TOPIC_SIZE];
+	unsigned char link_record[MM_MAXIMUM_RECORD_SIZE];
+	int link_size;
+	unsigned long link_since, link_sent;
 } local;
 
 static void sync_topic(void)
@@ -603,6 +612,12 @@ void p2p_party_update(void)
 	size = mm_party_step(&local.party, p2p_now(), bytes);
 	if (size)
 		p2p_signal_party_publish(bytes, size);
+	if (local.link_size && !elapsed(local.link_since, p2p_now(), LINK_RESEND) &&
+		elapsed(local.link_sent, p2p_now(), PARTY_INTERVAL))
+	{
+		local.link_sent = p2p_now();
+		p2p_signal_party_publish_on(local.link_topic, local.link_record, local.link_size);
+	}
 	sync_topic();
 	sync_offer();
 }
@@ -661,7 +676,13 @@ void p2p_party_remove(int member)
 	pthread_mutex_lock(&p2p_lock);
 	size = mm_party_remove(&local.party, member, secret, p2p_now(), bytes);
 	if (size)
+	{
 		p2p_signal_party_publish(bytes, size);
+		strcpy(local.link_topic, local.topic);
+		memcpy(local.link_record, bytes, (size_t)size);
+		local.link_size = size;
+		local.link_since = local.link_sent = p2p_now();
+	}
 	sync_topic();
 	sync_offer();
 	pthread_mutex_unlock(&p2p_lock);
