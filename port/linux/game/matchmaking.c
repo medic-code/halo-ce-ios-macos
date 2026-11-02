@@ -90,7 +90,7 @@ static struct
 	boolean map_set, player_added, start_now;
 	boolean public_game;
 	boolean reopen, party_stopped;
-	boolean party_joined, party_member;
+	boolean party_joined, party_member, following;
 	float team_seconds;
 	int team_asks;
 	byte host[6];
@@ -552,25 +552,33 @@ static void matchmaking_leave_game(void)
 	matchmaking.reopen = TRUE;
 }
 
-/* a joiner's screens follow the party */
+/* a member's screens follow the leader's search; a joiner's follow the party */
 static void matchmaking_party_update(void)
 {
+	struct p2p_mm_status status;
 	struct p2p_party_status party;
-	boolean member;
+	boolean member, following;
 
 	p2p_party_get_status(&party);
 	if (party.count && !matchmaking.party_joined)
 		matchmaking_party_name_update();
 	matchmaking.party_joined = party.count > 0;
+	if (matchmaking.role == _matchmaking_joined)
+		matchmaking.following = FALSE;
 	if (matchmaking.role != _matchmaking_idle || !main_menu_is_loaded() || global_network_game_client_get() ||
 		global_network_game_server_get())
 	{
 		return;
 	}
+	p2p_mm_get_status(&status);
 	member = party.count && !party.members[0].you;
-	if (member != matchmaking.party_member)
+	following = member && status.state != P2P_MM_OFF;
+	if (following && !matchmaking.following)
+		matchmaking_reopen(4);
+	else if (member != matchmaking.party_member || (matchmaking.following && !following))
 		matchmaking_reopen(3);
 	matchmaking.party_member = member;
+	matchmaking.following = following;
 }
 
 void matchmaking_update(float seconds)

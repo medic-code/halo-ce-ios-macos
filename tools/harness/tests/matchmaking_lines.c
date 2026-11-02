@@ -7,6 +7,12 @@
 #include "under_test.inc"
 
 static wchar_t title[96], count[96], help[128], notice[96], line[128];
+static const struct p2p_party_status no_party;
+
+static void lines_of(const struct p2p_mm_status *status, const struct p2p_party_status *party)
+{
+	matchmaking_lines(status, party, title, count, help, notice, 96);
+}
 
 static struct p2p_party_status party_of(int you, int players)
 {
@@ -66,7 +72,7 @@ int main(int argc, char **argv)
 		status = queued(1);
 		status.state = P2P_MM_LOOKING;
 		status.games_checked = 12;
-		matchmaking_lines(&status, title, count, help, notice, 64);
+		lines_of(&status, &no_party);
 		CHECK(!wcscmp(title, L"LOOKING FOR A GAME"), "title: %ls", title);
 		CHECK(!wcscmp(help, L"Checking 12 public games..."), "help: %ls", help);
 		CHECK(!count[0] && !notice[0], "no count, no notice: %ls, %ls", count, notice);
@@ -74,22 +80,22 @@ int main(int argc, char **argv)
 	CASE("queued")
 	{
 		status = queued(1);
-		matchmaking_lines(&status, title, count, help, notice, 64);
+		lines_of(&status, &no_party);
 		CHECK(!wcscmp(title, L"IN THE QUEUE"), "title: %ls", title);
 		CHECK(!wcscmp(count, L"3 searching"), "count: %ls", count);
 		CHECK(wcsstr(help, L"1 more for 2V2") && wcsstr(help, L"At 0:45"), "the next mark: %ls", help);
 		status = queued(0);
-		matchmaking_lines(&status, title, count, help, notice, 64);
+		lines_of(&status, &no_party);
 		CHECK(!wcsstr(help, L"2:00") && wcsstr(help, L"Your router cannot host"), "E13: strict: %ls", help);
 		status = queued(-1);
-		matchmaking_lines(&status, title, count, help, notice, 64);
+		lines_of(&status, &no_party);
 		CHECK(wcsstr(help, L"Your router cannot host") != NULL, "E48: not known yet: greyed: %ls", help);
 		status = queued(1);
 		status.count = 1;
-		matchmaking_lines(&status, title, count, help, notice, 64);
+		lines_of(&status, &no_party);
 		CHECK(!wcscmp(count, L"1 searching"), "E5: alone: %ls", count);
 		status.count = status.needed = 0;
-		matchmaking_lines(&status, title, count, help, notice, 64);
+		lines_of(&status, &no_party);
 		CHECK(!help[0], "no pool yet, no line about it: %ls", help);
 	}
 	CASE("widened")
@@ -97,11 +103,11 @@ int main(int argc, char **argv)
 		status = queued(1);
 		status.widened = 1;
 		status.all_sizes_count = 5;
-		matchmaking_lines(&status, title, count, help, notice, 64);
+		lines_of(&status, &no_party);
 		CHECK(!wcscmp(count, L"5 searching, all sizes"), "E6: %ls", count);
 		CHECK(wcsstr(help, L"Any size") && wcsstr(help, L"2:00"), "E6: any size, then the 2:00 mark: %ls", help);
 		status.can_host = 0;
-		matchmaking_lines(&status, title, count, help, notice, 64);
+		lines_of(&status, &no_party);
 		CHECK(!wcsstr(help, L"2:00") && wcsstr(help, L"Your router cannot host"), "E13: strict: %ls", help);
 	}
 	CASE("hosting")
@@ -111,7 +117,7 @@ int main(int argc, char **argv)
 		status.hosts = 1;
 		status.players = 2;
 		status.most_players = 4;
-		matchmaking_lines(&status, title, count, help, notice, 64);
+		lines_of(&status, &no_party);
 		CHECK(!wcscmp(title, L"SLAYER 2V2"), "title: %ls", title);
 		CHECK(!wcscmp(help, L"Searchers join you."), "E5, E7: %ls", help);
 		CHECK(!count[0], "the lobby carries the game's players: %ls", count);
@@ -123,15 +129,15 @@ int main(int argc, char **argv)
 		status.players = 3;
 		status.most_players = 4;
 		status.ping = 48;
-		matchmaking_lines(&status, title, count, help, notice, 64);
+		lines_of(&status, &no_party);
 		CHECK(!wcscmp(title, L"MATCH FOUND"), "title: %ls", title);
 		CHECK(!wcscmp(count, L"3 of 4 matched"), "count: %ls", count);
 		CHECK(!wcscmp(help, L"Joining the game:\r\nSLAYER 2V2, 48 ms"), "help: %ls", help);
 		status.ping = -1;
-		matchmaking_lines(&status, title, count, help, notice, 64);
+		lines_of(&status, &no_party);
 		CHECK(!wcscmp(help, L"Joining the game:\r\nSLAYER 2V2"), "a matchmade game, not timed: %ls", help);
 		status.hosts = 1;
-		matchmaking_lines(&status, title, count, help, notice, 64);
+		lines_of(&status, &no_party);
 		CHECK(!wcscmp(help, L"Searchers join you."), "this machine hosts: %ls", help);
 	}
 	CASE("big_looking")
@@ -139,12 +145,12 @@ int main(int argc, char **argv)
 		status = queued(1);
 		status.state = P2P_MM_LOOKING;
 		status.size = P2P_MM_BIG_TEAM;
-		matchmaking_lines(&status, title, count, help, notice, 96);
+		lines_of(&status, &no_party);
 		CHECK(!wcscmp(title, L"LOOKING FOR A GAME"), "title: %ls", title);
 		CHECK(!wcscmp(help, L"Looking for the best big game near you.\r\nIf none fits, you host one."), "help: %ls", help);
 		status.state = P2P_MM_QUEUED;
 		status.can_host = 0;
-		matchmaking_lines(&status, title, count, help, notice, 96);
+		lines_of(&status, &no_party);
 		CHECK(!wcscmp(title, L"LOOKING FOR A GAME") && !count[0], "a big size has no queue: %ls, %ls", title, count);
 		CHECK(wcsstr(help, L"Your router cannot host") && !wcsstr(help, L"you host one"), "strict: %ls", help);
 	}
@@ -156,7 +162,7 @@ int main(int argc, char **argv)
 		status.state = P2P_MM_HOSTING;
 		status.hosts = 1;
 		status.size = P2P_MM_BIG_FFA;
-		matchmaking_lines(&status, title, count, help, notice, 96);
+		lines_of(&status, &no_party);
 		CHECK(!wcscmp(title, L"SLAYER BIG FFA"), "title: %ls", title);
 		CHECK(!wcscmp(help, L"START NOW starts it"), "help: %ls", help);
 		matchmaking_lobby_line(-1, TRUE, 2, 128, line, 32);
@@ -173,14 +179,14 @@ int main(int argc, char **argv)
 		status.most_players = 16;
 		status.ping = -1;
 		strcpy(status.region, "eu");
-		matchmaking_lines(&status, title, count, help, notice, 96);
+		lines_of(&status, &no_party);
 		CHECK(!wcscmp(title, L"MATCH FOUND") && !count[0], "no pool to count: %ls, %ls", title, count);
 		CHECK(wcsstr(help, L"SLAYER BIG TEAM\r\n9 of 16 players, EU") != NULL, "a dedicated server's region: %ls", help);
 		status.region[0] = 0;
 		status.players = 47;
 		status.most_players = 128;
 		status.ping = 48;
-		matchmaking_lines(&status, title, count, help, notice, 96);
+		lines_of(&status, &no_party);
 		CHECK(wcsstr(help, L"SLAYER BIG TEAM\r\n47 of 128 players, 48 ms") != NULL, "a player's game: %ls", help);
 	}
 	CASE("lobby")
@@ -198,22 +204,22 @@ int main(int argc, char **argv)
 	{
 		status = queued(1);
 		status.notice = P2P_MM_NOTICE_HOST_LEFT;
-		matchmaking_lines(&status, title, count, help, notice, 64);
+		lines_of(&status, &no_party);
 		CHECK(!wcscmp(notice, L"THE HOST LEFT. BACK IN THE QUEUE, YOUR PLACE KEPT."), "host left: %ls", notice);
 		status.notice = P2P_MM_NOTICE_HOST_UNREACHED;
-		matchmaking_lines(&status, title, count, help, notice, 64);
+		lines_of(&status, &no_party);
 		CHECK(!wcscmp(notice, L"COULD NOT REACH THE HOST. BACK IN THE QUEUE."), "host unreached: %ls", notice);
 		status.notice = P2P_MM_NOTICE_HOST_FAILED;
-		matchmaking_lines(&status, title, count, help, notice, 64);
+		lines_of(&status, &no_party);
 		CHECK(!wcscmp(notice, L"COULD NOT HOST THE GAME. BACK IN THE QUEUE."), "host failed: %ls", notice);
 		status.notice = P2P_MM_NOTICE_TOO_BIG;
-		matchmaking_lines(&status, title, count, help, notice, 64);
+		lines_of(&status, &no_party);
 		CHECK(!wcscmp(notice, L"THE PARTY IS TOO BIG FOR THAT GAME. PICK A BIGGER GAME."), "too big: %ls", notice);
 		status.notice = P2P_MM_NOTICE_APART;
-		matchmaking_lines(&status, title, count, help, notice, 64);
+		lines_of(&status, &no_party);
 		CHECK(!wcscmp(notice, L"COULD NOT GET THE PARTY INTO ONE GAME. SEARCH STOPPED."), "apart: %ls", notice);
 		status.notice = P2P_MM_NOTICE_NONE;
-		matchmaking_lines(&status, title, count, help, notice, 64);
+		lines_of(&status, &no_party);
 		CHECK(!notice[0], "none: %ls", notice);
 	}
 	CASE("member_view")
@@ -236,6 +242,40 @@ int main(int argc, char **argv)
 		CHECK(!wcscmp(help, L"Leave Chief's party?"), "E61: %ls", help);
 		CHECK(!line[0], "E61: no line: %ls", line);
 		CHECK(matchmaking_party_bar(&party, view.asking) == (MATCHMAKING_BAR(yes) | MATCHMAKING_BAR(no)), "E61: YES and NO");
+	}
+	CASE("member_queue")
+	{
+		struct p2p_party_status party = party_of(1, 3);
+
+		status = queued(1);
+		lines_of(&status, &party);
+		CHECK(!wcscmp(title, L"IN THE QUEUE"), "E49: title: %ls", title);
+		CHECK(!wcscmp(count, L"3 searching"), "E49: the count: %ls", count);
+		CHECK(!wcscmp(read_out(help), L"Chief searches for the party. You follow Chief into the game."), "E49: %ls", help);
+		CHECK(matchmaking_search_bar(&status, &party) == MATCHMAKING_SEARCH_BAR(leave), "E49: LEAVE SEARCH (B) only");
+		status.state = P2P_MM_LOOKING;
+		lines_of(&status, &party);
+		CHECK(wcsstr(help, L"Chief searches for the party") != NULL, "E49: looking: %ls", help);
+		CHECK(matchmaking_search_bar(&status, &party) == MATCHMAKING_SEARCH_BAR(leave), "E49: looking: the bar");
+		party = party_of(0, 3);
+		status = queued(1);
+		lines_of(&status, &party);
+		CHECK(wcsstr(help, L"1 more for 2V2") != NULL, "the leader's own words: %ls", help);
+		CHECK(matchmaking_search_bar(&status, &party) == (MATCHMAKING_SEARCH_BAR(widen) | MATCHMAKING_SEARCH_BAR(host) |
+			MATCHMAKING_SEARCH_BAR(cancel)), "the leader's bar");
+		status.size = P2P_MM_BIG_TEAM;
+		CHECK(matchmaking_search_bar(&status, &party) == MATCHMAKING_SEARCH_BAR(cancel), "a big search's bar: CANCEL only");
+	}
+	CASE("member_found")
+	{
+		struct p2p_party_status party = party_of(1, 3);
+
+		status = queued(1);
+		status.state = P2P_MM_FOUND;
+		status.players = 0;
+		status.most_players = 0;
+		lines_of(&status, &party);
+		CHECK(!wcscmp(title, L"MATCH FOUND") && !count[0], "a member knows no pool: %ls, %ls", title, count);
 	}
 	CASE("party_sizes")
 	{

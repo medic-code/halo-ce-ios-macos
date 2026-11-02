@@ -246,6 +246,7 @@
 		<child widget="main_menu/multiplayer_type_select/matchmaking/search_button_widen" x="205" y="1"/>
 		<child widget="main_menu/multiplayer_type_select/matchmaking/search_button_host" x="341" y="1"/>
 		<child widget="main_menu/multiplayer_type_select/matchmaking/search_button_cancel" x="477" y="1"/>
+		<child widget="main_menu/multiplayer_type_select/matchmaking/search_button_leave" x="477" y="1"/>
 	</widget>
 	<widget name="main_menu/multiplayer_type_select/matchmaking/search_button_widen" type="text" width="128" height="24" bitmap="bitmaps/text_button_background" text="WIDEN NOW" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="2">
 		<on event="a" run="port matchmaking widen"/>
@@ -258,6 +259,11 @@
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</widget>
 	<widget name="main_menu/multiplayer_type_select/matchmaking/search_button_cancel" type="text" width="128" height="24" bitmap="bitmaps/text_button_background" text="CANCEL" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="2">
+		<on event="a" run="port matchmaking search back"/>
+		<on event="start" run="port matchmaking search back"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</widget>
+	<widget name="main_menu/multiplayer_type_select/matchmaking/search_button_leave" type="text" width="128" height="24" bitmap="bitmaps/text_button_background" text="LEAVE SEARCH" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="2">
 		<on event="a" run="port matchmaking search back"/>
 		<on event="start" run="port matchmaking search back"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
