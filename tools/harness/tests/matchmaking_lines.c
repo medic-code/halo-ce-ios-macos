@@ -170,6 +170,9 @@ int main(int argc, char **argv)
 		status.notice = P2P_MM_NOTICE_HOST_FAILED;
 		matchmaking_lines(&status, title, count, help, notice, 64);
 		CHECK(!wcscmp(notice, L"COULD NOT HOST THE GAME. BACK IN THE QUEUE."), "host failed: %ls", notice);
+		status.notice = P2P_MM_NOTICE_TOO_BIG;
+		matchmaking_lines(&status, title, count, help, notice, 64);
+		CHECK(!wcscmp(notice, L"THE PARTY IS TOO BIG FOR THAT GAME. PICK A BIGGER GAME."), "too big: %ls", notice);
 		status.notice = P2P_MM_NOTICE_NONE;
 		matchmaking_lines(&status, title, count, help, notice, 64);
 		CHECK(!notice[0], "none: %ls", notice);

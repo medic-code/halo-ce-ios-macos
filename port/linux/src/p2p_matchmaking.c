@@ -897,6 +897,8 @@ static int host_open(struct mm_search *search, int forced, struct mm_out *out, i
 {
 	int playlist, best = -1, most = -1, count, lower, best_lower = 0;
 
+	if (!mm_party_size_allowed(party_players(search), search->choice.size))
+		return 0;
 	for (playlist = 0; playlist < NUMBER_OF_P2P_MM_PLAYLISTS; playlist++)
 	{
 		if (!(search->choice.playlists & 1u << playlist) || !mm_playlist_has_size(1u << playlist, search->choice.size))
@@ -1831,5 +1833,7 @@ void p2p_mm_get_status(struct p2p_mm_status *status)
 		}
 		status->notice = mm.notice = notice_after(mm.notice, search->state);
 	}
+	if (p2p_party_too_big())
+		status->notice = P2P_MM_NOTICE_TOO_BIG;
 	pthread_mutex_unlock(&p2p_lock);
 }
