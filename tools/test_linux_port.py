@@ -472,6 +472,7 @@ def test_p2p_matchmaking(tmp_path):
     (("record->most_players > p2p_mm_size_players(record->size)", "0"), "fake_fuller_game"),
     (("publish_out(out, mm_step(&mm.search, now, out, MM_MAXIMUM_OUT));\n\t\tsync_topics();", "sync_topics();"),
      "joined_then_lost"),
+    (("count = mm_step(&mm.search, p2p_now(),", "count = mm_step(&mm.search, now,"), "lost_in_verify"),
 ])
 def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
     output = matchmaking_check(tmp_path, fault)
