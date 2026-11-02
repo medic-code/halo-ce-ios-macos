@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from tools import linux_build, linux_link_check, linux_msvc_semantics
+from tools.harness import function, read
 
 # for tests that compile for the Linux target (and run what they build)
 linux_host_only = pytest.mark.skipif(not sys.platform.startswith("linux"),
@@ -333,11 +334,7 @@ def test_default_brokers_are_brokers_txt():
     assert default.split(",") == [line for line in listed if line]
 
 
-@linux_host_only
-def test_p2p_signatures_and_listings(tmp_path):
-    """internet play's Ed25519 (RFC 8032), the X25519 key of a seed, and the
-    server browser's listings from host to browser (tools/p2p_lobby_check.c),
-    built with the flags ninja gives the platform layer"""
+def platform_flags():
     import shlex
 
     if not shutil.which("clang") or not shutil.which("ninja") or not Path("build.ninja").is_file():
@@ -359,6 +356,15 @@ def test_p2p_signatures_and_listings(tmp_path):
             continue
         else:
             flags.append(word)
+    return flags
+
+
+@linux_host_only
+def test_p2p_signatures_and_listings(tmp_path):
+    """internet play's Ed25519 (RFC 8032), the X25519 key of a seed, and the
+    server browser's listings from host to browser (tools/p2p_lobby_check.c),
+    built with the flags ninja gives the platform layer"""
+    flags = platform_flags()
     program = tmp_path / "p2p_lobby_check"
     built = subprocess.run(["clang", *flags, "-O1", "-no-pie", "-Wl,--unresolved-symbols=ignore-all", "-o",
                             str(program), "tools/p2p_lobby_check.c", "port/linux/src/p2p_crypto.c",
@@ -370,6 +376,107 @@ def test_p2p_signatures_and_listings(tmp_path):
     assert result.returncode == 0, result.stdout
     assert "PASS" in result.stdout
 
+
+MATCHMAKING_SOURCES = ["port/linux/src/p2p_crypto.c", "port/third_party/monocypher/monocypher.c",
+                       "port/third_party/monocypher/monocypher-ed25519.c"]
+
+
+def matchmaking_check(tmp_path, fault=None, *arguments):
+    source = Path("port/linux/src/p2p_matchmaking.c").read_text()
+    if fault:
+        assert source.count(fault[0]) == 1, fault[0]
+        source = source.replace(*fault)
+    copy = tmp_path / "p2p_matchmaking.c"
+    copy.write_text(source)
+    lobby = read("port/linux/src/p2p_lobby.c")
+    (tmp_path / "lobby_pick.inc").write_text("\n".join(function(lobby, name) for name in
+                                                      ("pick_fits", "p2p_lobby_pick", "p2p_lobby_pick_unpinged")))
+    program = tmp_path / "p2p_matchmaking_check"
+    built = subprocess.run(["clang", *platform_flags(), "-Iport/linux/src", f"-I{tmp_path}", "-O1", "-no-pie",
+                            "-Wl,--unresolved-symbols=ignore-all", "-o", str(program), "tools/p2p_matchmaking_check.c", str(copy), *MATCHMAKING_SOURCES],
+                           capture_output=True, text=True)
+    assert built.returncode == 0, built.stderr[-4000:]
+    return subprocess.run([str(program), *arguments], capture_output=True, text=True, timeout=300).stdout
+
+
+@linux_host_only
+def test_p2p_matchmaking(tmp_path):
+    output = matchmaking_check(tmp_path, None, "sweep")
+    assert output.strip().endswith("PASS"), output
+
+
+@linux_host_only
+@pytest.mark.parametrize("fault,case", [
+    (("if (!p2p_ed25519_verify(", "if (0 && !p2p_ed25519_verify("), "records"),
+    (("bytes[2] != MM_FORMAT)", "0)"), "records"),
+    (("if (!record->held)\n\t\t{\n\t\t\tmemcpy(bytes + at, record->token",
+      "if (1)\n\t\t{\n\t\t\tmemcpy(bytes + at, record->token"), "hosting"),
+    (("if (!can_host && !has_host && taken + 1 == players)", "if (0)"), "pool"),
+    (("return memcmp(units[a].key_hash, units[b].key_hash, P2P_KEY_HASH_SIZE) < 0;", "return 1;"), "pool"),
+    (("memcpy(material + at, units[unit].key, P2P_KEY_SIZE);\n\t\tp2p_sha256(material, at + P2P_KEY_SIZE",
+      "memcpy(material, units[unit].key, P2P_KEY_SIZE);\n\t\tp2p_sha256(material, P2P_KEY_SIZE"), "election"),
+    (("if (topic[0] && !strcmp(topics[index], topic))", "if (0)"), "topic moves"),
+    (("queues <= 12", "queues <= 25"), "topics"),
+    (("HALO_PORT_NETWORK_VERSION, playlist_names", "38, playlist_names"), "topics"),
+    (("peer->refreshes >= MM_REFRESHES_COUNTED", "peer->refreshes >= 1"), "e14_two_refreshes"),
+    (("peer->refreshes = -1;\n\t\tpeer->playlist", "peer->playlist"), "e14_two_refreshes"),
+    (("MM_KIND_CANCEL)\n\t\tpeer->refreshes = -1;", "MM_KIND_CANCEL)\n\t\tpeer->refreshes = 0;"), "e14_after_cancel"),
+    (("record.can_host = search->can_host > 0;", "record.can_host = search->can_host != 0;"), "e48_stun_unknown"),
+    (("MM_EXPIRY_INTERVALS * peer->record.interval * 100", "100000"), "e19_lost_cancel"),
+    (("if (record->kind == MM_KIND_CANCEL)", "if (0)"), "quit"),
+    (("now - search->pool_since >= MM_SETTLE", "0"), "e4_four"),
+    (("record->sequence <= peer->record.sequence", "0"), "e43_replay"),
+    (("if (!mm_playlist_has_size(1u << playlist, size))", "if (0)"), "e63_ffa_leaves_ctf"),
+    (("if (!mm_playlist_has_size(1u << playlist, queue_size))", "if (0)"), "e63_ffa_wanted"),
+    (("if (!looked && search->decision.kind == P2P_MM_DECIDE_NONE)\n\t\t\tcount = pick_game(", "if (0)\n\t\t\tcount = pick_game("), "look"),
+    (("count = lobby_games_unlocked(games, MAXIMUM_GAMES);", "count = 0;"), "look"),
+    (("lobby_mark_failed_unlocked(mm.search.picked);", "(void)0;"), "step1_failed"),
+    (("chosen != held_chosen ? chosen :", "0 ? 0 :"), "widened_pick"),
+    (("search->sequence = sequence;", "search->sequence = 0;"), "restart"),
+    (("!in_queue(search, peer->playlist, peer->size) ||\n", ""), "left_queue"),
+    (("set_queues(search);\n\tsearch->state = P2P_MM_QUEUED;\n\tsearch->join_after",
+      "search->state = P2P_MM_QUEUED;\n\tsearch->join_after"), "failed_join"),
+    (("if (search->decided != P2P_MM_DECIDE_HOST)", "if (0)"), "failed_join"),
+    (("if (mm_counted(peer))\n\t\t\tcontinue;", "if (0)\n\t\t\tcontinue;"), "full_table"),
+    (("return memcmp(units[a].key_hash, units[b].key_hash, P2P_KEY_HASH_SIZE) < 0;", "return 1;"),
+     "e37_late_listener"),
+    (("now - search->marks_from >= MM_WIDEN", "0"), "e5_alone"),
+    (("if (search->can_host > 0 && !search->pool_count", "if (!search->pool_count"),
+     "e13_strict"),
+    (("peer->record.players >= peer->record.most_players", "peer->record.players > peer->record.most_players"),
+     "e8_full"),
+    (("set_queues(search);\n\tsearch->state = P2P_MM_QUEUED;\n\tsearch->join_after",
+      "search->widened = 0;\n\tset_queues(search);\n\tsearch->state = P2P_MM_QUEUED;\n\tsearch->join_after"),
+     "widened_retry"),
+    (("peer->record.can_host && !peer->failed &&\n\t\t\tmemcmp", "memcmp"), "strict_lowest"),
+    (("!search->pool_count && now - search->marks_from >= MM_HOST", "now - search->marks_from >= MM_HOST"),
+     "pool_forming"),
+    (("if (search->host_now && search->can_host > 0)\n\t\t\tcount = host_open(search, 1, out, out_size);\n\t\tif (!looked && search->decision.kind == P2P_MM_DECIDE_NONE)\n\t\t\tcount = pick_game(search, now, out, out_size);\n\t\tif (search->decision.kind == P2P_MM_DECIDE_NONE)\n\t\t\tcount = join(search, now, out, out_size);\n",
+      "count = join(search, now, out, out_size);\n\t\tif (search->decision.kind == P2P_MM_DECIDE_NONE && search->host_now && search->can_host > 0)\n\t\t\tcount = host_open(search, 1, out, out_size);\n"),
+     "host_now_first"),
+    (("now - search->joining_since >= MM_HOST_WAIT", "0"), "e12_never_hosts"),
+    (("now - search->joining_since >= MM_HOST_WAIT", "0"), "two_queues"),
+    (("now - search->joining_since >= MM_HOST_WAIT", "0"), "pool_never_hosts"),
+    (("memcmp(search->key_hash, other->key_hash, P2P_KEY_HASH_SIZE) > 0", "0"), "e40_two_lone_hosts"),
+    (("now, kept_start);", "now, 0);"), "e11_host_quits"),
+    (("search->state = P2P_MM_OFF;\n\treturn count;", "return 0;"), "host_failed"),
+    (("peer->record.players > best->record.players ||", "0 ||"), "e10_invited_twice"),
+    (("if (candidate->failed)", "if (0)"), "e12_never_hosts"),
+    (("if (candidate->failed)", "if (0)"), "two_queues"),
+    (("peer->failed == MM_FAILED_PASSED_OVER)\n\t\tpeer->failed = MM_FAILED_NONE;", "peer->failed == MM_FAILED_PASSED_OVER)\n\t\tpeer->failed = MM_FAILED_PASSED_OVER;"), "passed_over_hosts"),
+    (("elapsed_ms(started) >= VERIFY_BUDGET", "0"), "verify_budget"),
+    (("p2p_signing_seed(),", "p2p_signing_key(),"), "run_key"),
+    (("mm.search.state != P2P_MM_OFF || mm.in_game", "mm.search.state != P2P_MM_OFF"), "joined_then_lost"),
+    (("search->join_after = now + MM_JOIN_BACKOFF;", "(void)now;"), "failed_join_waits"),
+    (("!mm_counted(peer) || !outranks", "!outranks"), "fake_fuller_game"),
+    (("record->most_players > p2p_mm_size_players(record->size)", "0"), "fake_fuller_game"),
+    (("publish_out(out, mm_step(&mm.search, now, out, MM_MAXIMUM_OUT));\n\t\tsync_topics();", "sync_topics();"),
+     "joined_then_lost"),
+    (("count = mm_step(&mm.search, p2p_now(),", "count = mm_step(&mm.search, now,"), "lost_in_verify"),
+])
+def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
+    output = matchmaking_check(tmp_path, fault)
+    assert f"FAIL {case}:" in output, output
 
 
 # port_config.c on its own, with the app's file paths (HALO_DATA_ROOT) and C
