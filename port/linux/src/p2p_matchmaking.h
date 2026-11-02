@@ -86,7 +86,6 @@ void mm_party_sign(const unsigned char *seed, const unsigned char *leader_key, c
 	unsigned char *signature);
 int mm_party_signed(const unsigned char *key, const unsigned char *leader_key, const unsigned char *party_hash,
 	const unsigned char *signature);
-int mm_party_size_allowed(int party, int size);
 int mm_seal_token(const unsigned char *seed, const unsigned char *member_key, const unsigned char *token,
 	unsigned char *sealed);
 int mm_open_token(const unsigned char *seed, const unsigned char *host_key, const unsigned char *sealed,

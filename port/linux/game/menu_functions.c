@@ -5565,11 +5565,37 @@ static struct
 	boolean loaded;
 } matchmaking_screen;
 
-static short matchmaking_size_after(unsigned playlists, short size)
+static boolean matchmaking_party_member(const struct p2p_party_status *party)
 {
-	if (mm_playlist_has_size(playlists, size))
+	return party->count && !party->members[0].you;
+}
+
+/* the size at or past `to`, the way the spinner stepped from `from`, large enough for the party */
+static short matchmaking_party_size(short from, short to, int party)
+{
+	short step = to == (from + NUMBER_OF_P2P_MM_SIZES - 1) % NUMBER_OF_P2P_MM_SIZES ? NUMBER_OF_P2P_MM_SIZES - 1 : 1;
+	short size = to, tries;
+
+	for (tries = 0; tries < NUMBER_OF_P2P_MM_SIZES && !mm_party_size_allowed(party, size); tries++)
+		size = (short)((size + step) % NUMBER_OF_P2P_MM_SIZES);
+	return size;
+}
+
+/* a size only the party's growth moved stays off the saved size */
+static boolean matchmaking_size_saved(short before, short after, int party)
+{
+	return after != before && mm_party_size_allowed(party, before);
+}
+
+static short matchmaking_size_after(unsigned playlists, short size, int party)
+{
+	short after = size == P2P_MM_BIG_FFA ? P2P_MM_BIG_TEAM : P2P_MM_2V2;
+
+	if (mm_playlist_has_size(playlists, size) && mm_party_size_allowed(party, size))
 		return size;
-	return size == P2P_MM_BIG_FFA ? P2P_MM_BIG_TEAM : P2P_MM_2V2;
+	while (after < P2P_MM_FFA_6 && !mm_party_size_allowed(party, after))
+		after++;
+	return after;
 }
 
 static short matchmaking_search_allowed(unsigned playlists, short local_players)
@@ -5626,15 +5652,18 @@ static void matchmaking_screen_show(struct widget_instance *widget, unsigned pla
 static boolean matchmaking_screen_load(struct widget_instance *widget, boolean defaults)
 {
 	char text[64] = "", size_text[16] = "";
+	struct p2p_party_status party;
 	unsigned playlists;
 	short size = 0;
 
+	p2p_party_get_status(&party);
 	setting_text("network.matchmaking_playlists", text, sizeof(text), defaults);
 	setting_text("network.matchmaking_size", size_text, sizeof(size_text), defaults);
 	playlists = matchmaking_playlists_read(text);
 	while (size < NUMBER_OF_P2P_MM_SIZES && strcmp(size_text, p2p_mm_size_names[size]))
 		size++;
-	size = matchmaking_size_after(playlists, size < NUMBER_OF_P2P_MM_SIZES ? size : P2P_MM_2V2);
+	size = matchmaking_size_after(playlists, size < NUMBER_OF_P2P_MM_SIZES ? size : P2P_MM_2V2,
+		matchmaking_party_member(&party) || !party.count ? 1 : party.count);
 	matchmaking_screen_show(widget, playlists, size);
 	if (!defaults)
 	{
@@ -5652,11 +5681,17 @@ static void matchmaking_screen_update(struct widget_instance *list)
 	struct widget_instance *spinner = named(list, "size_spinner", 0);
 	struct widget_instance *description = list->parameters.list.extended_description;
 	struct widget_instance *focused = list;
+	struct p2p_party_status party;
 	unsigned playlists = 0;
 	short index, shown, size, help;
+	boolean member;
+	int players;
 
 	if (!spinner)
 		return;
+	p2p_party_get_status(&party);
+	member = matchmaking_party_member(&party);
+	players = member || !party.count ? 1 : party.count;
 	if (!matchmaking_screen.loaded)
 		matchmaking_screen_load(list, FALSE);
 	for (index = 0; index < NUMBER_OF_P2P_MM_PLAYLISTS; index++)
@@ -5667,8 +5702,9 @@ static void matchmaking_screen_update(struct widget_instance *list)
 			playlists |= 1u << index;
 	}
 	shown = (short)PIN(spinner->parameters.list.selected_index, 0, NUMBER_OF_P2P_MM_SIZES - 1);
-	size = mm_playlist_has_size(playlists, shown) ? shown :
-		matchmaking_size_after(playlists, matchmaking_screen.size);
+	if (!mm_party_size_allowed(players, shown))
+		spinner->parameters.list.selected_index = shown = matchmaking_party_size(matchmaking_screen.size, shown, players);
+	size = mm_playlist_has_size(playlists, shown) ? shown : matchmaking_size_after(playlists, matchmaking_screen.size, players);
 	if (list->focused_child != spinner->parent)
 		spinner->parameters.list.selected_index = shown = size;
 	spinner->alpha_modifier = mm_playlist_has_size(playlists, shown) ? 1.0f : TAB_UNFOCUSED_ALPHA;
@@ -5692,7 +5728,8 @@ static void matchmaking_screen_update(struct widget_instance *list)
 			}
 		}
 		config_write("network.matchmaking_playlists", text);
-		config_write("network.matchmaking_size", p2p_mm_size_names[size]);
+		if (matchmaking_size_saved(matchmaking_screen.size, size, players))
+			config_write("network.matchmaking_size", p2p_mm_size_names[size]);
 	}
 	matchmaking_screen.playlists = playlists;
 	matchmaking_screen.size = size;

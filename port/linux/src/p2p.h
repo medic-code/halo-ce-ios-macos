@@ -435,6 +435,7 @@ int p2p_mm_size_players(int size);
 int p2p_mm_size_big(int size);
 /* CTF has no free-for-all variant; playlists has a bit per playlist */
 int mm_playlist_has_size(unsigned playlists, int size);
+int mm_party_size_allowed(int party, int size);
 
 /* on the wire (queue topics) and in config.toml */
 extern const char *const p2p_mm_playlist_names[NUMBER_OF_P2P_MM_PLAYLISTS];

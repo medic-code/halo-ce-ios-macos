@@ -26,17 +26,17 @@ int main(int argc, char **argv)
 		CHECK(mm_playlist_has_size(1u << P2P_MM_CTF, P2P_MM_4V4), "E62: team sizes stay");
 		CHECK(mm_playlist_has_size(1u << P2P_MM_CTF | 1u << P2P_MM_SLAYER, P2P_MM_FFA_6),
 			"E62: with Slayer, FFA 6 is offered");
-		CHECK(matchmaking_size_after(1u << P2P_MM_CTF, P2P_MM_FFA_6) == P2P_MM_2V2, "E62: the set size moves to 2V2");
-		CHECK(matchmaking_size_after(1u << P2P_MM_CTF, P2P_MM_3V3) == P2P_MM_3V3, "an allowed size stays");
+		CHECK(matchmaking_size_after(1u << P2P_MM_CTF, P2P_MM_FFA_6, 1) == P2P_MM_2V2, "E62: the set size moves to 2V2");
+		CHECK(matchmaking_size_after(1u << P2P_MM_CTF, P2P_MM_3V3, 1) == P2P_MM_3V3, "an allowed size stays");
 		CHECK(mm_playlist_has_size(0, P2P_MM_FFA_6), "no playlist: FFA 6 not greyed");
-		CHECK(matchmaking_size_after(0, P2P_MM_FFA_6) == P2P_MM_FFA_6, "no playlist: FFA 6 kept");
+		CHECK(matchmaking_size_after(0, P2P_MM_FFA_6, 1) == P2P_MM_FFA_6, "no playlist: FFA 6 kept");
 		CHECK(mm_playlist_has_size(1u << P2P_MM_CTF | 1u << P2P_MM_KING, P2P_MM_FFA_6), "CTF and KING: FFA 6 offered");
 		CHECK(!mm_playlist_has_size(1u << P2P_MM_CTF, P2P_MM_BIG_FFA), "E64: only CTF: BIG FFA greyed");
 		CHECK(mm_playlist_has_size(1u << P2P_MM_CTF | 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA),
 			"E64: with Slayer, BIG FFA is offered");
-		CHECK(matchmaking_size_after(1u << P2P_MM_CTF, P2P_MM_BIG_FFA) == P2P_MM_BIG_TEAM,
+		CHECK(matchmaking_size_after(1u << P2P_MM_CTF, P2P_MM_BIG_FFA, 1) == P2P_MM_BIG_TEAM,
 			"BIG FFA moves to BIG TEAM");
-		CHECK(matchmaking_size_after(1u << P2P_MM_CTF, P2P_MM_BIG_TEAM) == P2P_MM_BIG_TEAM, "BIG TEAM stays");
+		CHECK(matchmaking_size_after(1u << P2P_MM_CTF, P2P_MM_BIG_TEAM, 1) == P2P_MM_BIG_TEAM, "BIG TEAM stays");
 	}
 	CASE("unknown_playlist")
 	{
