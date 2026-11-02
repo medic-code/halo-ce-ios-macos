@@ -9,7 +9,6 @@
 #include <string.h>
 
 void platform_log(const char *format, ...);
-void platform_clipboard_set(const char *text);
 
 static const char record_label[] = "hceu-party-1";
 static const char link_prefix[] = "halo://party/";
@@ -165,19 +164,25 @@ int mm_party_link_held(const char *text)
 	return link_read(text, bytes);
 }
 
-int mm_party_join(struct mm_party *party, const unsigned char *seed, const char *text, unsigned long now)
+int mm_party_can_join(const struct mm_party *party, const unsigned char *seed, const char *text)
 {
 	unsigned char bytes[P2P_PARTY_SECRET_SIZE + P2P_KEY_SIZE], key[P2P_KEY_SIZE], x25519[P2P_KEY_SIZE];
 	const unsigned char *leader = bytes + P2P_PARTY_SECRET_SIZE;
 
 	p2p_ed25519_public(seed, key, NULL);
-	if (!link_read(text, bytes) || !memcmp(leader, key, P2P_KEY_SIZE) || !p2p_ed25519_to_x25519(leader, x25519) ||
-		party->role == MM_PARTY_MEMBER || party->count > 1)
-	{
+	return link_read(text, bytes) && memcmp(leader, key, P2P_KEY_SIZE) && p2p_ed25519_to_x25519(leader, x25519) &&
+		party->role != MM_PARTY_MEMBER && party->count <= 1;
+}
+
+int mm_party_join(struct mm_party *party, const unsigned char *seed, const char *text, unsigned long now)
+{
+	unsigned char bytes[P2P_PARTY_SECRET_SIZE + P2P_KEY_SIZE];
+
+	if (!mm_party_can_join(party, seed, text))
 		return 0;
-	}
-	begin_party(party, seed, MM_PARTY_MEMBER, leader, now);
-	add_member(party, key);
+	link_read(text, bytes);
+	begin_party(party, seed, MM_PARTY_MEMBER, bytes + P2P_PARTY_SECRET_SIZE, now);
+	add_member(party, party->key);
 	set_secret(party, bytes);
 	return 1;
 }
@@ -627,6 +632,11 @@ int p2p_party_link_held(const char *text)
 	return mm_party_link_held(text);
 }
 
+int p2p_party_can_join(const char *text)
+{
+	return mm_party_can_join(&local.party, p2p_signing_seed(), text);
+}
+
 int p2p_party_link_received(const char *text)
 {
 	if (!mm_party_link_held(text))
@@ -659,11 +669,12 @@ int p2p_party_invite(char *link, int size)
 		mm_party_make(&local.party, p2p_signing_seed(), secret, p2p_now());
 	made = local.party.role == MM_PARTY_LEADER;
 	if (made)
+	{
 		strcpy(link, local.party.link);
+		p2p_clipboard_offer(link);
+	}
 	sync_topic();
 	pthread_mutex_unlock(&p2p_lock);
-	if (made)
-		platform_clipboard_set(link);
 	return made;
 }
 

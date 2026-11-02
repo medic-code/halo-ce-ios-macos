@@ -636,11 +636,13 @@ function showFatal(text) {
 
 // a game hosted for the internet: its invite as this page's address with
 // ?join= (which native builds take too), and a button that copies it (a
-// page may write the clipboard only when it is clicked)
+// page may write the clipboard only when it is clicked); a party's link is
+// shown whole, as ?join= takes a game's invite alone
 function showInvite(text) {
   const code = /([0-9a-f]{64})/.exec(text);
   if (!code) return;
-  $('invite-link').value = `${location.origin}${location.pathname}?join=${code[1]}`;
+  $('invite-link').value = /^halo:\/\/party\//.test(text)
+    ? text : `${location.origin}${location.pathname}?join=${code[1]}`;
   $('invite-copy').textContent = 'Copy';
   $('invite').hidden = false;
 }

@@ -430,7 +430,7 @@ static struct
 	int join_gave_up;
 	int join_refused;
 
-	char clipboard[P2P_LINK_SIZE];
+	char clipboard[P2P_PARTY_LINK_SIZE];
 	int has_clipboard;
 
 	/* UPnP (posix_upnp.c): a thread asking the router; the port it forwards
@@ -2892,6 +2892,17 @@ const char *p2p_invite_log_text(const char *invite, char *text, int size)
 	return text;
 }
 
+int p2p_invite_can_join(const char *text)
+{
+	unsigned char hash[P2P_KEY_HASH_SIZE], token[P2P_TOKEN_SIZE];
+	int can_join;
+
+	pthread_mutex_lock(&p2p_lock);
+	can_join = parse_invite(text, hash, token) > 0 || p2p_party_can_join(text);
+	pthread_mutex_unlock(&p2p_lock);
+	return can_join;
+}
+
 int p2p_join_invite(const char *text)
 {
 	int result;
@@ -3184,8 +3195,7 @@ void p2p_new_invite_if_listed(void)
 	if (p2p.hosting)
 	{
 		p2p_signal_host(p2p.token);
-		memcpy(p2p.clipboard, p2p.invite, sizeof(p2p.clipboard));
-		p2p.has_clipboard = 1;
+		p2p_clipboard_offer(p2p.invite);
 		/* (Discord is told the new one) */
 		p2p.reported_player_count = -1;
 	}
@@ -3223,8 +3233,7 @@ static void update_hosting(void)
 		}
 		if (!p2p.invite_copied)
 		{
-			memcpy(p2p.clipboard, p2p.invite, sizeof(p2p.clipboard));
-			p2p.has_clipboard = 1;
+			p2p_clipboard_offer(p2p.invite);
 			p2p.invite_copied = 1;
 		}
 		p2p.reported_player_count = -1;
@@ -3560,9 +3569,15 @@ static void update_upnp(void)
 	pthread_detach(thread);
 }
 
+void p2p_clipboard_offer(const char *text)
+{
+	snprintf(p2p.clipboard, sizeof(p2p.clipboard), "%s", text);
+	p2p.has_clipboard = 1;
+}
+
 const char *p2p_take_clipboard_text(void)
 {
-	static char text[P2P_LINK_SIZE];
+	static char text[P2P_PARTY_LINK_SIZE];
 	const char *result = NULL;
 
 	if (!p2p.running)

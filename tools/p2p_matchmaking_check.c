@@ -82,7 +82,7 @@ void p2p_signal_party_publish_on(const char *topic, const unsigned char *payload
 	memcpy(resent, payload, (size_t)size);
 	resent_size = size;
 }
-void platform_clipboard_set(const char *text) { strcpy(clipboard, text); }
+void p2p_clipboard_offer(const char *text) { strcpy(clipboard, text); }
 void p2p_discord_set_party(const char *link, int count, int maximum)
 {
 	(void)maximum;
@@ -2892,6 +2892,7 @@ static void check_party_machine(void)
 	CHECK(!p2p_party_invite(link, 8), "a link needs its room");
 	CHECK(p2p_party_invite(link, sizeof(link)) && p2p_party_active(), "INVITE makes a party");
 	CHECK(!strcmp(clipboard, link), "INVITE puts the link on the clipboard");
+	CHECK(!p2p_party_can_join(link), "a leader's own link can't be joined, so it leaves its search running");
 	CHECK(signal_topic[0], "the brokers carry the party's topic");
 	party_update_locked();
 	CHECK(party_published_size > 0, "the leader publishes");
@@ -2940,7 +2941,9 @@ static void check_party_machine(void)
 	party_seed(0, seed);
 	mm_party_make(&parties[0], seed, (const unsigned char *)"0123456789abcdef", clock_now);
 	CHECK(!party_link_locked("no link here"), "text with no party link is left for the game's invites");
+	CHECK(p2p_party_can_join(parties[0].link), "a lone leader may join another's party");
 	CHECK(party_link_locked(parties[0].link), "a party link joins the party");
+	CHECK(!p2p_party_can_join(parties[0].link), "a member may not join again");
 	CHECK(!strcmp(signal_topic, parties[0].topic), "the brokers carry the new party's topic");
 	CHECK(party_link_locked(parties[0].link), "a link for a party this machine is in is still a party link");
 	strcpy(old_topic, signal_topic);
