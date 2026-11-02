@@ -29,12 +29,21 @@ void p2p_hex(const unsigned char *bytes, int size, char *text)
 		sprintf(text + index * 2, "%02x", bytes[index]);
 }
 
+static int lost_in_verify;
+
 void p2p_key_hash(const unsigned char *key, unsigned char *hash)
 {
 	unsigned char digest[P2P_SHA256_SIZE];
 
 	p2p_sha256(key, P2P_KEY_SIZE, digest);
 	memcpy(hash, digest, P2P_KEY_HASH_SIZE);
+	/* mm_record_read's last call: p2p_mm_verify_pass holds no lock here, as when the game's thread runs */
+	if (lost_in_verify)
+	{
+		lost_in_verify = 0;
+		clock_now += 100;
+		p2p_mm_game_lost();
+	}
 }
 
 static unsigned char run_seed[P2P_SEED_SIZE] = { 0x77, 0x13 }, run_key[P2P_KEY_SIZE];
@@ -299,6 +308,31 @@ static void check_joined_then_lost(void)
 	CHECK(browsing, "the restarted search holds the server browser open");
 	p2p_mm_cancel();
 	CHECK(!browsing, "the end of the search leaves the browser as it was");
+}
+
+static void check_lost_in_verify(void)
+{
+	struct p2p_mm_choice choice = { 1u << P2P_MM_SLAYER, P2P_MM_2V2 };
+	struct mm_record record = searching(20, 1);
+	struct p2p_mm_decision decision;
+	struct p2p_mm_status status;
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+	int size;
+
+	case_name = "lost_in_verify";
+	seed_of(20, seed);
+	size = mm_record_write(&record, seed, bytes, sizeof(bytes));
+	p2p_mm_search(&choice);
+	pthread_mutex_lock(&p2p_lock);
+	p2p_mm_heard(bytes, size);
+	lost_in_verify = 1;
+	p2p_mm_update(clock_now, 1, NULL);
+	pthread_mutex_unlock(&p2p_lock);
+	CHECK(!lost_in_verify, "the game is lost during the verify pass");
+	p2p_mm_get_status(&status);
+	CHECK(status.state == P2P_MM_LOOKING, "the restarted search looks for its full time: %d", status.state);
+	CHECK(p2p_mm_take_decision(&decision) == P2P_MM_DECIDE_NONE, "the restarted search decides nothing yet");
+	p2p_mm_cancel();
 }
 
 static void add_listing(const char *name, int engine, int players, int most, int ping)
@@ -1775,6 +1809,7 @@ int main(int argc, char **argv)
 	check_verify_budget();
 	check_run_key();
 	check_joined_then_lost();
+	check_lost_in_verify();
 	check_failed_join_waits();
 	check_fake_fuller_game();
 	check_look();

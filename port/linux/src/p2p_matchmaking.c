@@ -1145,7 +1145,8 @@ void p2p_mm_update(unsigned long now, int can_host, const unsigned char *token)
 	if (token)
 		memcpy(mm.token, token, P2P_TOKEN_SIZE);
 	p2p_mm_verify_pass(now);
-	count = mm_step(&mm.search, now, out, MM_MAXIMUM_OUT);
+	/* the pass lets go of p2p_lock: the game's thread may have restarted the search after now */
+	count = mm_step(&mm.search, p2p_now(), out, MM_MAXIMUM_OUT);
 	publish_out(out, count);
 	mm.notice = notice_after(mm.notice, mm.search.state);
 	if (mm.search.decision.kind != P2P_MM_DECIDE_NONE)
