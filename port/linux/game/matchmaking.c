@@ -203,7 +203,9 @@ static void matchmaking_update_host(float seconds)
 	}
 	/* (a joiner would read "0 of 4 players" in a record before it) */
 	if (game->player_count)
-		p2p_mm_game(game->player_count, game->maximum_players, state != SERVER_PREGAME);
+		/* a machine joining a game that is over waits out the whole join */
+		p2p_mm_game(game_engine_running() && !game_engine_can_score() ? game->maximum_players : game->player_count,
+			game->maximum_players, state != SERVER_PREGAME);
 	else if (matchmaking_host_gave_up(matchmaking.seconds, game->player_count))
 	{
 		p2p_mm_host_gave_up();
