@@ -672,6 +672,7 @@ int mm_cancel(struct mm_search *search, struct mm_out *out, int out_size)
 {
 	int count = cancel_except(search, -1, -1, out, out_size);
 
+	search->in_game = 0;
 	search->state = P2P_MM_OFF;
 	return count;
 }
@@ -1079,6 +1080,7 @@ void mm_joined(struct mm_search *search, int ok, unsigned long now)
 	if (ok)
 	{
 		search->state = P2P_MM_OFF;
+		search->in_game = 1;
 		return;
 	}
 	host = find_peer(search, search->joining, search->queues[0][0], search->queues[0][1]);
@@ -1242,7 +1244,6 @@ static struct
 	int queue_count;
 	struct p2p_mm_decision pending;
 	int subscribed[P2P_MM_MAXIMUM_TOPICS][2], subscribed_count;
-	int in_game;
 	int browser_held, browser_was;
 	int has_token;
 	unsigned char token[P2P_TOKEN_SIZE];
@@ -1443,7 +1444,6 @@ static void cancel_search(void)
 	struct mm_out out[MM_MAXIMUM_OUT];
 
 	publish_out(out, mm_cancel(&mm.search, out, MM_MAXIMUM_OUT));
-	mm.in_game = 0;
 	mm.pending.kind = P2P_MM_DECIDE_NONE;
 	mm.queue_count = 0;
 }
@@ -1503,7 +1503,6 @@ void p2p_mm_search(const struct p2p_mm_choice *choice)
 	pthread_mutex_lock(&p2p_lock);
 	if (mm.search.state != P2P_MM_OFF)
 		cancel_search();
-	mm.in_game = 0;
 	p2p_lobby_masters_forget();
 	mm_start(&mm.search, p2p_signing_seed(), choice, p2p_now(), (unsigned long)time(NULL));
 	mm.notice = P2P_MM_NOTICE_NONE;
@@ -1543,7 +1542,7 @@ void p2p_mm_cancel(void)
 		cancel_search();
 		platform_log("matchmaking: search cancelled");
 	}
-	mm.in_game = 0;
+	mm.search.in_game = 0;
 	mm.notice = P2P_MM_NOTICE_NONE;
 	was = take_browser();
 	pthread_mutex_unlock(&p2p_lock);
@@ -1579,7 +1578,6 @@ void p2p_mm_joined(int ok)
 			lobby_mark_failed_unlocked(mm.search.picked);
 		mm.search.picked_set = 0;
 		mm_joined(&mm.search, ok, p2p_now());
-		mm.in_game = ok;
 		platform_log("matchmaking: %s", ok ? "joined the game" : "could not join the game: back in the queue");
 		if (!ok)
 			mm.notice = P2P_MM_NOTICE_HOST_UNREACHED;
@@ -1608,14 +1606,13 @@ void p2p_mm_game_lost(void)
 	int restarted = 0, size = 0;
 
 	pthread_mutex_lock(&p2p_lock);
-	if (mm.search.state != P2P_MM_OFF || mm.in_game)
+	if (mm.search.state != P2P_MM_OFF || mm.search.in_game)
 	{
 		p2p_lobby_masters_forget();
 		mm_game_lost(&mm.search, p2p_now());
 		size = mm.search.choice.size;
 		platform_log("matchmaking: the game's host is gone: back in the queue, %lu s into the search",
 			search_seconds());
-		mm.in_game = 0;
 		mm.notice = P2P_MM_NOTICE_HOST_LEFT;
 		hold_browser();
 		restarted = 1;

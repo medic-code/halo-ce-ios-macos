@@ -180,6 +180,8 @@ struct mm_search
 	unsigned char picked[P2P_IDENTIFIER_SIZE];
 	int picked_set;
 	struct mm_search_party party;
+	/* joined: the search is off, and the party still follows it */
+	int in_game;
 };
 
 void mm_wanted(const struct mm_search *search, int queue, struct p2p_lobby_wanted *wanted);
