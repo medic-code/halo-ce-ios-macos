@@ -2478,6 +2478,7 @@ static void check_faults(void)
 
 static struct mm_party parties[P2P_PARTY_MAXIMUM + 2];
 static unsigned long party_now;
+static int party_silent;
 
 static void party_seed(int machine, unsigned char *seed)
 {
@@ -2513,6 +2514,8 @@ static void party_run(int machines, int half_seconds)
 			char topic[P2P_PARTY_TOPIC_SIZE];
 			int size;
 
+			if (index == party_silent)
+				continue;
 			strcpy(topic, parties[index].topic);
 			size = mm_party_step(&parties[index], party_now, bytes);
 			if (size)
@@ -2530,6 +2533,7 @@ static void party_form(int machines)
 	memset(parties, 0, sizeof(parties));
 	memset(secret, 0x31, sizeof(secret));
 	party_now = 1000000;
+	party_silent = -1;
 	for (index = 0; index < machines; index++)
 		strcpy(parties[index].name, names[index]);
 	party_seed(0, seed);
@@ -2634,6 +2638,38 @@ static void check_party_leaked_link(void)
 	CHECK(strcmp(parties[1].members[0].name, "FAKE") != 0, "E42: the leader's key without its signature is ignored");
 }
 
+static void check_party_expiry(void)
+{
+	unsigned long heard;
+
+	case_name = "member_expiry";
+	party_form(3);
+	party_silent = 2;
+	heard = parties[0].members[2].heard;
+	while (parties[0].count == 3 && party_now - heard < 30000)
+		party_run(3, 1);
+	CHECK(party_now - heard == 10000 || party_now - heard == 10500, "E23: out of the list after 10 s: %lu",
+		party_now - heard);
+	CHECK(parties[0].count == 2 && !party_lists(&parties[0], "KAT"), "E23: Kat is gone");
+	CHECK(parties[0].notice == P2P_PARTY_NOTICE_LEFT && !strcmp(parties[0].notice_name, "KAT"), "KAT LEFT THE PARTY");
+	party_run(3, 6);
+	CHECK(parties[1].count == 2, "the others follow the leader's list");
+	party_silent = -1;
+	party_run(3, 6);
+	CHECK(parties[0].count == 3, "a member heard again is back");
+
+	party_form(3);
+	party_silent = 0;
+	heard = parties[1].members[0].heard;
+	while (parties[1].role != MM_PARTY_NONE && party_now - heard < 30000)
+		party_run(3, 1);
+	CHECK(party_now - heard == 10000 || party_now - heard == 10500, "E30: the party ends after 10 s: %lu",
+		party_now - heard);
+	CHECK(!parties[1].topic[0], "E30: the member leaves the topic");
+	CHECK(parties[1].notice == P2P_PARTY_NOTICE_ENDED && !strcmp(parties[1].notice_name, "CHIEF"),
+		"THE PARTY ENDED: CHIEF LEFT");
+}
+
 static void check_party_sealed(void)
 {
 	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE], secret[P2P_PARTY_SECRET_SIZE], digest[P2P_SHA256_SIZE];
@@ -2729,6 +2765,7 @@ int main(int argc, char **argv)
 	check_party_link();
 	check_party_status();
 	check_party_leaked_link();
+	check_party_expiry();
 	check_party_sealed();
 	check_party_copies();
 	check_party_full();
