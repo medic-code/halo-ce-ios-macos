@@ -239,9 +239,9 @@ int main(int argc, char **argv)
 
 		CHECK(matchmaking_party_member(&party), "Rook is a member");
 		matchmaking_party_words(&party, &view, help, line, 128);
-		CHECK(!wcscmp(read_out(help), L"Chief chooses and searches for the party. You join Chief's match, on Chief's team."),
+		CHECK(!wcscmp(read_out(help), L"Chief searches for you. You join Chief's team."),
 			"help: %ls", help);
-		CHECK(!wcscmp(line, L"Waiting for Chief to search."), "line: %ls", line);
+		CHECK(!wcscmp(read_out(line), L"Waiting for Chief to search."), "line: %ls", line);
 		CHECK(matchmaking_party_bar(&party, _matchmaking_ask_none) == (MATCHMAKING_BAR(leave) | MATCHMAKING_BAR(cancel)),
 			"the bar: LEAVE PARTY and CANCEL");
 		CHECK(!wcscmp(matchmaking_party_mark(&party, &view, 0), L"LEADER"), "Chief's mark");
@@ -261,11 +261,11 @@ int main(int argc, char **argv)
 		lines_of(&status, &party);
 		CHECK(!wcscmp(title, L"IN THE QUEUE"), "E49: title: %ls", title);
 		CHECK(!wcscmp(count, L"3 searching"), "E49: the count: %ls", count);
-		CHECK(!wcscmp(read_out(help), L"Chief searches for the party. You follow Chief into the game."), "E49: %ls", help);
+		CHECK(!wcscmp(read_out(help), L"Chief searches for you. You follow them into the game."), "E49: %ls", help);
 		CHECK(matchmaking_search_bar(&status, &party) == MATCHMAKING_SEARCH_BAR(leave), "E49: LEAVE SEARCH (B) only");
 		status.state = P2P_MM_LOOKING;
 		lines_of(&status, &party);
-		CHECK(wcsstr(help, L"Chief searches for the party") != NULL, "E49: looking: %ls", help);
+		CHECK(wcsstr(help, L"Chief searches for you") != NULL, "E49: looking: %ls", help);
 		CHECK(matchmaking_search_bar(&status, &party) == MATCHMAKING_SEARCH_BAR(leave), "E49: looking: the bar");
 		party = party_of(0, 3);
 		status = queued(1);
@@ -319,12 +319,12 @@ int main(int argc, char **argv)
 		view.size_focused = FALSE;
 		view.focused = 2;
 		matchmaking_party_words(&party, &view, help, line, 128);
-		CHECK(!wcscmp(read_out(help), L"X removes Kat from the party and makes a new party link."), "on Kat: %ls", help);
+		CHECK(!wcscmp(read_out(help), L"X removes Kat from the party and makes a new link."), "on Kat: %ls", help);
 		CHECK(!wcscmp(matchmaking_party_mark(&party, &view, 2), L"X REMOVE"), "on Kat: the tag");
 		CHECK(!wcscmp(matchmaking_party_mark(&party, &view, 0), L"LEADER"), "on Kat: the leader's mark");
 		view.asking = _matchmaking_ask_remove;
 		matchmaking_party_words(&party, &view, help, line, 128);
-		CHECK(!wcscmp(help, L"Remove Kat from the party?"), "asking: %ls", help);
+		CHECK(!wcscmp(read_out(help), L"Remove Kat from the party?"), "asking: %ls", help);
 		CHECK(!wcscmp(matchmaking_party_mark(&party, &view, 2), L"REMOVE?"), "asking: the tag");
 		CHECK(matchmaking_party_bar(&party, view.asking) == (MATCHMAKING_BAR(yes) | MATCHMAKING_BAR(no)), "asking: YES and NO");
 		{
