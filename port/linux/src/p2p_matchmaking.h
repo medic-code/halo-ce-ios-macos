@@ -198,6 +198,7 @@ int mm_cancel(struct mm_search *search, struct mm_out *out, int out_size);
 void mm_game_lost(struct mm_search *search, unsigned long now);
 void mm_host_gave_up(struct mm_search *search, unsigned long now);
 void mm_set_party(struct mm_search *search, const struct mm_search_party *party, unsigned long now);
+void mm_invite_text(const unsigned char *key_hash, const unsigned char *token, char *text);
 
 enum { MM_PARTY_NONE, MM_PARTY_LEADER, MM_PARTY_MEMBER };
 
