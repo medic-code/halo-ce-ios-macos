@@ -580,7 +580,7 @@ void p2p_party_heard(const unsigned char *payload, int size)
 	local.queue[local.queue_count++].size = size;
 }
 
-void p2p_party_update(unsigned long now)
+void p2p_party_update(void)
 {
 	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
 	unsigned long started = p2p_now();
@@ -598,9 +598,9 @@ void p2p_party_update(unsigned long now)
 		good = mm_party_verify(&record);
 		pthread_mutex_lock(&p2p_lock);
 		if (good)
-			mm_party_heard(&local.party, &record, now);
+			mm_party_heard(&local.party, &record, p2p_now());
 	}
-	size = mm_party_step(&local.party, now, bytes);
+	size = mm_party_step(&local.party, p2p_now(), bytes);
 	if (size)
 		p2p_signal_party_publish(bytes, size);
 	sync_topic();

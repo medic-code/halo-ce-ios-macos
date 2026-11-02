@@ -96,12 +96,15 @@ void p2p_lobby_masters_forget(void) { masters_forgotten++; }
 void master_list_refresh(void) { masters_refreshed++; }
 
 static int verifies;
+static void (*verify_window)(void);
 
 int __real_p2p_ed25519_verify(const unsigned char *public_key, const void *message, int size, const unsigned char *signature);
 
 int __wrap_p2p_ed25519_verify(const unsigned char *public_key, const void *message, int size, const unsigned char *signature)
 {
 	verifies++;
+	if (verify_window)
+		verify_window();
 	return __real_p2p_ed25519_verify(public_key, message, size, signature);
 }
 
@@ -1721,7 +1724,7 @@ static void check_party_full(void)
 static void party_update_locked(void)
 {
 	pthread_mutex_lock(&p2p_lock);
-	p2p_party_update(clock_now);
+	p2p_party_update();
 	pthread_mutex_unlock(&p2p_lock);
 }
 
@@ -1796,6 +1799,60 @@ static void check_party_machine(void)
 	CHECK(!offered_link[0], "Discord stops offering a link");
 }
 
+static unsigned char window_record[MM_MAXIMUM_RECORD_SIZE];
+static int window_member, window_size;
+
+/* the game thread while p2p_party_update has the lock released */
+static void remove_in_window(void)
+{
+	verify_window = NULL;
+	clock_now += 5;
+	party_published_size = 0;
+	p2p_party_remove(window_member);
+	memcpy(window_record, party_published, sizeof(window_record));
+	window_size = party_published_size;
+}
+
+static void party_machine_hears(int member, int window)
+{
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+	int size;
+
+	parties[member].sent = clock_now - 3000;
+	size = mm_party_step(&parties[member], clock_now, bytes);
+	p2p_party_heard(bytes, size);
+	window_member = window;
+	verify_window = window ? remove_in_window : NULL;
+	party_update_locked();
+}
+
+static void check_party_verify_window(void)
+{
+	static const char *const names[] = { "ROOK", "KAT", "PIP" };
+	unsigned char seed[P2P_SEED_SIZE];
+	char link[P2P_PARTY_LINK_SIZE];
+	struct p2p_party_status status;
+	int index;
+
+	case_name = "party verify window";
+	CHECK(p2p_party_invite(link, sizeof(link)), "the machine leads");
+	memset(parties, 0, sizeof(parties));
+	for (index = 1; index <= 3; index++)
+	{
+		party_seed(index, seed);
+		strcpy(parties[index].name, names[index - 1]);
+		CHECK(mm_party_join(&parties[index], seed, link, clock_now), "%s holds the link", names[index - 1]);
+		party_machine_hears(index, 0);
+	}
+	p2p_party_get_status(&status);
+	CHECK(status.count == 4, "the party forms: %d", status.count);
+
+	party_machine_hears(1, 2);
+	p2p_party_get_status(&status);
+	CHECK(status.count == 3 && !strcmp(status.members[2].name, "PIP"),
+		"a removal while a record is checked takes only that member: %d", status.count);
+}
+
 int main(void)
 {
 	check_pool();
@@ -1832,6 +1889,7 @@ int main(void)
 	check_party_copies();
 	check_party_full();
 	check_party_machine();
+	check_party_verify_window();
 	printf(failures ? "FAILED %d\n" : "PASS\n", failures);
 	return failures != 0;
 }
