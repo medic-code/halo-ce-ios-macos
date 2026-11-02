@@ -3145,6 +3145,7 @@ static void check_party_flags(void)
 
 	memset(&search, 0, sizeof(search));
 	search.state = P2P_MM_QUEUED;
+	search.choice.size = search.decision.size = P2P_MM_2V2;
 	parties[0].members[1].searching = 1;
 	parties[0].members[1].in_game = 1;
 	search.in_game = 1;
@@ -3280,6 +3281,69 @@ static void check_e77_friend_joins_search(void)
 	CHECK(!parties[0].notice, "and it never had the search: %d", parties[0].notice);
 }
 
+static void check_e77_party_outgrows(void)
+{
+	struct mm_record record;
+	int cancels = 0, index;
+
+	case_name = "e77_party_outgrows";
+	party_world(2, 3);
+	party_start(2, P2P_MM_2V2, 3);
+	run(8);
+	CHECK(machines[1].search.party.following, "the member follows");
+	capture_from = 0;
+	captured_count = 0;
+	friend_takes_link(2, "JUN");
+	run(5);
+	capture_from = -1;
+	for (index = 0; index < captured_count; index++)
+		cancels += mm_record_read(captured[index].bytes, captured[index].size, &record) &&
+			record.kind == MM_KIND_CANCEL;
+	CHECK(cancels > 0, "the queue's cancel goes out: %d", cancels);
+	for (index = 0; index < 3; index++)
+	{
+		CHECK(machines[index].search.state == P2P_MM_OFF, "machine %d stops: state %d", index, machines[index].search.state);
+		CHECK(parties[index].notice == P2P_PARTY_NOTICE_TOO_BIG, "machine %d is told: %d", index, parties[index].notice);
+	}
+	CHECK(parties[0].count == 3 && parties[2].role == MM_PARTY_MEMBER, "the friend stays in the party: %d", parties[0].count);
+	run(150);
+	CHECK(!machines[0].hosting && !machines[1].hosting && !machines[2].hosting, "and nobody hosts it");
+
+	party_start(3, P2P_MM_4V4, 7);
+	run(5);
+	CHECK(party_size() == 3 && !parties[0].notice && !parties[1].notice && !parties[2].notice,
+		"a bigger game takes the three, the notice gone: %d %d", party_size(), parties[1].notice);
+
+	party_world(1, 2);
+	party_start(1, P2P_MM_1V1, 1);
+	run(130);
+	CHECK(machines[0].hosting, "the leader hosts its 1V1");
+	friend_takes_link(1, "KAT");
+	run(5);
+	CHECK(!machines[0].hosting && machines[0].search.state == P2P_MM_OFF && machines[1].in < 0, "a lobby stops too");
+	CHECK(parties[1].notice == P2P_PARTY_NOTICE_TOO_BIG, "and the friend is told: %d", parties[1].notice);
+
+	party_world(2, 4);
+	list_game(3, 1, 4);
+	party_start(2, P2P_MM_2V2, 3);
+	for (index = 0; index < 10 && machines[0].in < 0; index++)
+		run(1);
+	CHECK(machines[0].in == 3, "the leader is in a 2V2: in %d", machines[0].in);
+	run(10);
+	friend_takes_link(2, "JUN");
+	run(10);
+	CHECK(machines[0].in == 3 && machines[2].in < 0 && !machines[2].search.party.following,
+		"a game goes on without the friend: in %d %d", machines[0].in, machines[2].in);
+	CHECK(parties[2].notice == P2P_PARTY_NOTICE_TOO_BIG, "who is told: %d", parties[2].notice);
+	listing_count = 0;
+
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_1V1, 1);
+	machines[0].search.party.count = 2;
+	run(130);
+	CHECK(!machines[0].hosting, "host_open keeps to sizes the party fits");
+}
+
 static void check_member_stays_in_game(void)
 {
 	struct mm_out out[MM_MAXIMUM_OUT];
@@ -3322,6 +3386,7 @@ static void check_party_journeys(void)
 	check_e75_member_keeps_hosting();
 	check_e76_party_stays_together();
 	check_e77_friend_joins_search();
+	check_e77_party_outgrows();
 	check_member_stays_in_game();
 	check_e25_follow_big();
 	check_e29_cannot_follow();
@@ -3849,7 +3914,12 @@ static void check_party_wiring(void)
 	strcpy(parties[5].name, "EMILE");
 	mm_party_join(&parties[5], seed, link, clock_now);
 	party_machine_hears(5, 0);
+	choice.size = P2P_MM_1V1;
 	p2p_mm_search(&choice);
+	CHECK(search->state == P2P_MM_OFF && p2p_party_too_big(), "SEARCH refuses a size the party does not fit");
+	choice.size = P2P_MM_2V2;
+	p2p_mm_search(&choice);
+	CHECK(search->state != P2P_MM_OFF && !p2p_party_too_big(), "one it fits goes, and the notice with it");
 	party_update_locked();
 	CHECK(search->party.count == 2, "a leader's search carries its member: %d", search->party.count);
 	p2p_mm_cancel();

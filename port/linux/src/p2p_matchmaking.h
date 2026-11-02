@@ -238,6 +238,8 @@ struct mm_party_search
 	int number, game, left;
 	int searching, widened, playlists, size, host;
 	int has_game, game_playlist, game_size, public_game;
+	/* the party grew too big for the search: it stopped, or goes on in its game without the friend */
+	int outgrown;
 	char invite[P2P_LINK_SIZE];
 };
 
@@ -298,6 +300,7 @@ void mm_party_search(struct mm_party *party, struct mm_search *search, unsigned 
 
 struct mm_search *p2p_mm_local(void);
 int p2p_party_is_member(void);
+int p2p_party_too_big(void);
 void p2p_party_search_begin(struct mm_search *search);
 void p2p_party_search_left(void);
 

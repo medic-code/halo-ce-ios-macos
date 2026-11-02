@@ -78,7 +78,7 @@ static struct
 	char map[64];
 	boolean map_set, player_added, start_now;
 	boolean public_game;
-	boolean reopen;
+	boolean reopen, too_big;
 	byte host[6];
 } matchmaking;
 
@@ -378,12 +378,15 @@ void matchmaking_update(float seconds)
 		matchmaking_update_joined();
 		break;
 	}
+	if (status.notice == P2P_MM_NOTICE_TOO_BIG && !matchmaking.too_big && !global_network_game_client_get())
+		matchmaking.reopen = TRUE;
+	matchmaking.too_big = status.notice == P2P_MM_NOTICE_TOO_BIG;
 	if (matchmaking.reopen && main_menu_is_loaded())
 	{
 		/* p2p_mm_game_lost has restarted the search since the read above */
 		p2p_mm_get_status(&status);
 		matchmaking.reopen = FALSE;
-		if (status.state != P2P_MM_OFF)
+		if (status.state != P2P_MM_OFF || status.notice == P2P_MM_NOTICE_TOO_BIG)
 			matchmaking_reopen_search();
 	}
 	if ((matchmaking.role == _matchmaking_idle || matchmaking.role == _matchmaking_hosting) &&
