@@ -2567,6 +2567,17 @@ static void check_party_verify_window(void)
 	p2p_party_get_status(&status);
 	CHECK(status.count == 3 && !strcmp(status.members[2].name, "PIP"),
 		"a removal while a record is checked takes only that member: %d", status.count);
+
+	for (index = 1; index <= 3; index += 2)
+	{
+		struct mm_party_record record;
+
+		CHECK(mm_party_read(&parties[index], window_record, window_size, &record), "the new link reads");
+		mm_party_heard(&parties[index], &record, clock_now);
+	}
+	party_machine_hears(3, 2);
+	p2p_party_get_status(&status);
+	CHECK(status.count == 2, "a record being checked when its sender is removed does not bring them back: %d", status.count);
 }
 
 /* under loss two machines can elect themselves at once, so the lossy runs check only the end state */

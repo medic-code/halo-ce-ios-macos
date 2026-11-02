@@ -370,6 +370,7 @@ int mm_party_read(struct mm_party *party, const unsigned char *payload, int size
 	record->key = record->plain + 1;
 	record->sequence = get_long(record->plain + 1 + P2P_KEY_SIZE);
 	record->body = body;
+	memcpy(record->seal, party->seal, sizeof(record->seal));
 	if (!memcmp(record->key, party->key, P2P_KEY_SIZE))
 		return 0;
 	if (record->kind == PARTY_MEMBER_RECORD)
@@ -489,7 +490,9 @@ static void heard_link(struct mm_party *party, const struct mm_party_record *rec
 
 void mm_party_heard(struct mm_party *party, const struct mm_party_record *record, unsigned long now)
 {
-	if (party->role == MM_PARTY_NONE)
+	/* (the lock is released while a signature is checked: a removal in that
+	time changes the seal, and a removed member's record must not add them back) */
+	if (party->role == MM_PARTY_NONE || memcmp(record->seal, party->seal, sizeof(party->seal)))
 		return;
 	if (record->kind == PARTY_MEMBER_RECORD)
 	{
