@@ -96,7 +96,17 @@ int lobby_games_unlocked(struct p2p_listing *games, int maximum_count)
 	memcpy(games, listings, (size_t)count * sizeof(*games));
 	return count;
 }
-int p2p_lobby_pick(const struct p2p_listing *games, int count, const struct p2p_lobby_wanted *wanted) { return count ? 0 : -1; }
+static struct p2p_lobby_wanted picked_wanted;
+int p2p_lobby_pick(const struct p2p_listing *games, int count, const struct p2p_lobby_wanted *wanted)
+{
+	int index;
+
+	picked_wanted = *wanted;
+	for (index = 0; index < count; index++)
+		if (!games[index].failed)
+			return index;
+	return -1;
+}
 int p2p_lobby_pick_unpinged(const struct p2p_listing *games, int count, const struct p2p_lobby_wanted *wanted) { return 0; }
 static int marked_count;
 
@@ -587,7 +597,7 @@ static void game_side(int index)
 		machine->hosting = 0;
 		if (fail_join == index)
 		{
-			mm_hosted(&machine->search, token, 1, 4, 0, now_ms);
+			mm_hosted(&machine->search, token, 1, 1, 4, 0, now_ms);
 			hosted_while_joining = machine->search.state == P2P_MM_HOSTING;
 			mm_joined(&machine->search, 0, now_ms);
 			return;
@@ -616,7 +626,8 @@ static void game_side(int index)
 	}
 	if (machine->hosting)
 	{
-		mm_hosted(&machine->search, token, machine->players, machine->most, machine->players == machine->most, now_ms);
+		mm_hosted(&machine->search, token, machine->players, (machine->players + 1) / 2, machine->most,
+			machine->players == machine->most, now_ms);
 	}
 }
 
@@ -765,9 +776,9 @@ static void check_replay(void)
 	CHECK(peer_count(&machines[1].search) == 0, "E43: a replayed searcher is never counted again");
 }
 
-static int game_most_players = 4;
+static int game_most_players = 4, game_red_players, game_size = P2P_MM_2V2;
 
-static void hear_game(int host, int players, unsigned long sequence, unsigned char *key_hash)
+static void hear_game(int host, int players, int held, unsigned long sequence, unsigned char *key_hash)
 {
 	struct mm_record record = searching(host, sequence), read_back;
 	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE], token[P2P_TOKEN_SIZE];
@@ -775,9 +786,17 @@ static void hear_game(int host, int players, unsigned long sequence, unsigned ch
 	seed_of(host, seed);
 	memset(token, host, sizeof(token));
 	record.kind = MM_KIND_HOSTING;
+	record.size = game_size;
 	record.players = players;
+	record.red_players = game_red_players;
 	record.most_players = game_most_players;
 	memcpy(record.token, token, P2P_TOKEN_SIZE);
+	if (held)
+	{
+		record.held = record.pool_count = 1;
+		memcpy(record.pool[0], machines[0].search.key_hash, P2P_KEY_HASH_SIZE);
+		mm_seal_token(seed, machines[0].search.key, token, record.sealed[0]);
+	}
 	if (mm_record_read(bytes, mm_record_write(&record, seed, bytes, sizeof(bytes)), &read_back))
 	{
 		mm_heard(&machines[0].search, &read_back, now_ms);
@@ -826,15 +845,15 @@ static void check_fake_fuller_game(void)
 	machines[0].search.most_players = 4;
 	game_most_players = 16;
 	for (sequence = 1; sequence <= 3; sequence++)
-		hear_game(20, 3, sequence, key_hash);
+		hear_game(20, 3, 0, sequence, key_hash);
 	game_most_players = 4;
 	run(1.0);
 	CHECK(machines[0].search.state == P2P_MM_HOSTING, "a game claiming more players than its size is ignored");
-	hear_game(21, 3, 1, key_hash);
+	hear_game(21, 3, 0, 1, key_hash);
 	run(1.0);
 	CHECK(machines[0].search.state == P2P_MM_HOSTING, "one record does not end a lobby");
-	hear_game(21, 3, 2, key_hash);
-	hear_game(21, 3, 3, key_hash);
+	hear_game(21, 3, 0, 2, key_hash);
+	hear_game(21, 3, 0, 3, key_hash);
 	run(1.0);
 	CHECK(machines[0].search.state != P2P_MM_HOSTING, "a counted fuller game takes the lobby");
 }
@@ -947,11 +966,11 @@ static void check_big_listing(void)
 	pthread_mutex_lock(&p2p_lock);
 	p2p_mm_update(clock_now, 1, token);
 	pthread_mutex_unlock(&p2p_lock);
-	p2p_mm_game(1, 16, 0);
+	p2p_mm_game(1, 0, 16, 0);
 	p2p_mm_get_status(&status);
 	CHECK(status.state == P2P_MM_HOSTING && p2p_mm_hosts_big_game(), "a big host still says so once it hosts");
 	CHECK(browsing, "a lone big host keeps the browser open for the pings it merges by");
-	p2p_mm_game(2, 16, 0);
+	p2p_mm_game(2, 0, 16, 0);
 	CHECK(!browsing, "a big host with a player leaves the browser as it was");
 	p2p_mm_cancel();
 	CHECK(!p2p_mm_hosts_big_game(), "a search cancelled hosts no big game");
@@ -1400,6 +1419,160 @@ static int pool_names(const struct mm_record *record, const unsigned char *key)
 	return 0;
 }
 
+/* E28, through the records: a hosting record's team counts, on the wire, decide a party's join */
+static void check_e28_room(void)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct mm_record keys;
+	unsigned char even[P2P_KEY_HASH_SIZE], red[P2P_KEY_HASH_SIZE];
+	char text[2 * P2P_KEY_HASH_SIZE + 1];
+	struct mm_search *search;
+
+	case_name = "e28_room";
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	keys = party_of(100, 1, 1);
+	set_party(search, &keys, 0);
+	game_red_players = 1;
+	hear_game(300, 2, 0, 1, even);
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_NONE, "1 and 1 is passed over");
+	game_red_players = 2;
+	hear_game(301, 2, 0, 1, red);
+	game_red_players = 0;
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	p2p_hex(red, P2P_KEY_HASH_SIZE, text);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_JOIN &&
+		!strncmp(search->decision.invite + strlen("halo://join/"), text, strlen(text)), "2 on red is joined");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	game_red_players = 1;
+	hear_game(300, 2, 0, 1, even);
+	game_red_players = 0;
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_JOIN, "a solo takes 1 and 1");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	keys = party_of(100, 1, 1);
+	set_party(search, &keys, 0);
+	game_red_players = 1;
+	hear_game(300, 3, 1, 1, even);
+	game_red_players = 0;
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_JOIN, "a held seat is the party's whatever the counts");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	game_red_players = 2;
+	hear_game(300, 4, 1, 1, even);
+	game_red_players = 0;
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_NONE, "a held seat in a full game is not taken");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	game_red_players = 3;
+	hear_game(300, 4, 0, 1, even);
+	game_red_players = 0;
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_NONE, "3 and 1 is full, whatever its short team");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_FFA_6, 1);
+	keys = party_of(100, 1, 1);
+	set_party(search, &keys, 0);
+	game_red_players = 2;
+	game_most_players = 6;
+	game_size = P2P_MM_FFA_6;
+	hear_game(300, 4, 0, 1, even);
+	game_red_players = 0;
+	game_most_players = 4;
+	game_size = P2P_MM_2V2;
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_JOIN, "a free-for-all has no teams to be short of");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	keys = party_of(100, 1, 1);
+	set_party(search, &keys, 0);
+	hear_game(300, 2, 0, 1, even);
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_NONE, "no red count hides the short team: a party passes it by");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	hear_game(300, 2, 0, 1, even);
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_JOIN, "a player alone fits without a red count");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_FFA_6, 1);
+	keys = party_of(100, 1, 1);
+	set_party(search, &keys, 0);
+	game_most_players = 6;
+	game_size = P2P_MM_FFA_6;
+	hear_game(300, 2, 0, 1, even);
+	game_most_players = 4;
+	game_size = P2P_MM_2V2;
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_JOIN, "a free-for-all needs no red count");
+}
+
+static void check_team_counts(void)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct mm_record read_back, record = searching(300, 1);
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE], token[P2P_TOKEN_SIZE] = { 1 };
+	struct mm_search *search;
+	int count, index, red = -1, size;
+
+	case_name = "team_counts";
+	seed_of(300, seed);
+	record.kind = MM_KIND_HOSTING;
+	record.most_players = 4;
+	record.players = 2;
+	size = mm_record_write(&record, seed, bytes, sizeof(bytes));
+	record.red_players = 2;
+	CHECK(mm_record_write(&record, seed, bytes, sizeof(bytes)) == size, "the counts add no bytes");
+	CHECK(bytes[2] == MM_FORMAT, "and take no new format");
+	CHECK(mm_record_read(bytes, size, &read_back) && read_back.red_players == 2 && read_back.can_host,
+		"they read back beside the flags: %d", read_back.red_players);
+	record.red_players = 20;
+	mm_record_write(&record, seed, bytes, sizeof(bytes));
+	CHECK(mm_record_read(bytes, size, &read_back) && read_back.red_players == MM_RED_MAXIMUM && read_back.can_host,
+		"a count past four bits stops at the top: %d", read_back.red_players);
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	search->hosting_playlist = P2P_MM_SLAYER;
+	search->hosting_size = P2P_MM_2V2;
+	search->state = P2P_MM_FOUND;
+	search->decided = P2P_MM_DECIDE_HOST;
+	mm_hosted(search, token, 2, 1, 4, 0, now_ms);
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	now_ms += 100;
+	mm_hosted(search, token, 2, 2, 4, 0, now_ms);
+	count = mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	for (index = 0; index < count; index++)
+	{
+		if (mm_record_read(out[index].bytes, out[index].size, &read_back) && read_back.kind == MM_KIND_HOSTING)
+			red = read_back.red_players;
+	}
+	CHECK(red == 2, "a player's move is published at once: %d", red);
+}
+
 static void check_party_pool_invited(void)
 {
 	struct mm_out out[MM_MAXIMUM_OUT];
@@ -1429,7 +1602,7 @@ static void check_party_pool_invited(void)
 	search->hosting_size = P2P_MM_3V3;
 	search->state = P2P_MM_FOUND;
 	search->decided = P2P_MM_DECIDE_HOST;
-	mm_hosted(search, token, 1, 6, 0, now_ms);
+	mm_hosted(search, token, 1, 0, 6, 0, now_ms);
 	count = mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
 	for (index = 0; index < count; index++)
 		found |= mm_record_read(out[index].bytes, out[index].size, &read_back) && read_back.kind == MM_KIND_HOSTING;
@@ -1878,7 +2051,7 @@ static void check_e25_follow_big(void)
 
 	case_name = "e25_follow_big";
 	party_world(4, 5);
-	list_game(4, 2, 8);
+	list_game(4, 1, 8);
 	party_start(4, P2P_MM_4V4, 15);
 	for (index = 0; index < 10 && machines[0].in < 0; index++)
 		run(1);
@@ -1886,8 +2059,23 @@ static void check_e25_follow_big(void)
 	run(20);
 	for (index = 1; index < 4; index++)
 		CHECK(machines[index].in == 4, "member %d followed within 20 s: in %d", index, machines[index].in);
-	CHECK(machines[4].players == 6, "the party's 4 in the game: %d", machines[4].players);
+	CHECK(machines[4].players == 5, "the party's 4 in the game: %d", machines[4].players);
 	CHECK(!parties[0].notice, "no notice: %d", parties[0].notice);
+	listing_count = 0;
+}
+
+static void check_e28_listing(void)
+{
+	int index;
+
+	case_name = "e28_listing";
+	party_world(4, 5);
+	list_game(4, 2, 8);
+	picked_wanted.party = 0;
+	party_start(4, P2P_MM_4V4, 15);
+	for (index = 0; index < 10 && machines[0].in < 0; index++)
+		run(1);
+	CHECK(picked_wanted.party == 4, "the leader's look asks the browser for room for 4: %d", picked_wanted.party);
 	listing_count = 0;
 }
 
@@ -2381,6 +2569,7 @@ static void check_party_journeys(void)
 	check_e77_leader_follows_member();
 	check_listing_send();
 	check_e25_follow_big();
+	check_e28_listing();
 	check_e29_cannot_follow();
 }
 
@@ -3011,6 +3200,8 @@ int main(void)
 	check_party_record_search();
 	check_party_journeys();
 	check_party_pool_invited();
+	check_e28_room();
+	check_team_counts();
 	check_party_sizes();
 	check_party_records();
 	check_party_link();
