@@ -32,6 +32,7 @@ enum
 	PARTY_GAME = 4,
 	PARTY_PUBLIC = 8,
 	PARTY_OUTGROWN = 16,
+	PARTY_APART = 32,
 	PARTY_MEMBER_SIZE = P2P_PARTY_NAME_SIZE + 2 + P2P_SIGNATURE_SIZE,
 	/* a member in a game adds its game: left number, playlist, size, the invite sealed for the leader */
 	PARTY_MEMBER_GAME_SIZE = 3 + MM_SEALED_INVITE_SIZE,
@@ -242,7 +243,8 @@ static int write_search(struct mm_party *party, unsigned char *plain)
 
 	plain[size++] = (unsigned char)((search->searching ? PARTY_SEARCHING : 0) | (search->widened ? PARTY_WIDENED : 0) |
 		(search->has_game ? PARTY_GAME : 0) | (search->public_game ? PARTY_PUBLIC : 0) |
-		(search->outgrown ? PARTY_OUTGROWN : 0));
+		(search->stopped == P2P_PARTY_NOTICE_TOO_BIG ? PARTY_OUTGROWN : 0) |
+		(search->stopped == P2P_PARTY_NOTICE_APART ? PARTY_APART : 0));
 	plain[size++] = (unsigned char)search->number;
 	plain[size++] = (unsigned char)search->game;
 	plain[size++] = (unsigned char)search->left;
@@ -542,14 +544,15 @@ static void heard_search(struct mm_party *party, const unsigned char *block, int
 	struct mm_party_search *search = &party->search;
 	const unsigned char *sealed = block + MM_PARTY_SEARCH_SIZE + 2;
 	unsigned char key[P2P_SHA256_SIZE];
-	const int outgrown = !!(block[0] & PARTY_OUTGROWN);
+	const int stopped = block[0] & PARTY_OUTGROWN ? P2P_PARTY_NOTICE_TOO_BIG :
+		block[0] & PARTY_APART ? P2P_PARTY_NOTICE_APART : P2P_PARTY_NOTICE_NONE;
 	int index;
 
-	if (outgrown && !search->outgrown)
-		set_notice(party, P2P_PARTY_NOTICE_TOO_BIG, "");
-	else if (!outgrown && party->notice == P2P_PARTY_NOTICE_TOO_BIG)
+	if (stopped && stopped != search->stopped)
+		set_notice(party, stopped, "");
+	else if (!stopped && search->stopped && party->notice == search->stopped)
 		party->notice = P2P_PARTY_NOTICE_NONE;
-	search->outgrown = outgrown;
+	search->stopped = stopped;
 	search->searching = !!(block[0] & PARTY_SEARCHING);
 	search->widened = !!(block[0] & PARTY_WIDENED);
 	search->public_game = !!(block[0] & PARTY_PUBLIC);
@@ -748,27 +751,65 @@ static void leader_game(struct mm_party *party, const struct mm_search *search, 
 		party->members[index].in_game = 0;
 }
 
-/* a game under way goes on without the friends too many; anything sooner stops for the whole party */
-static void leader_outgrown(struct mm_party *party, struct mm_search *search, struct mm_party_search *said, int *on,
+static void leader_stop(struct mm_party *party, struct mm_search *search, struct mm_party_search *said, int notice,
 	unsigned long now)
 {
-	int index = party->count;
-
-	said->outgrown = 1;
-	set_notice(party, P2P_PARTY_NOTICE_TOO_BIG, "");
-	if (search->in_game || (search->state == P2P_MM_HOSTING && search->under_way))
-	{
-		while (!party->members[--index].searching)
-			;
-		party->members[index].searching = 0;
-		return;
-	}
+	said->stopped = notice;
+	set_notice(party, notice, "");
 	if (search->state == P2P_MM_HOSTING)
 		search->left_game = 1;
 	/* not mm_cancel: mm_step still owes the queues' cancels */
 	search->state = P2P_MM_OFF;
-	said->searching = *on = 0;
+	said->searching = 0;
 	leader_game(party, search, said, now);
+}
+
+/* a game under way goes on without the friends too many; anything sooner stops for the whole party */
+static void leader_outgrown(struct mm_party *party, struct mm_search *search, struct mm_party_search *said,
+	unsigned long now)
+{
+	int index = party->count;
+
+	if (!search->in_game && !(search->state == P2P_MM_HOSTING && search->under_way))
+	{
+		leader_stop(party, search, said, P2P_PARTY_NOTICE_TOO_BIG, now);
+		return;
+	}
+	said->stopped = P2P_PARTY_NOTICE_TOO_BIG;
+	set_notice(party, P2P_PARTY_NOTICE_TOO_BIG, "");
+	while (!party->members[--index].searching)
+		;
+	party->members[index].searching = 0;
+}
+
+/* a leader left in the queue takes the game a member reached; refused there too, the party stops */
+static void leader_follow(struct mm_party *party, struct mm_search *search, struct mm_party_search *said,
+	unsigned long now)
+{
+	int index;
+
+	if (search->in_game)
+		party->following_member = 0;
+	if (search->state != P2P_MM_LOOKING && search->state != P2P_MM_QUEUED)
+		return;
+	if (party->following_member)
+	{
+		party->following_member = 0;
+		leader_stop(party, search, said, P2P_PARTY_NOTICE_APART, now);
+		return;
+	}
+	for (index = 1; index < party->count; index++)
+	{
+		const struct mm_party_member *member = &party->members[index];
+
+		if (member->searching && member->in_game && member->game.invite[0] && member->game.left == said->left)
+		{
+			party->following_member = 1;
+			mm_follow_game(search, member->game.invite, member->game.playlist, member->game.size, member->game.public_game,
+				now);
+			return;
+		}
+	}
 }
 
 static void leader_search(struct mm_party *party, struct mm_search *search, unsigned long now)
@@ -776,19 +817,19 @@ static void leader_search(struct mm_party *party, struct mm_search *search, unsi
 	struct mm_search_party wanted;
 	struct mm_party_search said = party->search;
 	const struct mm_party_member *late;
-	int on = search->state != P2P_MM_OFF || search->in_game;
 	int index;
 
-	said.searching = on;
+	said.searching = search->state != P2P_MM_OFF || search->in_game;
 	said.widened = search->widened;
 	said.playlists = (int)search->choice.playlists;
 	said.size = search->choice.size;
 	leader_game(party, search, &said, now);
-	search_members(party, search, on, &wanted, &late);
-	while (on && !mm_party_size_allowed(wanted.count, said.has_game ? said.game_size : search->choice.size))
+	leader_follow(party, search, &said, now);
+	search_members(party, search, said.searching, &wanted, &late);
+	while (said.searching && !mm_party_size_allowed(wanted.count, said.has_game ? said.game_size : search->choice.size))
 	{
-		leader_outgrown(party, search, &said, &on, now);
-		search_members(party, search, on, &wanted, &late);
+		leader_outgrown(party, search, &said, now);
+		search_members(party, search, said.searching, &wanted, &late);
 	}
 	mm_set_party(search, &wanted, now);
 	said.host = 0;
@@ -869,7 +910,7 @@ static void member_search(struct mm_party *party, struct mm_search *search, unsi
 	{
 		struct p2p_mm_choice choice;
 
-		if (!said->searching || said->outgrown || said->number == party->left_number)
+		if (!said->searching || said->stopped || said->number == party->left_number)
 			return;
 		choice.playlists = (unsigned)said->playlists;
 		choice.size = said->size;
@@ -947,10 +988,11 @@ void mm_party_search_begin(struct mm_party *party, struct mm_search *search, uns
 	if (party->role != MM_PARTY_LEADER)
 		return;
 	party->search.number = party->search.number % 255 + 1;
-	party->search.has_game = party->search.outgrown = 0;
-	party->follow_done = 0;
-	if (party->notice == P2P_PARTY_NOTICE_TOO_BIG)
+	party->search.has_game = 0;
+	party->follow_done = party->following_member = 0;
+	if (party->notice == P2P_PARTY_NOTICE_TOO_BIG || party->notice == P2P_PARTY_NOTICE_APART)
 		party->notice = P2P_PARTY_NOTICE_NONE;
+	party->search.stopped = P2P_PARTY_NOTICE_NONE;
 	for (index = 1; index < party->count; index++)
 	{
 		party->members[index].searching = 1;
@@ -1020,9 +1062,10 @@ int p2p_party_is_member(void)
 	return local.party.role == MM_PARTY_MEMBER;
 }
 
-int p2p_party_too_big(void)
+int p2p_party_mm_notice(void)
 {
-	return local.party.notice == P2P_PARTY_NOTICE_TOO_BIG;
+	return local.party.notice == P2P_PARTY_NOTICE_TOO_BIG ? P2P_MM_NOTICE_TOO_BIG :
+		local.party.notice == P2P_PARTY_NOTICE_APART ? P2P_MM_NOTICE_APART : P2P_MM_NOTICE_NONE;
 }
 
 void p2p_party_search_begin(struct mm_search *search)
