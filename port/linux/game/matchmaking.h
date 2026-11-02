@@ -7,7 +7,9 @@
 
 void matchmaking_update(float seconds);
 boolean matchmaking_game_locked(void);
+boolean matchmaking_teams_locked(void);
 boolean matchmaking_can_start_now(void);
+boolean matchmaking_hosts_big_game(void);
 void matchmaking_start_now(void);
 
 #endif

@@ -387,6 +387,27 @@ def test_p2p_signatures_and_listings(tmp_path):
 
 
 @linux_host_only
+@pytest.mark.parametrize("fault,case", [
+    (("p2p_mm_hosts_big_game() ? _listing_big_game : 0", "0"), "a matchmade big host's listing says so"),
+    (("shown->big_game = !shown->dedicated && (listing->flags & _listing_big_game) != 0;", "shown->big_game = 0;"),
+     "a matchmade big host's listing says so"),
+    (("shown->big_game = !shown->dedicated && (listing->flags & _listing_big_game) != 0;",
+      "shown->big_game = (listing->flags & _listing_big_game) != 0;"),
+     "a dedicated server's flag on the brokers is not taken"),
+    (("made = listing_make_token(bytes, lobby.flags, lobby.hosting_token);",
+      "made = listing_make_token(bytes, lobby.flags | _listing_big_game, lobby.hosting_token);"),
+     "a master server's entry does not carry the flag"),
+    (("game->listing.big_game = big_game && !dedicated;", "game->listing.big_game = 0;"),
+     "a master's entry for a player's game leaves the flag"),
+    (("game->listing.big_game = big_game && !dedicated;", "game->listing.big_game = big_game;"),
+     "a dedicated server is no big game"),
+])
+def test_p2p_matchmaking_big_listing(tmp_path, fault, case):
+    result = lobby_check(tmp_path, fault)
+    assert result.returncode != 0 and f"FAIL: {case}" in result.stdout, result.stdout
+
+
+@linux_host_only
 def test_p2p_masters_heard_needs_an_answer(tmp_path):
     result = lobby_check(tmp_path, ("lobby.games[index].listing.master_count = 0;",
                                     "lobby.games[index].listing.master_count = 0; masters_answered = 1;"))
@@ -447,6 +468,15 @@ def test_p2p_matchmaking(tmp_path):
     (("if (!mm_playlist_has_size(1u << playlist, queue_size))", "if (0)"), "e63_ffa_wanted"),
     (("if (!looked && search->decision.kind == P2P_MM_DECIDE_NONE)\n\t\t\tcount = pick_game(", "if (0)\n\t\t\tcount = pick_game("), "look"),
     (("count = lobby_games_unlocked(games, MAXIMUM_GAMES);", "count = 0;"), "look"),
+    (("waiting += wanted.big && !p2p_lobby_masters_were_heard();", "waiting += 0;"), "big_look"),
+    (("search->decision.public_game = !games[index].big_game;", "search->decision.public_game = 1;"), "big_look"),
+    (("search->decision.public_game = !games[index].big_game;", "search->decision.public_game = 0;"), "big_look"),
+    (("mm.search.decided == P2P_MM_DECIDE_HOST && p2p_mm_size_big(mm.search.hosting_size)", "p2p_mm_size_big(mm.search.hosting_size)"), "big_listing"),
+    (("p2p_mm_size_big(mm.search.hosting_size) &&", ""), "big_listing"),
+    (("(mm.search.state == P2P_MM_FOUND || mm.search.state == P2P_MM_HOSTING)", "1"), "big_listing"),
+    (("(mm.search.state == P2P_MM_FOUND || mm.search.state == P2P_MM_HOSTING)", "mm.search.state == P2P_MM_FOUND"), "big_listing"),
+    (("games[index].dedicated ? games[index].region : \"\"", "\"\""), "big_look"),
+    (("games[index].dedicated ? games[index].region", "games[index].master ? games[index].region"), "big_look"),
     (("lobby_mark_failed_unlocked(mm.search.picked);", "(void)0;"), "step1_failed"),
     (("chosen != held_chosen ? chosen :", "0 ? 0 :"), "widened_pick"),
     (("search->sequence = sequence;", "search->sequence = 0;"), "restart"),
@@ -477,7 +507,7 @@ def test_p2p_matchmaking(tmp_path):
     (("memcmp(search->key_hash, other->key_hash, P2P_KEY_HASH_SIZE) > 0", "0"), "e40_two_lone_hosts"),
     (("now, kept_start);", "now, 0);"), "e11_host_quits"),
     (("search->state = P2P_MM_OFF;\n\treturn count;", "return 0;"), "host_failed"),
-    (("peer->record.players > best->record.players ||", "0 ||"), "e10_invited_twice"),
+    (("return record->players > than->players ||", "return 0 ||"), "e10_invited_twice"),
     (("if (candidate->failed)", "if (0)"), "e12_never_hosts"),
     (("if (candidate->failed)", "if (0)"), "two_queues"),
     (("peer->failed == MM_FAILED_PASSED_OVER)\n\t\tpeer->failed = MM_FAILED_NONE;", "peer->failed == MM_FAILED_PASSED_OVER)\n\t\tpeer->failed = MM_FAILED_PASSED_OVER;"), "passed_over_hosts"),
@@ -486,7 +516,30 @@ def test_p2p_matchmaking(tmp_path):
     (("mm.search.state != P2P_MM_OFF || mm.in_game", "mm.search.state != P2P_MM_OFF"), "joined_then_lost"),
     (("search->join_after = now + MM_JOIN_BACKOFF;", "(void)now;"), "failed_join_waits"),
     (("!mm_counted(peer) || !outranks", "!outranks"), "fake_fuller_game"),
-    (("record->most_players > p2p_mm_size_players(record->size)", "0"), "fake_fuller_game"),
+    (("record->most_players <= p2p_mm_size_players(record->size)", "1"), "fake_fuller_game"),
+    (("record->most_players <= HALO_PORT_MAXIMUM_NETWORK_PLAYERS", "1"), "big_records"),
+    (("record->most_players <= HALO_PORT_MAXIMUM_NETWORK_PLAYERS", "record->most_players <= 16"), "big_records"),
+    (("record->kind != MM_KIND_SEARCHING && ", ""), "big_records"),
+    (("search->queue_count && !p2p_mm_size_big(search->choice.size) &&", "search->queue_count &&"), "e32_big_hosts"),
+    (("return search->can_host > 0 ? host_open(search, 1, out, out_size) : 0;",
+      "return host_open(search, 1, out, out_size);"), "e32_big_hosts"),
+    (("return search->can_host > 0 ? host_open(", "return search->can_host ? host_open("), "e32_big_hosts"),
+    (("p2p_lobby_masters_forget();\n\t\tmm_game_lost", "mm_game_lost"), "big_lost"),
+    (("if (restarted)\n\t\tbrowse_for(size);", "if (restarted)\n\t\tp2p_lobby_browse(1);"), "big_lost"),
+    (("return wanted->big && !game->kind &&", "return wanted->big &&"), "big_look"),
+    (("p2p_mm_size_big(peer->size) && !big_host_near(peer)", "0"), "e33_lone_merge"),
+    (("p2p_mm_size_big(peer->size) && !big_host_near(peer)", "0"), "e32_big_hosts"),
+    (("return ping >= 0 && ping < P2P_LOBBY_PICK_PING;", "return ping < P2P_LOBBY_PICK_PING;"), "e33_lone_merge"),
+    (("return ping >= 0 && ping < P2P_LOBBY_PICK_PING;", "return ping <= P2P_LOBBY_PICK_PING;"), "e32_big_hosts"),
+    (("if (kind == P2P_MM_DECIDE_HOST && !p2p_mm_size_big(mm.search.choice.size))", "if (kind == P2P_MM_DECIDE_HOST)"),
+     "big_listing"),
+    (("if (players > 1 || under_way)\n\t\t\twas = take_browser();", "(void)was;"), "big_listing"),
+    (("!p2p_mm_size_big(search->hosting_size) || search->players == 1", "1"), "e33_lone_merge"),
+    (("p2p_mm_size_big(best->size) &&\n\t\tbetter_host_settling(search, best)", "0"), "big_hold"),
+    (("(ping < 0 && peer->refreshes < MM_REFRESHES_PINGED)", "ping < 0"), "big_hold"),
+    (("!p2p_mm_size_big(search->hosting_size) || search->players == 1", "search->players == 1"), "small_hands_over"),
+    (("if (!mm_playlist_has_size(1u << playlist, size))", "if (0)"), "e64_big_ffa_no_ctf"),
+    (("size != P2P_MM_FFA_6 && size != P2P_MM_BIG_FFA", "size != P2P_MM_FFA_6"), "e64_big_ffa_no_ctf"),
     (("publish_out(out, mm_step(&mm.search, now, out, MM_MAXIMUM_OUT));\n\t\tsync_topics();", "sync_topics();"),
      "joined_then_lost"),
     (("count = mm_step(&mm.search, p2p_now(),", "count = mm_step(&mm.search, now,"), "lost_in_verify"),

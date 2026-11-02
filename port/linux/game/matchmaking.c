@@ -33,6 +33,8 @@ unsigned long system_milliseconds(void);
 boolean main_menu_is_loaded(void);
 boolean pc_menu_player1_profile(void);
 boolean pc_menu_multiplayer_player(short controller);
+wchar_t const *pc_menu_game_name(void);
+short pc_menu_maximum_players(void);
 void platform_log(char const *format, ...);
 
 static char const *const slayer_small_maps[] = { "chillout", "prisoner", "wizard", "longest", "carousel", "damnation", NULL };
@@ -44,17 +46,18 @@ static char const *const king_maps[] = { "beavercreek", "chillout", "hangemhigh"
 static char const *const oddball_small_maps[] = { "chillout", "prisoner", "wizard", "longest", NULL };
 static char const *const oddball_maps[] = { "beavercreek", "damnation", "hangemhigh", "carousel", "ratrace", NULL };
 static char const *const race_maps[] = { "bloodgulch", "sidewinder", NULL };
+static char const *const big_maps[] = { "bloodgulch", "sidewinder", "boardingaction", NULL };
 
 static const struct
 {
 	char const *team_variant, *ffa_variant;
-	char const *const *small_maps, *const *maps;
+	char const *const *small_maps, *const *maps, *const *big_maps;
 } playlists[NUMBER_OF_P2P_MM_PLAYLISTS] = {
-	[P2P_MM_SLAYER] = { "team_slayer", "slayer", slayer_small_maps, slayer_maps },
-	[P2P_MM_CTF] = { "ctf", NULL, ctf_small_maps, ctf_maps },
-	[P2P_MM_KING] = { "team_king", "king", king_small_maps, king_maps },
-	[P2P_MM_ODDBALL] = { "team_oddball", "oddball", oddball_small_maps, oddball_maps },
-	[P2P_MM_RACE] = { "team_race", "race", race_maps, race_maps },
+	[P2P_MM_SLAYER] = { "team_slayer", "slayer", slayer_small_maps, slayer_maps, big_maps },
+	[P2P_MM_CTF] = { "ctf", NULL, ctf_small_maps, ctf_maps, big_maps },
+	[P2P_MM_KING] = { "team_king", "king", king_small_maps, king_maps, race_maps },
+	[P2P_MM_ODDBALL] = { "team_oddball", "oddball", oddball_small_maps, oddball_maps, race_maps },
+	[P2P_MM_RACE] = { "team_race", "race", race_maps, race_maps, race_maps },
 };
 
 enum
@@ -79,14 +82,20 @@ static struct
 
 boolean matchmaking_game_locked(void)
 {
-	return matchmaking.role != _matchmaking_idle && !matchmaking.public_game;
+	return (matchmaking.role != _matchmaking_idle && !matchmaking.public_game) ||
+		(!global_network_game_server_get() && p2p_joined_listed_big_game());
+}
+
+boolean matchmaking_teams_locked(void)
+{
+	return matchmaking.role != _matchmaking_idle && !matchmaking.public_game && !p2p_mm_size_big(matchmaking.size);
 }
 
 static void matchmaking_start_countdown(struct network_game_server *server, short players, short most_players, boolean start_now)
 {
 	if (start_now)
 		return;
-	if (players < most_players)
+	if (players < most_players || p2p_mm_size_big(matchmaking.size))
 		network_game_server_port_countdown_stop(server);
 	else if (network_game_server_port_ok_to_countdown(server) && !network_game_server_port_countdown_paused(server))
 		network_game_server_port_countdown_begin(server, MATCHMAKING_START_MILLISECONDS);
@@ -123,8 +132,10 @@ static void matchmaking_open_lobby(void)
 
 static void matchmaking_begin_host(struct p2p_mm_decision const *decision)
 {
-	char const *const *maps = decision->size <= P2P_MM_2V2 ? playlists[decision->playlist].small_maps :
-		playlists[decision->playlist].maps;
+	boolean big = p2p_mm_size_big(decision->size);
+	char const *const *maps = big ? playlists[decision->playlist].big_maps :
+		decision->size <= P2P_MM_2V2 ? playlists[decision->playlist].small_maps : playlists[decision->playlist].maps;
+	short most_players = MAX((short)p2p_mm_size_players(decision->size), big ? pc_menu_maximum_players() : 0);
 	short count = 0;
 	char const *map;
 
@@ -143,9 +154,10 @@ static void matchmaking_begin_host(struct p2p_mm_decision const *decision)
 		return;
 	}
 	/* before p2p_set_hosting_public: a limit set later is not the one listed */
-	network_game_server_port_set_settings(NULL, (short)p2p_mm_size_players(decision->size));
+	network_game_server_port_set_settings(big ? pc_menu_game_name() : NULL, most_players);
 	p2p_set_hosting_allowed(TRUE);
-	p2p_set_hosting_public(FALSE);
+	p2p_set_hosting_password(NULL);
+	p2p_set_hosting_public(big);
 	matchmaking_open_lobby();
 	matchmaking.role = _matchmaking_hosting;
 	matchmaking.public_game = FALSE;
@@ -184,8 +196,8 @@ static void matchmaking_update_host(float seconds)
 		if (!matchmaking.map_set && matchmaking.seconds >= MATCHMAKING_MAP_SECONDS)
 		{
 			struct game_variant variant;
-			char const *name = matchmaking.size == P2P_MM_FFA_6 ? playlists[matchmaking.playlist].ffa_variant :
-				playlists[matchmaking.playlist].team_variant;
+			char const *name = matchmaking.size == P2P_MM_FFA_6 || matchmaking.size == P2P_MM_BIG_FFA ?
+				playlists[matchmaking.playlist].ffa_variant : playlists[matchmaking.playlist].team_variant;
 
 			if (!name)
 			{
@@ -227,7 +239,13 @@ boolean matchmaking_can_start_now(void)
 	struct network_game *game = server ? network_game_server_get_game(server) : NULL;
 
 	return game && matchmaking.role == _matchmaking_hosting && matchmaking.player_added && !matchmaking.start_now &&
-		network_game_server_get_state(server, NULL) == SERVER_PREGAME && game->player_count < game->maximum_players;
+		network_game_server_get_state(server, NULL) == SERVER_PREGAME && network_game_server_port_ok_to_countdown(server) &&
+		(p2p_mm_size_big(matchmaking.size) || game->player_count < game->maximum_players);
+}
+
+boolean matchmaking_hosts_big_game(void)
+{
+	return matchmaking.role == _matchmaking_hosting && p2p_mm_size_big(matchmaking.size);
 }
 
 void matchmaking_start_now(void)
@@ -255,6 +273,7 @@ static void matchmaking_begin_join(struct p2p_mm_decision const *decision)
 	}
 	matchmaking.role = _matchmaking_joining;
 	matchmaking.public_game = decision->public_game != 0;
+	matchmaking.size = (short)decision->size;
 	matchmaking.seconds = 0.0f;
 }
 

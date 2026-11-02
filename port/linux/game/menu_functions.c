@@ -3759,6 +3759,28 @@ static short const cooperative_friendly_fire_modes[] =
 	_friendly_fire_off, _friendly_fire_on, _friendly_fire_shields_only, _friendly_fire_explosives_only
 };
 
+static void game_name_default(void)
+{
+	if (!multiplayer.game_name[0] && player_ui_get_active_player_profile_index(0) != NONE)
+	{
+		struct player_profile profile;
+
+		player_ui_get_active_player_profile(0, &profile);
+		ustrncpy(multiplayer.game_name, profile.player_name, NUMBEROF(multiplayer.game_name) - 1);
+	}
+}
+
+wchar_t const *pc_menu_game_name(void)
+{
+	game_name_default();
+	return multiplayer.game_name;
+}
+
+short pc_menu_maximum_players(void)
+{
+	return maximum_players[PIN(multiplayer.maximum_players_index, 0, NUMBEROF(maximum_players) - 1)];
+}
+
 /* the most players Server Setup shows and sets: the multiplayer game's, or
 the co-op game's (COOPERATIVE_DEFAULT_PLAYERS the first time in each game
 hosted: multiplayer_host) */
@@ -3809,13 +3831,7 @@ static boolean server_settings_initialize(struct widget_instance *list)
 	/* (co-op has no gametype to edit) */
 	if (!hosting_cooperative())
 		gametype_setup_begin();
-	if (!multiplayer.game_name[0] && player_ui_get_active_player_profile_index(0) != NONE)
-	{
-		struct player_profile profile;
-
-		player_ui_get_active_player_profile(0, &profile);
-		ustrncpy(multiplayer.game_name, profile.player_name, NUMBEROF(multiplayer.game_name) - 1);
-	}
+	game_name_default();
 	if (spinner)
 		spinner->parameters.list.selected_index = *server_settings_maximum_players_index();
 	/* (PUBLIC or PRIVATE: this game's; the screen is made again on coming
@@ -4123,16 +4139,16 @@ boolean pc_menu_text_color(struct widget_instance *widget, real_argb_color *colo
 	return TRUE;
 }
 
-/* a bar of buttons' focus, off one hidden: on its first one shown */
+/* a bar's focus, off a hidden button: on its first one shown; the left and
+right tabs count from selected_index */
 static void focus_off_hidden(struct widget_instance *bar)
 {
 	struct widget_instance *button;
 	short button_index = 0;
 
-	for (button = bar && bar->focused_child && !bar->focused_child->visible ? bar->child : NULL; button;
-		button = button->next, button_index++)
+	for (button = bar && bar->focused_child ? bar->child : NULL; button; button = button->next, button_index++)
 	{
-		if (button->visible)
+		if (bar->focused_child->visible ? button == bar->focused_child : button->visible)
 		{
 			bar->focused_child = button;
 			bar->parameters.list.selected_index = button_index;
@@ -6603,15 +6619,16 @@ static void lobby_update(struct widget_instance *list)
 	}
 	lobby_join_help(list);
 	map_vote_lobby_check();
-	visible_set(named(list, "lobby_button_team", 0), game && game->variant.universal_variant.teams && !matchmaking_game_locked());
+	visible_set(named(list, "lobby_button_team", 0), game && game->variant.universal_variant.teams && !matchmaking_teams_locked());
 	visible_set(named(list, "lobby_button_start", 0), !matchmaking_game_locked());
 	visible_set(named(list, "lobby_button_host_start", 0), start_now);
 	visible_set(named(list, "lobby_button_add", 0), !matchmaking_game_locked());
-	/* (the buttons' focus, off Switch Team when it is hidden; to the first
-	shown as START NOW appears, the lobby being open by then) */
-	if (bar && start_now && !start_now_shown)
+	/* (a joiner's team change brings START NOW back on a big host: A on
+	SWITCH TEAM must not become a start) */
+	if (bar && start_now && !start_now_shown &&
+		(list->focused_child != bar || !named(list, "lobby_button_team", 0)->visible))
 	{
-		bar->focused_child = bar->child;
+		bar->focused_child = named(list, "lobby_button_host_start", 0);
 		/* (a first focus on the rows leaves A there, off the button drawn focused) */
 		if (lobby_first_focus)
 		{
@@ -6620,11 +6637,12 @@ static void lobby_update(struct widget_instance *list)
 		}
 	}
 	start_now_shown = start_now;
-	/* (a joiner's rows do nothing, and the bar draws LEAVE focused) */
-	if (bar && lobby_first_focus && matchmaking_game_locked() && !global_network_game_server_get())
+	/* (a joiner's rows do nothing, and the bar draws SWITCH TEAM or LEAVE focused) */
+	if (bar && lobby_first_focus && !global_network_game_server_get() && state >= _client_state_pregame)
 	{
 		lobby_first_focus = FALSE;
 		focus_row(list, NONE);
+		bar->focused_child = named(list, "lobby_button_team", 0);
 	}
 	focus_off_hidden(bar);
 	visible_set(named(description, "lobby_right_item", 0), game != NULL && state >= _client_state_pregame);
@@ -6662,7 +6680,7 @@ static void lobby_update(struct widget_instance *list)
 		gametype[NUMBEROF(gametype) - 1] = 0;
 		if (!kind)
 			kind = engine_names[PIN(game->variant.game_engine_index, 0, 5)];
-		if (matchmaking_game_locked())
+		if (matchmaking_teams_locked() || matchmaking_hosts_big_game())
 		{
 			wchar_t line[MATCHMAKING_TEXT_LENGTH];
 
@@ -6674,7 +6692,8 @@ static void lobby_update(struct widget_instance *list)
 		{
 			usnprintf(text, NUMBEROF(text) - 1, L"%s%s\r\n%s\r\n%d of %d players\r\n\r\n%s", name, gametype, kind,
 				lobby_player_count, game->maximum_players,
-				seconds > 0 ? L"Starting in:" : game->machine_count < 2 || dedicated ? L"Waiting for players" : L"");
+				seconds > 0 ? L"Starting in:" : game->machine_count < 2 || dedicated ? L"Waiting for players" :
+				matchmaking_game_locked() ? L"The host starts it" : L"");
 			text[NUMBEROF(text) - 1] = 0;
 			if (seconds > 0)
 			{

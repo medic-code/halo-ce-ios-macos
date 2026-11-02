@@ -96,6 +96,8 @@ enum
 	_listing_password = 16,
 	/* a dedicated server's (halo --server: server_mode.c) */
 	_listing_dedicated = 32,
+	/* a matchmade big game's (never on a master server's entry) */
+	_listing_big_game = 64,
 	STAMP_SIZE = 8,
 	/* the signed part's end: everything but the signature */
 	MAXIMUM_LISTING_SIZE = 2 + 1 + 2 + 1 + 4 + 4 + P2P_KEY_SIZE + P2P_SEALED_TOKEN_SIZE + 3 +
@@ -458,7 +460,7 @@ static int listing_signed(const unsigned char *bytes, const struct listing *list
 
 static void publish(void)
 {
-	lobby.listing_size = listing_make(lobby.listing, lobby.flags);
+	lobby.listing_size = listing_make(lobby.listing, lobby.flags | (p2p_mm_hosts_big_game() ? _listing_big_game : 0));
 	lobby.published_time = p2p_now();
 	lobby.republish_wanted = 0;
 	p2p_signal_lobby_publish(lobby.listing, lobby.listing_size, 0);
@@ -746,6 +748,7 @@ static void listing_take(const struct queued *queued, const struct listing *list
 	flag is its host's, which any host can set, so a game the brokers alone
 	list is the players' however it calls itself) */
 	shown->dedicated = game->master && game->master_dedicated;
+	shown->big_game = !shown->dedicated && (listing->flags & _listing_big_game) != 0;
 	shown->network_version = (unsigned short)listing->version;
 }
 
@@ -919,7 +922,7 @@ int p2p_lobby_take_master_listing(const unsigned char *payload, int size, const 
 	struct listing listing;
 	struct queued queued;
 	struct game *game;
-	int taken = 0;
+	int taken = 0, big_game = 0;
 
 	(void)network_version_shown;
 	if (size < MINIMUM_LISTING_SIZE || size > MAXIMUM_LISTING_SIZE || !listing_read(payload, size, &listing) ||
@@ -935,6 +938,8 @@ int p2p_lobby_take_master_listing(const unsigned char *payload, int size, const 
 	if (lobby.browsing)
 	{
 		game = find_game(queued.key_hash);
+		/* (only a host's listing on the brokers says it is a big game) */
+		big_game = game && game->listing.big_game;
 		/* (the same listing again: heard; a newer one: taken; another
 		version's is shown, greyed, by the menus: network_version) */
 		if (game && game->payload_size == size && !memcmp(game->payload, payload, (size_t)size))
@@ -954,6 +959,7 @@ int p2p_lobby_take_master_listing(const unsigned char *payload, int size, const 
 			game->master_dedicated = dedicated != 0;
 			game->master_time = p2p_now();
 			game->listing.dedicated = dedicated != 0;
+			game->listing.big_game = big_game && !dedicated;
 			game->listing.master = 1;
 			snprintf(game->listing.publisher, sizeof(game->listing.publisher), "%s", publisher ? publisher : "");
 			snprintf(game->listing.region, sizeof(game->listing.region), "%s", region ? region : "");
@@ -1163,6 +1169,13 @@ void p2p_lobby_refresh(void)
 int p2p_lobby_browsing(void)
 {
 	return lobby.browsing;
+}
+
+int lobby_ping_unlocked(const unsigned char *key_hash)
+{
+	const struct game *game = find_game(key_hash);
+
+	return game ? game->ping : -1;
 }
 
 /* the order shown: the most players first; then those joining has not

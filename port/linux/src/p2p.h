@@ -169,6 +169,7 @@ struct p2p_listing
 	(master_list.c): by how many, its publisher's name and its region
 	(empty: none said) */
 	unsigned char dedicated;
+	unsigned char big_game;
 	unsigned char master;
 	unsigned char master_count;
 	char publisher[P2P_LISTING_PUBLISHER_SIZE + 1];
@@ -196,6 +197,9 @@ server's that a master server lists: an approved operator's, whose chat
 follows its network.text_chat (a listing's own dedicated flag, which any
 host may set, is not enough) */
 int p2p_joined_listed_dedicated(void);
+/* whether the public game joined (p2p_joined_listed_host) is a matchmade big
+game, on its host's word (big_game) */
+int p2p_joined_listed_big_game(void);
 /* the key ids of the masters that listed the game being joined, if it was
 joined from the server browser (master_key_ids): how many, 0 if not known (an
 invite's, a LAN's) */
