@@ -1240,6 +1240,12 @@ static int pick_fits(const struct p2p_listing *game, const struct p2p_lobby_want
 	/* an empty dedicated server starts its game on its own once a player joins */
 	if (!game->player_count && !(wanted->big && game->dedicated))
 		return 0;
+	/* a listing has no team counts, and a party asks for its team in a lobby alone */
+	if (wanted->party > 1 && (game->in_progress ||
+		game->maximum_player_count - game->player_count < (game->has_teams ? 2 * wanted->party - 1 : wanted->party)))
+	{
+		return 0;
+	}
 	/* a small search passes over a dedicated server: it plays its operator's game, not the one searched for */
 	if (game->dedicated)
 		return wanted->big && !game->kind && (!wanted->region[0] || !strcasecmp(game->region, wanted->region));
