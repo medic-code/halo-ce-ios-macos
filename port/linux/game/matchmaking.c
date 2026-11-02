@@ -12,6 +12,7 @@
 #include "networking/network_server_manager.h"
 #include "networking/network_server_manager_internal.h"
 #include "game/game_engine.h"
+#include "map_share.h"
 #include "matchmaking.h"
 
 #include "../src/p2p.h"
@@ -34,6 +35,14 @@ boolean pc_menu_multiplayer_player(short controller);
 wchar_t const *pc_menu_game_name(void);
 short pc_menu_maximum_players(void);
 void platform_log(char const *format, ...);
+
+/* at most a pool's units and the party joining, each of two players or more */
+#define MATCHMAKING_MOST_WAITING 9
+
+struct team_party
+{
+	long seats, arrived, team;
+};
 
 static char const *const slayer_small_maps[] = { "chillout", "prisoner", "wizard", "longest", "carousel", "damnation", NULL };
 static char const *const slayer_maps[] = { "beavercreek", "chillout", "damnation", "hangemhigh", "carousel", "ratrace", "putput", "prisoner", NULL };
@@ -239,6 +248,116 @@ static void matchmaking_update_host(float seconds)
 		matchmaking.start_now = matchmaking.map_set = FALSE;
 	else if (matchmaking.player_added)
 		matchmaking_start_countdown(server, game->player_count, game->maximum_players, matchmaking.start_now);
+}
+
+static long machine_party(
+	short machine_index,
+	struct p2p_mm_team_party const *parties,
+	long party_count,
+	unsigned char const *own_key_hash)
+{
+	byte identifier[6];
+	unsigned char hash[P2P_PLAYER_KEY_HASH_SIZE];
+	long party, member;
+
+	if (machine_index == network_game_client_get_local_machine_index())
+		csmemcpy(hash, own_key_hash, sizeof(hash));
+	else if (!p2p_peer_key_hash(network_order(network_game_server_machine_address(machine_index)), identifier, hash))
+		return NONE;
+	for (party = 0; party < party_count; party++)
+	{
+		for (member = 0; member < parties[party].players; member++)
+		{
+			if (!csmemcmp(parties[party].key_hashes[member], hash, sizeof(hash)))
+				return party;
+		}
+	}
+	return NONE;
+}
+
+/* parties split so the teams come closest: taking the largest in turn can
+leave a host's solo with no team that fits */
+static long party_team(
+	long *seats,
+	struct team_party *parties,
+	long party_count,
+	long joining)
+{
+	long waiting[MATCHMAKING_MOST_WAITING];
+	long waiting_count = 0, best_split = 0, best_gap = NONE;
+	long index, split;
+
+	for (index = 0; index < party_count; index++)
+	{
+		if (parties[index].team != NONE)
+			seats[parties[index].team] += parties[index].seats;
+		else if (parties[index].seats && waiting_count < MATCHMAKING_MOST_WAITING)
+			waiting[waiting_count++] = index;
+	}
+	for (split = 0; split < 1L << waiting_count; split++)
+	{
+		long gap = seats[0] - seats[1];
+
+		for (index = 0; index < waiting_count; index++)
+			gap += split >> index & 1 ? -parties[waiting[index]].seats : parties[waiting[index]].seats;
+		if (best_gap == NONE || labs(gap) < best_gap)
+		{
+			best_gap = labs(gap);
+			best_split = split;
+		}
+	}
+	for (index = 0; index < waiting_count; index++)
+	{
+		parties[waiting[index]].team = best_split >> index & 1;
+		seats[parties[waiting[index]].team] += parties[waiting[index]].seats;
+	}
+	return joining != NONE ? parties[joining].team : seats[1] < seats[0] ? 1 : 0;
+}
+
+long matchmaking_team(
+	struct network_game const *game,
+	short machine_index)
+{
+	struct p2p_mm_team_party table[P2P_MM_TEAM_PARTIES];
+	struct team_party team_parties[P2P_MM_TEAM_PARTIES];
+	unsigned char own_key_hash[P2P_PLAYER_KEY_HASH_SIZE];
+	long seats[2] = { 0, 0 };
+	long party_count, joining, index;
+
+	if (matchmaking.role != _matchmaking_hosting || matchmaking.public_game)
+		return NONE;
+	party_count = p2p_mm_team_parties(table, own_key_hash);
+	if (!party_count)
+		return NONE;
+	joining = machine_party(machine_index, table, party_count, own_key_hash);
+	for (index = 0; index < party_count; index++)
+	{
+		team_parties[index].seats = table[index].reserved || index == joining ? table[index].players : 0;
+		team_parties[index].arrived = 0;
+		team_parties[index].team = NONE;
+	}
+	for (index = 0; index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS; index++)
+	{
+		struct network_player const *other_player = &game->players[index];
+		long party, team;
+
+		if (!network_player_is_valid(other_player) ||
+			!VALID_INDEX(other_player->team_index, 2))
+		{
+			continue;
+		}
+		team = other_player->team_index;
+		party = machine_party(other_player->machine_index, table, party_count, own_key_hash);
+		if (party == NONE)
+		{
+			seats[team]++;
+			continue;
+		}
+		team_parties[party].team = team;
+		if (team_parties[party].seats < ++team_parties[party].arrived)
+			team_parties[party].seats = team_parties[party].arrived;
+	}
+	return party_team(seats, team_parties, party_count, joining);
 }
 
 boolean matchmaking_can_start_now(void)
