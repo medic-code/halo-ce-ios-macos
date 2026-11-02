@@ -495,4 +495,31 @@ enum { P2P_MM_LOOK_SECONDS = 6, P2P_MM_WIDEN_SECONDS = 45, P2P_MM_HOST_SECONDS =
 void p2p_mm_get_status(struct p2p_mm_status *status);
 void p2p_mm_host_gave_up(void);
 
+/* MATCHMAKING's party (p2p_party.c) */
+enum { P2P_PARTY_MAXIMUM = 8, P2P_PARTY_NAME_SIZE = 32, P2P_PARTY_LINK_SIZE = 110 };
+enum
+{
+	P2P_PARTY_NOTICE_NONE,
+	P2P_PARTY_NOTICE_LEFT,
+	P2P_PARTY_NOTICE_LEFT_SEARCH,
+	P2P_PARTY_NOTICE_COULD_NOT_JOIN,
+	P2P_PARTY_NOTICE_ENDED,
+	P2P_PARTY_NOTICE_REMOVED,
+};
+struct p2p_party_member
+{
+	char name[P2P_PARTY_NAME_SIZE + 1];
+	int leader, you, searching;
+};
+struct p2p_party_status
+{
+	int count;
+	struct p2p_party_member members[P2P_PARTY_MAXIMUM];
+	struct p2p_mm_choice choice;
+	int search_state;
+	/* notice_name is the member it names */
+	int notice;
+	char notice_name[P2P_PARTY_NAME_SIZE + 1];
+};
+
 #endif

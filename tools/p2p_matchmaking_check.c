@@ -2476,6 +2476,228 @@ static void check_faults(void)
 	check_pool_never_hosts();
 }
 
+static struct mm_party parties[P2P_PARTY_MAXIMUM + 2];
+static unsigned long party_now;
+
+static void party_seed(int machine, unsigned char *seed)
+{
+	seed_of(machine + 400, seed);
+}
+
+static void party_send(int machines, const char *topic, const unsigned char *bytes, int size)
+{
+	int index;
+
+	for (index = 0; index < machines; index++)
+	{
+		struct mm_party_record record;
+
+		if (!strcmp(parties[index].topic, topic) && mm_party_read(&parties[index], bytes, size, &record) &&
+			mm_party_verify(&record))
+		{
+			mm_party_heard(&parties[index], &record, party_now);
+		}
+	}
+}
+
+static void party_run(int machines, int half_seconds)
+{
+	while (half_seconds--)
+	{
+		int index;
+
+		party_now += 500;
+		for (index = 0; index < machines; index++)
+		{
+			unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+			char topic[P2P_PARTY_TOPIC_SIZE];
+			int size;
+
+			strcpy(topic, parties[index].topic);
+			size = mm_party_step(&parties[index], party_now, bytes);
+			if (size)
+				party_send(machines, topic, bytes, size);
+		}
+	}
+}
+
+static void party_form(int machines)
+{
+	static const char *const names[] = { "CHIEF", "ROOK", "KAT", "JUN", "EMILE", "JORGE", "CARTER", "NOBLE", "SIX" };
+	unsigned char seed[P2P_SEED_SIZE], secret[P2P_PARTY_SECRET_SIZE];
+	int index;
+
+	memset(parties, 0, sizeof(parties));
+	memset(secret, 0x31, sizeof(secret));
+	party_now = 1000000;
+	for (index = 0; index < machines; index++)
+		strcpy(parties[index].name, names[index]);
+	party_seed(0, seed);
+	mm_party_make(&parties[0], seed, secret, party_now);
+	for (index = 1; index < machines; index++)
+	{
+		party_seed(index, seed);
+		mm_party_join(&parties[index], seed, parties[0].link, party_now);
+	}
+	party_run(machines, 12);
+}
+
+static int party_lists(const struct mm_party *party, const char *name)
+{
+	struct p2p_party_status status;
+	int index;
+
+	mm_party_status(party, &status);
+	for (index = 0; index < status.count; index++)
+		if (!strcmp(status.members[index].name, name))
+			return 1;
+	return 0;
+}
+
+static void check_party_link(void)
+{
+	unsigned char seed[P2P_SEED_SIZE];
+	char text[2 * P2P_PARTY_LINK_SIZE];
+	struct mm_party party;
+
+	case_name = "party link";
+	party_form(2);
+	CHECK(strlen(parties[0].link) == P2P_PARTY_LINK_SIZE - 1 && !strncmp(parties[0].link, "halo://party/", 13),
+		"%s", parties[0].link);
+	CHECK(strstr(parties[0].link, parties[0].topic + strlen(parties[0].topic) - 32) == NULL, "the link is not the topic");
+	party_seed(2, seed);
+	memset(&party, 0, sizeof(party));
+	sprintf(text, "come along: HALO://PARTY/%s tonight", parties[0].link + 13);
+	CHECK(mm_party_link_held(text) && mm_party_join(&party, seed, text, party_now), "a link among words, in any case");
+	CHECK(!strcmp(party.topic, parties[0].topic), "the link's topic");
+	memset(&party, 0, sizeof(party));
+	strcpy(text, parties[0].link);
+	text[strlen(text) - 1] = 0;
+	CHECK(!mm_party_link_held(text) && !mm_party_join(&party, seed, text, party_now), "a link cut short");
+	strcpy(text, parties[0].link);
+	strcat(text, "0");
+	CHECK(!mm_party_link_held(text) && !mm_party_join(&party, seed, text, party_now), "a link too long");
+	CHECK(!mm_party_link_held("halo://join/00") && !mm_party_link_held(""), "a game's invite is no party's");
+	memset(text, 0, sizeof(text));
+	memcpy(text, parties[0].link, 13 + 32);
+	memset(text + 45, '0', 64);
+	CHECK(!mm_party_join(&party, seed, text, party_now), "a leader's key with no X25519 form");
+	party_seed(0, seed);
+	CHECK(!mm_party_join(&party, seed, parties[0].link, party_now), "a leader's own link");
+	party_seed(2, seed);
+	CHECK(!mm_party_join(&parties[0], seed, parties[1].link, party_now), "a leader with members stays");
+	CHECK(!mm_party_join(&parties[1], seed, parties[0].link, party_now), "a member stays");
+	memset(&party, 0, sizeof(party));
+	party_seed(5, seed);
+	mm_party_make(&party, seed, (const unsigned char *)"0123456789abcdef", party_now);
+	CHECK(mm_party_join(&party, seed, parties[0].link, party_now) && party.role == MM_PARTY_MEMBER,
+		"a leader alone joins another's party");
+}
+
+static void check_party_status(void)
+{
+	struct p2p_party_status status;
+
+	case_name = "party status";
+	party_form(3);
+	mm_party_status(&parties[1], &status);
+	CHECK(status.count == 3, "three in the party: %d", status.count);
+	CHECK(!strcmp(status.members[0].name, "CHIEF") && status.members[0].leader && !status.members[0].you, "the leader first");
+	CHECK(party_lists(&parties[1], "KAT") && party_lists(&parties[1], "ROOK"), "a member sees the others' names");
+	CHECK(status.members[1].you != status.members[2].you && !status.members[1].leader, "this machine is marked");
+	mm_party_status(&parties[0], &status);
+	CHECK(status.count == 3 && status.members[0].you && status.members[0].leader, "the leader's own list");
+}
+
+static void check_party_leaked_link(void)
+{
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+	struct mm_party stranger;
+	int size;
+
+	case_name = "e42_leaked_link";
+	party_form(2);
+	memset(&stranger, 0, sizeof(stranger));
+	party_seed(7, seed);
+	CHECK(mm_party_join(&stranger, seed, parties[0].link, party_now), "a stranger holds the link");
+	stranger.role = MM_PARTY_LEADER;
+	stranger.sequence = 1000;
+	stranger.sent = party_now - 3000;
+	strcpy(stranger.name, "FAKE");
+	size = mm_party_step(&stranger, party_now, bytes);
+	party_send(2, parties[1].topic, bytes, size);
+	CHECK(strcmp(parties[1].members[0].name, "FAKE"), "E42: members ignore a record signed by another key");
+	memcpy(stranger.key, parties[0].key, P2P_KEY_SIZE);
+	stranger.sent = party_now - 3000;
+	size = mm_party_step(&stranger, party_now, bytes);
+	party_send(2, parties[1].topic, bytes, size);
+	CHECK(strcmp(parties[1].members[0].name, "FAKE") != 0, "E42: the leader's key without its signature is ignored");
+}
+
+static void check_party_sealed(void)
+{
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE], secret[P2P_PARTY_SECRET_SIZE], digest[P2P_SHA256_SIZE];
+	unsigned char plain[MM_MAXIMUM_RECORD_SIZE];
+	int size, index;
+
+	case_name = "party sealed";
+	party_form(2);
+	parties[0].sent = party_now - 3000;
+	size = mm_party_step(&parties[0], party_now, bytes);
+	CHECK(size > 0, "a record");
+	memset(secret, 0x31, sizeof(secret));
+	p2p_sha256(secret, sizeof(secret), digest);
+	CHECK(p2p_open(digest, bytes, size, plain) < 0, "the hash a watcher reads in the topic does not open it");
+	for (index = 0; index + 5 <= size; index++)
+		CHECK(memcmp(bytes + index, "CHIEF", 5), "no name in the clear");
+}
+
+static void check_party_copies(void)
+{
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+	int size;
+
+	case_name = "party copies";
+	party_form(2);
+	parties[0].sent = party_now - 3000;
+	size = mm_party_step(&parties[0], party_now, bytes);
+	verifies = 0;
+	party_send(2, parties[0].topic, bytes, size);
+	CHECK(verifies == 1, "one signature for the first copy: %d", verifies);
+	party_send(2, parties[0].topic, bytes, size);
+	CHECK(verifies == 1, "none for a copy from another broker: %d", verifies);
+	parties[1].sent = party_now - 3000;
+	size = mm_party_step(&parties[1], party_now, bytes);
+	verifies = 0;
+	party_send(2, parties[1].topic, bytes, size);
+	party_send(2, parties[1].topic, bytes, size);
+	CHECK(verifies == 1, "a member's record too: %d", verifies);
+}
+
+static void check_party_full(void)
+{
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE], seed[P2P_SEED_SIZE];
+	int size;
+
+	case_name = "party full";
+	party_form(P2P_PARTY_MAXIMUM);
+	memset(parties[3].name, 'J', P2P_PARTY_NAME_SIZE);
+	party_run(P2P_PARTY_MAXIMUM, 6);
+	CHECK(parties[0].count == P2P_PARTY_MAXIMUM && parties[7].count == P2P_PARTY_MAXIMUM, "a full party: %d %d",
+		parties[0].count, parties[7].count);
+	CHECK(party_lists(&parties[7], parties[3].name), "the longest name");
+	parties[0].sent = party_now - 3000;
+	size = mm_party_step(&parties[0], party_now, bytes);
+	CHECK(size + 7 * (2 * P2P_KEY_HASH_SIZE + P2P_SEAL_OVERHEAD) <= MM_MAXIMUM_RECORD_SIZE,
+		"a leader's record leaves room for each member's sealed invite: %d", size);
+	party_send(P2P_PARTY_MAXIMUM, parties[0].topic, bytes, size);
+	party_seed(8, seed);
+	mm_party_join(&parties[8], seed, parties[0].link, party_now);
+	strcpy(parties[8].name, "SIX");
+	party_run(P2P_PARTY_MAXIMUM + 1, 6);
+	CHECK(parties[0].count == P2P_PARTY_MAXIMUM && !party_lists(&parties[0], "SIX"), "a ninth is not taken");
+}
+
 /* under loss two machines can elect themselves at once, so the lossy runs check only the end state */
 int main(int argc, char **argv)
 {
@@ -2504,6 +2726,12 @@ int main(int argc, char **argv)
 	check_party_pool();
 	check_party_sizes();
 	check_party_records();
+	check_party_link();
+	check_party_status();
+	check_party_leaked_link();
+	check_party_sealed();
+	check_party_copies();
+	check_party_full();
 	check_worlds();
 	check_faults();
 	if (argc > 1)
