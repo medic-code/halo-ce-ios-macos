@@ -26,6 +26,7 @@ enum
 	PARTY_FLAG_LEAVING = 1,
 	PARTY_FLAG_CAN_HOST = 2,
 	PARTY_FLAG_IN_GAME = 4,
+	PARTY_FLAG_LATE = 8,
 	PARTY_SEARCHING = 1,
 	PARTY_WIDENED = 2,
 	PARTY_GAME = 4,
@@ -210,7 +211,7 @@ static int write_member(struct mm_party *party, int flags, unsigned char *bytes)
 
 	size += put_name(party->name, plain + size);
 	plain[size++] = (unsigned char)(flags | (party->can_host ? PARTY_FLAG_CAN_HOST : 0) |
-		(party->in_game ? PARTY_FLAG_IN_GAME : 0));
+		(party->in_game ? PARTY_FLAG_IN_GAME : 0) | (party->late ? PARTY_FLAG_LATE : 0));
 	plain[size++] = (unsigned char)party->left_number;
 	mm_party_sign(party->seed, party->members[0].key, plain + size);
 	size += P2P_SIGNATURE_SIZE;
@@ -485,7 +486,8 @@ static void heard_member(struct mm_party *party, const struct mm_party_record *r
 		record->body[P2P_PARTY_NAME_SIZE + 1] == party->search.number)
 	{
 		member->searching = 0;
-		set_notice(party, P2P_PARTY_NOTICE_LEFT_SEARCH, member->name);
+		if (!(flags & PARTY_FLAG_LATE))
+			set_notice(party, P2P_PARTY_NOTICE_LEFT_SEARCH, member->name);
 	}
 	member->can_host = !!(flags & PARTY_FLAG_CAN_HOST);
 	member->in_game = !!(flags & PARTY_FLAG_IN_GAME);
@@ -515,6 +517,7 @@ static void heard_search(struct mm_party *party, const unsigned char *block, int
 	{
 		party->search_heard = 1;
 		party->left_number = search->number;
+		party->late = search->searching;
 		party->left_seen = search->left;
 		party->followed_game = search->game;
 	}
@@ -649,8 +652,8 @@ static void search_members(const struct mm_party *party, const struct mm_search 
 			continue;
 		if (member->can_host && !wanted->member_hosts && search->can_host <= 0)
 		{
-			memcpy(wanted->keys[at], wanted->keys[0], P2P_KEY_SIZE);
-			memcpy(wanted->signatures[at], wanted->signatures[0], P2P_SIGNATURE_SIZE);
+			memmove(wanted->keys[at], wanted->keys[0], P2P_KEY_SIZE);
+			memmove(wanted->signatures[at], wanted->signatures[0], P2P_SIGNATURE_SIZE);
 			at = 0;
 			wanted->member_hosts = 1;
 		}
@@ -666,6 +669,7 @@ static void leader_game(struct mm_party *party, const struct mm_search *search, 
 	unsigned long now)
 {
 	const int hosting = search->state == P2P_MM_HOSTING;
+	int index;
 
 	if (!search->in_game && !hosting)
 	{
@@ -686,6 +690,8 @@ static void leader_game(struct mm_party *party, const struct mm_search *search, 
 		snprintf(said->invite, sizeof(said->invite), "%s", search->decision.invite);
 	party->follow_since = now;
 	party->follow_done = 0;
+	for (index = 1; index < party->count; index++)
+		party->members[index].in_game = 0;
 }
 
 static void leader_search(struct mm_party *party, struct mm_search *search, unsigned long now)
@@ -696,13 +702,13 @@ static void leader_search(struct mm_party *party, struct mm_search *search, unsi
 	const int on = search->state != P2P_MM_OFF || search->in_game;
 	int index;
 
-	search_members(party, search, on, &wanted, &late);
-	mm_set_party(search, &wanted, now);
 	said.searching = on;
 	said.widened = search->widened;
 	said.playlists = (int)search->choice.playlists;
 	said.size = search->choice.size;
 	leader_game(party, search, &said, now);
+	search_members(party, search, on, &wanted, &late);
+	mm_set_party(search, &wanted, now);
 	said.host = 0;
 	for (index = 1; wanted.member_hosts && index < party->count; index++)
 		if (!memcmp(party->members[index].key, wanted.keys[0], P2P_KEY_SIZE))
@@ -724,7 +730,7 @@ static void leader_search(struct mm_party *party, struct mm_search *search, unsi
 			party->members[index].in_game = 0;
 		mm_game_left(search, now);
 	}
-	for (index = 1; index < party->count; index++)
+	for (index = 1; !party->search.has_game && index < party->count; index++)
 		if (!party->members[index].in_game)
 			mm_forget_game(search, party->members[index].key);
 }
@@ -758,11 +764,14 @@ static void stop_following(struct mm_search *search)
 static void member_search(struct mm_party *party, struct mm_search *search, unsigned long now, unsigned long unix_now)
 {
 	const struct mm_party_search *said = &party->search;
+	const int in_game = search->in_game || search->state == P2P_MM_HOSTING;
 	const int hosts = said->host > 0 && said->host < party->count &&
 		!memcmp(party->members[said->host].hash, party->hash, P2P_KEY_HASH_SIZE);
 
+	if (in_game != party->in_game)
+		party->sent = now - PARTY_INTERVAL;
+	party->in_game = in_game;
 	party->can_host = search->can_host > 0;
-	party->in_game = search->in_game || search->state == P2P_MM_HOSTING;
 	if (!party->search_heard)
 		return;
 	if (search->state == P2P_MM_OFF && !search->in_game)
@@ -862,6 +871,7 @@ void mm_party_search_left(struct mm_party *party, unsigned long now)
 	if (party->role != MM_PARTY_MEMBER)
 		return;
 	party->left_number = party->search.number;
+	party->late = 0;
 	party->sent = now - PARTY_INTERVAL;
 }
 

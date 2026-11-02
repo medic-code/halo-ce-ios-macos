@@ -1720,8 +1720,9 @@ void p2p_mm_game_lost(void)
 		platform_log("matchmaking: the game's host is gone: back in the queue, %lu s into the search",
 			search_seconds());
 		mm.notice = P2P_MM_NOTICE_HOST_LEFT;
-		hold_browser();
-		restarted = 1;
+		restarted = !mm.search.party.following;
+		if (restarted)
+			hold_browser();
 	}
 	pthread_mutex_unlock(&p2p_lock);
 	if (restarted)
