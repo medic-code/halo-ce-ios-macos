@@ -734,6 +734,15 @@ static int invited_to_own_game(const struct mm_search *search, const char *invit
 	return strstr(invite, hash) != NULL;
 }
 
+/* a member hosting keeps its game, which goes on as its own: the players in it stay */
+static void stop_following(struct mm_search *search)
+{
+	if (search->state == P2P_MM_HOSTING || (search->state == P2P_MM_FOUND && search->decided == P2P_MM_DECIDE_HOST))
+		memset(&search->party, 0, sizeof(search->party));
+	else
+		mm_cancel(search, NULL, 0);
+}
+
 static void member_search(struct mm_party *party, struct mm_search *search, unsigned long now, unsigned long unix_now)
 {
 	const struct mm_party_search *said = &party->search;
@@ -758,10 +767,14 @@ static void member_search(struct mm_party *party, struct mm_search *search, unsi
 		return;
 	}
 	if (!search->party.following)
+	{
+		if (said->searching && said->number != party->left_number)
+			mm_party_search_left(party, now);
 		return;
+	}
 	if (!said->searching)
 	{
-		mm_cancel(search, NULL, 0);
+		stop_following(search);
 		return;
 	}
 	if (search->party.count != party->count || search->party.member_hosts != hosts)
@@ -796,7 +809,7 @@ void mm_party_search(struct mm_party *party, struct mm_search *search, unsigned 
 	else if (party->role == MM_PARTY_MEMBER)
 		member_search(party, search, now, unix_now);
 	else if (search->party.following)
-		mm_cancel(search, NULL, 0);
+		stop_following(search);
 }
 
 void mm_party_search_begin(struct mm_party *party, struct mm_search *search, unsigned long now)

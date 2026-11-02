@@ -3021,6 +3021,77 @@ static void check_e29_cannot_follow(void)
 	listing_count = 0;
 }
 
+/* way: 0 the leader cancels, 1 quits, 2 removes the member */
+static void e75_leader_goes(int way)
+{
+	static const unsigned char secret[P2P_PARTY_SECRET_SIZE] = { 6 };
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+	char topic[P2P_PARTY_TOPIC_SIZE];
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct mm_search *host = &machines[1].search;
+
+	party_world(2, 3);
+	party_start(2, P2P_MM_2V2, 2);
+	run(140);
+	CHECK(machines[1].hosting && machines[0].in == 1, "way %d: the member hosts with the leader in", way);
+	if (way == 0)
+	{
+		publish(0, out, mm_cancel(&machines[0].search, out, MM_MAXIMUM_OUT));
+		machines[0].search.in_game = 0;
+	}
+	else if (way == 1)
+	{
+		machines[0].quit = 1;
+		machines[1].players--;
+	}
+	else
+	{
+		strcpy(topic, parties[0].topic);
+		party_send(2, topic, bytes, mm_party_remove(&parties[0], 1, secret, now_ms, bytes));
+	}
+	run(14);
+	CHECK(host->state == P2P_MM_HOSTING && !host->party.following, "way %d: the member keeps hosting: state %d", way,
+		host->state);
+	start_searching(2, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 0);
+	run(10);
+	CHECK(machines[2].in == 1, "way %d: its game refills: in %d", way, machines[2].in);
+	CHECK(host->state == P2P_MM_HOSTING, "way %d: and it hosts on: state %d", way, host->state);
+}
+
+static void check_e75_member_keeps_hosting(void)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct mm_search *member = &machines[1].search;
+	int way;
+
+	case_name = "e75_member_keeps_hosting";
+	for (way = 0; way < 3; way++)
+		e75_leader_goes(way);
+
+	party_world(2, 3);
+	party_start(2, P2P_MM_2V2, 2);
+	run(140);
+	publish(0, out, mm_cancel(&machines[0].search, out, MM_MAXIMUM_OUT));
+	machines[0].search.in_game = 0;
+	run(4);
+	parties[0].notice = P2P_PARTY_NOTICE_NONE;
+	party_start(2, P2P_MM_2V2, 1);
+	run(4);
+	CHECK(party_size() == 1 && parties[0].notice == P2P_PARTY_NOTICE_LEFT_SEARCH,
+		"the host is not counted in the leader's next search: %d, notice %d", party_size(), parties[0].notice);
+	CHECK(member->state == P2P_MM_HOSTING, "and hosts on: state %d", member->state);
+
+	party_world(2, 2);
+	party_start(2, P2P_MM_2V2, 2);
+	run(8);
+	member->state = P2P_MM_FOUND;
+	member->decided = P2P_MM_DECIDE_HOST;
+	publish(0, out, mm_cancel(&machines[0].search, out, MM_MAXIMUM_OUT));
+	run(1);
+	CHECK(member->state == P2P_MM_FOUND && !member->party.following, "a member starting its game keeps it: state %d",
+		member->state);
+}
+
 static void check_party_journeys(void)
 {
 	check_e24_leader_cancels();
@@ -3032,6 +3103,7 @@ static void check_party_journeys(void)
 	check_e25_big_follow_count();
 	check_small_follow_count();
 	check_big_member_size();
+	check_e75_member_keeps_hosting();
 	check_e25_follow_big();
 	check_e29_cannot_follow();
 }
