@@ -57,9 +57,9 @@ const unsigned char *p2p_signing_key(void)
 void p2p_signal_mm_topics(const char topics[][P2P_MM_TOPIC_SIZE], int count) { (void)topics; (void)count; }
 
 static char signal_topic[P2P_PARTY_TOPIC_SIZE], publish_topic[P2P_PARTY_TOPIC_SIZE];
-static char clipboard[P2P_PARTY_LINK_SIZE];
+static char clipboard[P2P_PARTY_LINK_SIZE], offered_link[P2P_PARTY_LINK_SIZE];
 static unsigned char party_published[MM_MAXIMUM_RECORD_SIZE];
-static int party_published_size;
+static int party_published_size, offered_count;
 
 void p2p_signal_party_topic(const char *topic) { strcpy(signal_topic, topic); }
 void p2p_signal_party_publish(const unsigned char *payload, int size)
@@ -69,6 +69,12 @@ void p2p_signal_party_publish(const unsigned char *payload, int size)
 	party_published_size = size;
 }
 void platform_clipboard_set(const char *text) { strcpy(clipboard, text); }
+void p2p_discord_set_party(const char *link, int count, int maximum)
+{
+	(void)maximum;
+	strcpy(offered_link, link);
+	offered_count = count;
+}
 
 /* the lobby's own pick is matchmaking_pick's to check: here the first listing is taken */
 static struct p2p_listing listings[4];
@@ -1745,6 +1751,7 @@ static void check_party_machine(void)
 	CHECK(signal_topic[0], "the brokers carry the party's topic");
 	party_update_locked();
 	CHECK(party_published_size > 0, "the leader publishes");
+	CHECK(!strcmp(offered_link, link) && offered_count == 1, "Discord offers the link: %d", offered_count);
 
 	memset(parties, 0, sizeof(parties));
 	party_seed(1, seed);
@@ -1765,11 +1772,15 @@ static void check_party_machine(void)
 	p2p_party_get_status(&status);
 	CHECK(status.count == 2 && !strcmp(status.members[1].name, "ROOK"), "a heard member joins: %d", status.count);
 	CHECK(!strcmp(status.members[0].name, "CHIEF") && status.members[0].you, "the name set is shown");
+	CHECK(offered_count == 2, "Discord's count follows: %d", offered_count);
 
 	strcpy(old_topic, signal_topic);
 	p2p_party_remove(1);
 	CHECK(!strcmp(publish_topic, old_topic), "the new link goes out on the old topic");
 	CHECK(strcmp(signal_topic, old_topic) && signal_topic[0], "and then the topic moves");
+	CHECK(strcmp(offered_link, link), "Discord offers the new link");
+	p2p_party_invite(link, sizeof(link));
+	CHECK(!strcmp(clipboard, link) && !strcmp(link, offered_link), "INVITE gives the new link");
 
 	memset(&parties[0], 0, sizeof(parties[0]));
 	party_seed(0, seed);
@@ -1782,6 +1793,7 @@ static void check_party_machine(void)
 	p2p_party_leave();
 	CHECK(!strcmp(publish_topic, old_topic) && party_published_size > 0, "the goodbye goes out on the party's topic");
 	CHECK(!signal_topic[0] && !p2p_party_active(), "the machine leaves the topic");
+	CHECK(!offered_link[0], "Discord stops offering a link");
 }
 
 int main(void)
