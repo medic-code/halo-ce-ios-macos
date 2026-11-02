@@ -176,6 +176,19 @@ static void check_topics(void)
 	CHECK(mm_interval(25) * MM_RECORDS_PER_SECOND >= 25 * 10, "E44: at most 4 a second");
 }
 
+static void check_party_topic(void)
+{
+	unsigned char secret[P2P_PARTY_SECRET_SIZE];
+	char topic[P2P_PARTY_TOPIC_SIZE];
+	int index;
+
+	case_name = "party topic";
+	for (index = 0; index < P2P_PARTY_SECRET_SIZE; index++)
+		secret[index] = (unsigned char)index;
+	mm_party_topic(secret, topic, sizeof(topic));
+	CHECK(!strcmp(topic, "hceu/3/party/" HALO_PORT_NETWORK_VERSION_TEXT "/be45cb2605bf36bebde684841a28f0fd"), "%s", topic);
+}
+
 static struct mm_record party_of(int leader, int members, unsigned long sequence);
 
 static void verify_budget_of(int members, int queue_size, double limit_ms)
@@ -1339,6 +1352,7 @@ int main(void)
 	check_hosting();
 	check_playlists();
 	check_topics();
+	check_party_topic();
 	check_verify_budget();
 	check_fake_fuller_game();
 	check_four();
