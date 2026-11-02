@@ -522,6 +522,7 @@ static void heard_member(struct mm_party *party, const struct mm_party_record *r
 		party->sent = now - PARTY_INTERVAL;
 	}
 	get_name(record->body, member->name);
+	memcpy(member->key, record->key, P2P_KEY_SIZE);
 	member->sequence = record->sequence;
 	member->heard = now;
 	if (party->role == MM_PARTY_LEADER && member->searching &&
@@ -611,6 +612,8 @@ static void heard_leader(struct mm_party *party, const struct mm_party_record *r
 		for (was = 1; was < old_count; was++)
 			if (!memcmp(old[was].hash, hash, P2P_KEY_HASH_SIZE))
 				*member = old[was];
+		if (!memcmp(hash, party->hash, P2P_KEY_HASH_SIZE))
+			memcpy(member->key, party->key, P2P_KEY_SIZE);
 		party->count++;
 	}
 	for (index = 1; index < old_count; index++)
@@ -930,12 +933,14 @@ static void member_search(struct mm_party *party, struct mm_search *search, unsi
 		stop_following(search);
 		return;
 	}
-	if (search->party.count != party->count || search->party.member_hosts != hosts)
 	{
 		struct mm_search_party wanted = search->party;
+		int index;
 
 		wanted.count = party->count;
 		wanted.member_hosts = hosts;
+		for (index = 1; index < party->count; index++)
+			memcpy(wanted.keys[index - 1], party->members[index].key, P2P_KEY_SIZE);
 		mm_set_party(search, &wanted, now);
 	}
 	if (said->left != party->left_seen)
