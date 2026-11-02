@@ -537,8 +537,10 @@ static struct
 		int size;
 	} queue[MAXIMUM_QUEUED];
 	int queue_count;
-	/* what the brokers were last told */
+	/* what the brokers and Discord were last told */
 	char topic[P2P_PARTY_TOPIC_SIZE];
+	char offered[P2P_PARTY_LINK_SIZE];
+	int offered_count;
 } local;
 
 static void sync_topic(void)
@@ -547,6 +549,18 @@ static void sync_topic(void)
 	{
 		strcpy(local.topic, local.party.topic);
 		p2p_signal_party_topic(local.topic);
+	}
+}
+
+static void sync_offer(void)
+{
+	const char *link = local.party.role == MM_PARTY_LEADER ? local.party.link : "";
+
+	if (strcmp(local.offered, link) || local.offered_count != local.party.count)
+	{
+		snprintf(local.offered, sizeof(local.offered), "%s", link);
+		local.offered_count = local.party.count;
+		p2p_discord_set_party(link, local.party.count, P2P_PARTY_MAXIMUM);
 	}
 }
 
@@ -590,6 +604,7 @@ void p2p_party_update(unsigned long now)
 	if (size)
 		p2p_signal_party_publish(bytes, size);
 	sync_topic();
+	sync_offer();
 }
 
 int p2p_party_link_held(const char *text)
@@ -648,6 +663,7 @@ void p2p_party_remove(int member)
 	if (size)
 		p2p_signal_party_publish(bytes, size);
 	sync_topic();
+	sync_offer();
 	pthread_mutex_unlock(&p2p_lock);
 }
 
@@ -661,6 +677,7 @@ void p2p_party_leave(void)
 	if (size)
 		p2p_signal_party_publish(bytes, size);
 	sync_topic();
+	sync_offer();
 	pthread_mutex_unlock(&p2p_lock);
 }
 

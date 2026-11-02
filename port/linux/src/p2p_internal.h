@@ -417,5 +417,7 @@ void p2p_discord_user(char *id, int id_size, char *name, int name_size);
 /* what to show: hosting with an invite link's secret and player counts, or
 not (secret NULL) */
 void p2p_discord_set_hosting(const char *secret, int player_count, int maximum_player_count);
+/* what to show while not hosting: a party with its link, or none ("") */
+void p2p_discord_set_party(const char *link, int count, int maximum);
 
 #endif
