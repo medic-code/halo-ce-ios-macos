@@ -2320,10 +2320,12 @@ def _matchmaking_search(base: str) -> list:
                                                    ("flags", "pass_unhandled_to_focused_child left_right_tabs_items")],
                      [f'<child widget="{base}/search_button_widen" x="205" y="1"/>',
                       f'<child widget="{base}/search_button_host" x="341" y="1"/>',
-                      f'<child widget="{base}/search_button_cancel" x="477" y="1"/>'])
+                      f'<child widget="{base}/search_button_cancel" x="477" y="1"/>',
+                      f'<child widget="{base}/search_button_leave" x="477" y="1"/>'])
     for key, text, run in (("widen", "WIDEN NOW", "port matchmaking widen"),
                            ("host", "HOST NOW", "port matchmaking host"),
-                           ("cancel", "CANCEL", "port matchmaking search back")):
+                           ("cancel", "CANCEL", "port matchmaking search back"),
+                           ("leave", "LEAVE SEARCH", "port matchmaking search back")):
         lines += _text_button(f"{base}/search_button_{key}", text,
                               [f'<on event="a" run="{run}"/>', f'<on event="start" run="{run}"/>'])
     return lines

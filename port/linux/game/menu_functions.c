@@ -5580,6 +5580,21 @@ static char const *const matchmaking_bar_names[NUMBER_OF_MATCHMAKING_BAR_BUTTONS
 	"button_defaults", "button_invite", "button_search", "button_leave", "common_button_cancel", "button_yes", "button_no"
 };
 
+/* port_settings.py's search_button_bar, in matchmaking_search_bar_names' order */
+enum
+{
+	_matchmaking_search_bar_widen,
+	_matchmaking_search_bar_host,
+	_matchmaking_search_bar_cancel,
+	_matchmaking_search_bar_leave,
+	NUMBER_OF_MATCHMAKING_SEARCH_BAR_BUTTONS
+};
+#define MATCHMAKING_SEARCH_BAR(button) (1u << _matchmaking_search_bar_##button)
+
+static char const *const matchmaking_search_bar_names[NUMBER_OF_MATCHMAKING_SEARCH_BAR_BUTTONS] = {
+	"search_button_widen", "search_button_host", "search_button_cancel", "search_button_leave"
+};
+
 /* focused: a member's place, NONE off the members */
 struct matchmaking_party_view
 {
@@ -5656,6 +5671,16 @@ static unsigned matchmaking_party_bar(const struct p2p_party_status *party, shor
 	if (matchmaking_party_member(party))
 		return MATCHMAKING_BAR(leave) | MATCHMAKING_BAR(cancel);
 	return MATCHMAKING_BAR(defaults) | MATCHMAKING_BAR(invite) | MATCHMAKING_BAR(search) | MATCHMAKING_BAR(cancel);
+}
+
+static unsigned matchmaking_search_bar(const struct p2p_mm_status *status, const struct p2p_party_status *party)
+{
+	if (matchmaking_party_member(party))
+		return MATCHMAKING_SEARCH_BAR(leave);
+	if (p2p_mm_size_big(status->size))
+		return MATCHMAKING_SEARCH_BAR(cancel);
+	return MATCHMAKING_SEARCH_BAR(cancel) | (status->state == P2P_MM_QUEUED ? MATCHMAKING_SEARCH_BAR(host) : 0) |
+		(status->state == P2P_MM_QUEUED && !status->widened ? MATCHMAKING_SEARCH_BAR(widen) : 0);
 }
 
 void matchmaking_party_name_utf8(wchar_t const *wide, char *text, short size)
@@ -6133,8 +6158,8 @@ static boolean matchmaking_screen_back(struct widget_instance *widget, boolean *
 	return TRUE;
 }
 
-static void matchmaking_lines(const struct p2p_mm_status *status, wchar_t *title, wchar_t *count, wchar_t *help,
-	wchar_t *notice, short size)
+static void matchmaking_lines(const struct p2p_mm_status *status, const struct p2p_party_status *party, wchar_t *title,
+	wchar_t *count, wchar_t *help, wchar_t *notice, short size)
 {
 	wchar_t const *playlist = matchmaking_playlist_words[PIN(status->playlist, 0, NUMBER_OF_P2P_MM_PLAYLISTS - 1)];
 	wchar_t const *game_size = matchmaking_size_words[PIN(status->size, 0, NUMBER_OF_P2P_MM_SIZES - 1)];
@@ -6220,6 +6245,13 @@ static void matchmaking_lines(const struct p2p_mm_status *status, wchar_t *title
 		usnprintf(notice, size - 1, L"THE PARTY IS TOO BIG FOR THAT GAME. PICK A BIGGER GAME.");
 	else if (status->notice == P2P_MM_NOTICE_APART)
 		usnprintf(notice, size - 1, L"COULD NOT GET THE PARTY INTO ONE GAME. SEARCH STOPPED.");
+	if (matchmaking_party_member(party) && (status->state == P2P_MM_LOOKING || status->state == P2P_MM_QUEUED))
+	{
+		wchar_t leader[P2P_PARTY_NAME_SIZE + 1];
+
+		mods_wide_text(party->members[0].name, leader, P2P_PARTY_NAME_SIZE + 1);
+		usnprintf(help, size - 1, L"%ls searches for the party.\r\nYou follow %ls into the game.", leader, leader);
+	}
 	title[size - 1] = count[size - 1] = help[size - 1] = notice[size - 1] = 0;
 }
 
@@ -6313,13 +6345,20 @@ static void matchmaking_search_update(struct widget_instance *list)
 	struct widget_instance *bar = named(list, "search_button_bar", 0);
 	struct widget_instance *widget;
 	struct p2p_mm_status status;
+	struct p2p_party_status party;
 	wchar_t title[MATCHMAKING_TEXT_LENGTH], count[MATCHMAKING_TEXT_LENGTH], help[MATCHMAKING_TEXT_LENGTH];
 	wchar_t notice[MATCHMAKING_TEXT_LENGTH], text[MATCHMAKING_TEXT_LENGTH];
+	unsigned buttons;
 	short index;
-	boolean big;
 
 	p2p_mm_get_status(&status);
-	matchmaking_lines(&status, title, count, help, notice, MATCHMAKING_TEXT_LENGTH);
+	p2p_party_get_status(&party);
+	if (matchmaking_party_member(&party))
+	{
+		matchmaking_screen.playlists = party.choice.playlists;
+		matchmaking_screen.size = (short)party.choice.size;
+	}
+	matchmaking_lines(&status, &party, title, count, help, notice, MATCHMAKING_TEXT_LENGTH);
 	text_set_length(named(screen, "search_title", 0), title, MATCHMAKING_TEXT_LENGTH);
 	text_set_length(named(screen, "search_count", 0), count, MATCHMAKING_TEXT_LENGTH);
 	text_set_length(named(screen, "search_help", 0), help, MATCHMAKING_TEXT_LENGTH);
@@ -6339,9 +6378,9 @@ static void matchmaking_search_update(struct widget_instance *list)
 	text_append(text, NUMBEROF(text), TICKER_SEPARATOR);
 	text_append(text, NUMBEROF(text), status.widened ? L"ANY SIZE" : matchmaking_size_words[matchmaking_screen.size]);
 	text_set_length(named(screen, "search_card_text", 0), text, MATCHMAKING_TEXT_LENGTH);
-	big = p2p_mm_size_big(matchmaking_screen.size);
-	visible_set(named(bar, "search_button_widen", 0), !big && status.state == P2P_MM_QUEUED && !status.widened);
-	visible_set(named(bar, "search_button_host", 0), !big && status.state == P2P_MM_QUEUED);
+	buttons = matchmaking_search_bar(&status, &party);
+	for (index = 0; index < NUMBER_OF_MATCHMAKING_SEARCH_BAR_BUTTONS; index++)
+		visible_set(named(bar, matchmaking_search_bar_names[index], 0), (buttons >> index) & 1);
 	if ((widget = named(bar, "search_button_host", 0)) != NULL)
 		widget->alpha_modifier = status.can_host <= 0 ? TAB_UNFOCUSED_ALPHA : 1.0f;
 	focus_off_hidden(bar);
@@ -7122,8 +7161,10 @@ static void lobby_update(struct widget_instance *list)
 		{
 			wchar_t title[MATCHMAKING_TEXT_LENGTH], count[MATCHMAKING_TEXT_LENGTH], help[MATCHMAKING_TEXT_LENGTH];
 			wchar_t notice[MATCHMAKING_TEXT_LENGTH];
+			struct p2p_party_status party;
 
-			matchmaking_lines(&search, title, count, help, notice, MATCHMAKING_TEXT_LENGTH);
+			p2p_party_get_status(&party);
+			matchmaking_lines(&search, &party, title, count, help, notice, MATCHMAKING_TEXT_LENGTH);
 			text_append(text, NUMBEROF(text), L"\r\n\r\n");
 			text_append(text, NUMBEROF(text), matchmaking_hosts_big_game() && !start_now ? L"Waiting for players" : help);
 		}
