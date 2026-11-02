@@ -141,6 +141,7 @@ static void matchmaking_begin_host(struct p2p_mm_decision const *decision)
 	}
 	/* before p2p_set_hosting_public: a limit set later is not the one listed */
 	network_game_server_port_set_settings(NULL, (short)p2p_mm_size_players(decision->size));
+	p2p_set_hosting_allowed(TRUE);
 	p2p_set_hosting_public(FALSE);
 	matchmaking_open_lobby();
 	matchmaking.role = _matchmaking_hosting;
