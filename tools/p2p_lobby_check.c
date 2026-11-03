@@ -80,6 +80,8 @@ void p2p_signal_lobby_publish(const unsigned char *listing, int size, int closin
 	publish_count++;
 }
 void p2p_signal_lobby_quit(void) {}
+static int hosts_big_game;
+int p2p_mm_hosts_big_game(void) { return hosts_big_game; }
 /* (not a dedicated server, and no master servers: master_list.c) */
 int halo_server_mode(void) { return 0; }
 void master_list_browse(int on) { (void)on; }
@@ -401,12 +403,48 @@ static void lobby_checks(void)
 	hear(published, published_size, 0, NULL);
 	check(games(&listing) == 1 && !listing.locked && !strcmp(listing.invite, expected_invite),
 		"a game whose password is taken off is listed open");
+	check(!listing.big_game, "a plain public game is no big game");
+	hosts_big_game = 1;
+	p2p_set_game_listing(NULL, NULL, NULL, 2, 0x81, 1, 0, 1);
+	clock_now += 6000;
+	lobby_update(token, 3, 16);
+	hear(published, published_size, 0, NULL);
+	check(games(&listing) == 1 && listing.big_game, "a matchmade big host's listing says so");
+	{
+		unsigned char entry[512];
+		int entry_size = p2p_lobby_host_listing(entry, sizeof(entry));
+
+		check(entry_size > 5 && !(entry[5] & 64), "a master server's entry does not carry the flag");
+		check(p2p_lobby_take_master_listing(entry, entry_size, "master", "EU", 0, 0, NULL) &&
+			games(&listing) == 1 && listing.big_game, "a master's entry for a player's game leaves the flag");
+		check(p2p_lobby_take_master_listing(entry, entry_size, "master", "EU", 0, 1, NULL) &&
+			games(&listing) == 1 && !listing.big_game, "a dedicated server is no big game");
+	}
+	p2p_set_game_listing(NULL, NULL, NULL, 2, 0x81, 1, 1, 1);
+	clock_now += 6000;
+	lobby_update(token, 3, 16);
+	hear(published, published_size, 0, NULL);
+	check(games(&listing) == 1 && listing.dedicated && !listing.big_game,
+		"a dedicated server's flag on the brokers is not taken");
+	hosts_big_game = 0;
+}
+
+static void masters_checks(void)
+{
+	p2p_lobby_masters_forget();
+	p2p_lobby_masters_heard();
+	check(!p2p_lobby_masters_were_heard(), "a round beginning is not an answer");
+	p2p_lobby_master_answered();
+	check(p2p_lobby_masters_were_heard(), "a master's answer is");
+	p2p_lobby_masters_forget();
+	check(!p2p_lobby_masters_were_heard(), "a new search forgets it");
 }
 
 int main(void)
 {
 	crypto_checks();
 	lobby_checks();
+	masters_checks();
 	printf("%s (%d failures)\n", failures ? "FAIL" : "PASS", failures);
 	return failures != 0;
 }

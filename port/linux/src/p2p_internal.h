@@ -363,6 +363,7 @@ int p2p_lobby_browsing(void);
 enum { MAXIMUM_GAMES = 256 };
 /* caller holds p2p_lock */
 int lobby_games_unlocked(struct p2p_listing *games, int maximum_count);
+int lobby_ping_unlocked(const unsigned char *key_hash);
 void lobby_mark_failed_unlocked(const unsigned char *identifier);
 int p2p_lobby_pick_unpinged(const struct p2p_listing *games, int count, const struct p2p_lobby_wanted *wanted);
 /* a message on a slot (its key hash in hex) through a broker; retained: the
@@ -381,6 +382,8 @@ void p2p_signal_mm_topics(const char topics[][P2P_MM_TOPIC_SIZE], int count);
 void p2p_signal_mm_publish(const char *topic, const unsigned char *payload, int size);
 void p2p_mm_heard(const unsigned char *payload, int size);
 int p2p_mm_active(void);
+/* call under p2p_lock */
+int p2p_mm_hosts_big_game(void);
 /* call under p2p_lock; it drops the lock around each signature check */
 int p2p_mm_verify_pass(unsigned long now);
 void p2p_mm_update(unsigned long now, int can_host, const unsigned char *token);
