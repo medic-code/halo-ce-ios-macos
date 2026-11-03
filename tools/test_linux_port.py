@@ -415,6 +415,14 @@ def test_p2p_matchmaking(tmp_path):
     (("if (topic[0] && !strcmp(topics[index], topic))", "if (0)"), "topic moves"),
     (("queues <= 12", "queues <= 25"), "topics"),
     (("HALO_PORT_NETWORK_VERSION, playlist_names", "38, playlist_names"), "topics"),
+    (("peer->refreshes >= MM_REFRESHES_COUNTED", "peer->refreshes >= 1"), "e14_two_refreshes"),
+    (("peer->refreshes = -1;\n\t\tpeer->playlist", "peer->playlist"), "e14_two_refreshes"),
+    (("MM_KIND_CANCEL)\n\t\tpeer->refreshes = -1;", "MM_KIND_CANCEL)\n\t\tpeer->refreshes = 0;"), "e14_after_cancel"),
+    (("MM_EXPIRY_INTERVALS * peer->record.interval * 100", "100000"), "e19_lost_cancel"),
+    (("if (record->kind == MM_KIND_CANCEL)", "if (0)"), "quit"),
+    (("record->sequence <= peer->record.sequence", "0"), "e43_replay"),
+    (("search->sequence = sequence;", "search->sequence = 0;"), "restart"),
+    (("if (mm_counted(peer))\n\t\t\tcontinue;", "if (0)\n\t\t\tcontinue;"), "full_table"),
 ])
 def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
     output = matchmaking_check(tmp_path, fault)
