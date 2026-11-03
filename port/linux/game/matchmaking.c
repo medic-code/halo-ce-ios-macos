@@ -616,6 +616,8 @@ void matchmaking_update(float seconds)
 		matchmaking.reopen = FALSE;
 		if (status.state != P2P_MM_OFF || status.notice >= P2P_MM_NOTICE_TOO_BIG)
 			matchmaking_reopen(4);
+		else if (p2p_party_is_member())
+			matchmaking_reopen(3);
 	}
 	matchmaking_party_update();
 	if ((matchmaking.role == _matchmaking_idle || matchmaking.role == _matchmaking_hosting) &&
