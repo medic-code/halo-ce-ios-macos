@@ -181,6 +181,8 @@ struct p2p_listing
 	unsigned char master_key_ids[P2P_LISTING_MAXIMUM_MASTERS][P2P_LISTING_MASTER_KEY_ID_SIZE];
 	unsigned char master_key_id_count;
 };
+/* writes the invite's host identifier (6 bytes); 0 if text is no invite */
+int p2p_invite_host(const char *text, unsigned char *identifier);
 /* joins a public game the server browser found (p2p_join_invite with its
 invite), remembering its host: nonzero if it held an invite */
 int p2p_join_listing(const struct p2p_listing *listing);
@@ -419,6 +421,10 @@ int p2p_mm_size_players(int size);
 /* CTF has no free-for-all variant; playlists has a bit per playlist */
 int mm_playlist_has_size(unsigned playlists, int size);
 
+/* on the wire (queue topics) and in config.toml */
+extern const char *const p2p_mm_playlist_names[NUMBER_OF_P2P_MM_PLAYLISTS];
+extern const char *const p2p_mm_size_names[NUMBER_OF_P2P_MM_SIZES];
+
 struct p2p_mm_choice
 {
 	unsigned playlists;
@@ -464,9 +470,13 @@ struct p2p_mm_status
 	/* counts include this machine */
 	int playlist, size, count, needed, all_sizes_count;
 	int games_checked;
+	/* FOUND and HOSTING only; ping -1: not timed */
+	int hosts, players, most_players, ping;
 	int notice;
 };
-enum { P2P_MM_NOTICE_NONE, P2P_MM_NOTICE_HOST_LEFT, P2P_MM_NOTICE_HOST_UNREACHED };
+enum { P2P_MM_NOTICE_NONE, P2P_MM_NOTICE_HOST_LEFT, P2P_MM_NOTICE_HOST_UNREACHED, P2P_MM_NOTICE_HOST_FAILED };
+enum { P2P_MM_LOOK_SECONDS = 6, P2P_MM_WIDEN_SECONDS = 45, P2P_MM_HOST_SECONDS = 120, P2P_MM_HOST_WAIT_SECONDS = 20 };
 void p2p_mm_get_status(struct p2p_mm_status *status);
+void p2p_mm_host_gave_up(void);
 
 #endif

@@ -417,7 +417,7 @@ def test_p2p_matchmaking(tmp_path):
       "memcpy(material, units[unit].key, P2P_KEY_SIZE);\n\t\tp2p_sha256(material, P2P_KEY_SIZE"), "election"),
     (("if (topic[0] && !strcmp(topics[index], topic))", "if (0)"), "topic moves"),
     (("queues <= 12", "queues <= 25"), "topics"),
-    (("HALO_PORT_NETWORK_VERSION, playlist_names", "38, playlist_names"), "topics"),
+    (("HALO_PORT_NETWORK_VERSION, p2p_mm_playlist_names", "38, p2p_mm_playlist_names"), "topics"),
     (("peer->refreshes >= MM_REFRESHES_COUNTED", "peer->refreshes >= 1"), "e14_two_refreshes"),
     (("peer->refreshes = -1;\n\t\tpeer->playlist", "peer->playlist"), "e14_two_refreshes"),
     (("MM_KIND_CANCEL)\n\t\tpeer->refreshes = -1;", "MM_KIND_CANCEL)\n\t\tpeer->refreshes = 0;"), "e14_after_cancel"),
@@ -559,6 +559,13 @@ def test_config_has_each_section_once(tmp_path):
     assert sections().count("display") == 1
     assert run("get", "display.vsync")[0] == "false"
     assert run("get", "game.console_log")[0] == "all"
+
+    assert run("get", "network.matchmaking_playlists")[0] == "slayer"
+    assert run("get", "network.matchmaking_size")[0] == "2v2"
+    run("write", "network.matchmaking_playlists", "slayer,ctf")
+    run("write", "network.matchmaking_size", "ffa6")
+    assert run("get", "network.matchmaking_playlists")[0] == "slayer,ctf"
+    assert run("get", "network.matchmaking_size")[0] == "ffa6"
 
 
 # ---------- system link's stand-in machines (tools/system_link_bots.py)
