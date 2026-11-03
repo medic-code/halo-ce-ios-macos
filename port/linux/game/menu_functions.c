@@ -5560,6 +5560,7 @@ enum
 #define MATCHMAKING_ROWS (1 + NUMBER_OF_P2P_MM_PLAYLISTS)
 
 enum { _search_slot_you, _search_slot_matched, _search_slot_looking };
+enum { _matchmaking_ask_none, _matchmaking_ask_remove, _matchmaking_ask_leave };
 
 /* port_settings.py's button_bar, in matchmaking_bar_names' order */
 enum
@@ -5567,17 +5568,22 @@ enum
 	_matchmaking_bar_defaults,
 	_matchmaking_bar_invite,
 	_matchmaking_bar_search,
+	_matchmaking_bar_leave,
 	_matchmaking_bar_cancel,
+	_matchmaking_bar_yes,
+	_matchmaking_bar_no,
 	NUMBER_OF_MATCHMAKING_BAR_BUTTONS
 };
 #define MATCHMAKING_BAR(button) (1u << _matchmaking_bar_##button)
 
 static char const *const matchmaking_bar_names[NUMBER_OF_MATCHMAKING_BAR_BUTTONS] = {
-	"button_defaults", "button_invite", "button_search", "common_button_cancel"
+	"button_defaults", "button_invite", "button_search", "button_leave", "common_button_cancel", "button_yes", "button_no"
 };
 
+/* focused: a member's place, NONE off the members */
 struct matchmaking_party_view
 {
+	short asking, focused;
 	boolean size_focused, invited, discord;
 };
 
@@ -5589,6 +5595,9 @@ static struct
 	struct widget_instance *focused;
 	boolean loaded;
 	boolean member, invited;
+	short row, asking, asked;
+	char asked_name[P2P_PARTY_NAME_SIZE + 1];
+	struct widget_instance *asked_from, *asked_button;
 	wchar_t name[P2P_PARTY_NAME_SIZE + 1];
 } matchmaking_screen;
 
@@ -5630,10 +5639,22 @@ static short matchmaking_size_after(unsigned playlists, short size, int party)
 	return after;
 }
 
-static unsigned matchmaking_party_bar(const struct p2p_party_status *party)
+/* the member's place now, count if gone: the status may have moved them since the question */
+static short matchmaking_party_find(const struct p2p_party_status *party, short index, char const *name)
 {
+	if (index < party->count && !strcmp(party->members[index].name, name))
+		return index;
+	for (index = 1; index < party->count && strcmp(party->members[index].name, name); index++)
+		;
+	return index;
+}
+
+static unsigned matchmaking_party_bar(const struct p2p_party_status *party, short asking)
+{
+	if (asking != _matchmaking_ask_none)
+		return MATCHMAKING_BAR(yes) | MATCHMAKING_BAR(no);
 	if (matchmaking_party_member(party))
-		return MATCHMAKING_BAR(cancel);
+		return MATCHMAKING_BAR(leave) | MATCHMAKING_BAR(cancel);
 	return MATCHMAKING_BAR(defaults) | MATCHMAKING_BAR(invite) | MATCHMAKING_BAR(search) | MATCHMAKING_BAR(cancel);
 }
 
@@ -5662,8 +5683,11 @@ void matchmaking_party_name_utf8(wchar_t const *wide, char *text, short size)
 	text[at] = 0;
 }
 
-static wchar_t const *matchmaking_party_mark(const struct p2p_party_status *party, short index)
+static wchar_t const *matchmaking_party_mark(const struct p2p_party_status *party,
+	const struct matchmaking_party_view *view, short index)
 {
+	if (index && index == view->focused)
+		return view->asking == _matchmaking_ask_remove ? L"REMOVE?" : L"X REMOVE";
 	if ((party->count > 1 || matchmaking_party_member(party)) && party->members[index].leader)
 		return L"LEADER";
 	return (party->count <= 1 && !matchmaking_party_member(party)) || party->members[index].you ? L"YOU" : L"";
@@ -5675,20 +5699,27 @@ static void matchmaking_party_words(const struct p2p_party_status *party, const 
 {
 	static wchar_t const *const skipped[] = { L"", L"1V1 is", L"1V1 and 2V2 are", L"1V1, 2V2 and 3V3 are", L"1V1 to 4V4 are",
 		L"1V1 to FFA 6 are" };
-	wchar_t leader[P2P_PARTY_NAME_SIZE + 1];
+	wchar_t leader[P2P_PARTY_NAME_SIZE + 1], name[P2P_PARTY_NAME_SIZE + 1];
 	boolean ended = party->notice == P2P_PARTY_NOTICE_ENDED || party->notice == P2P_PARTY_NOTICE_REMOVED;
 	short first = P2P_MM_1V1;
 
 	help[0] = line[0] = 0;
 	mods_wide_text(party->members[0].name, leader, P2P_PARTY_NAME_SIZE + 1);
+	mods_wide_text(view->focused > 0 ? party->members[view->focused].name : "", name, P2P_PARTY_NAME_SIZE + 1);
 	while (first < P2P_MM_BIG_TEAM && !mm_party_size_allowed(party->count, first))
 		first++;
-	if (matchmaking_party_member(party))
+	if (view->asking == _matchmaking_ask_leave)
+		usnprintf(help, size - 1, L"Leave %ls's party?", leader);
+	else if (view->asking == _matchmaking_ask_remove)
+		usnprintf(help, size - 1, L"Remove %ls from the party?", name);
+	else if (matchmaking_party_member(party))
 	{
 		if (leader[0])
 			usnprintf(help, size - 1, L"%ls chooses and searches\r\nfor the party. You join %ls's\r\nmatch, on %ls's team.",
 				leader, leader, leader);
 	}
+	else if (view->focused > 0)
+		usnprintf(help, size - 1, L"X removes %ls from the party\r\nand makes a new party link.", name);
 	else if (view->size_focused && party->count > 1 && first < (short)NUMBEROF(skipped))
 		usnprintf(help, size - 1, L"A party of %d plays %ls or larger:\r\n%ls skipped.", party->count,
 			matchmaking_size_words[first], skipped[first]);
@@ -5696,7 +5727,7 @@ static void matchmaking_party_words(const struct p2p_party_status *party, const 
 		usnprintf(help, size - 1, L"You are on your own. SEARCH to look\r\nfor a game, or INVITE friends.");
 	if (matchmaking_party_member(party))
 	{
-		if (leader[0])
+		if (leader[0] && view->asking != _matchmaking_ask_leave)
 			usnprintf(line, size - 1, L"Waiting for %ls to search.", leader);
 	}
 	else if (view->invited)
@@ -5807,6 +5838,92 @@ static void matchmaking_bar_focus(struct widget_instance *bar, char const *name)
 	}
 }
 
+/* the pointer's focus leaves no focused child */
+static void matchmaking_refocus(struct widget_instance *list, struct widget_instance *child)
+{
+	list->focused_child = child;
+	if (child)
+		list->parameters.list.selected_index = sibling_index(child);
+}
+
+static boolean matchmaking_ask(struct widget_instance *widget, short asking)
+{
+	struct widget_instance *list = named(screen_of(widget), "options_menu", 0);
+	struct widget_instance *bar = named(list, "button_bar", 0);
+
+	if (!list || !bar)
+		return FALSE;
+	matchmaking_screen.asking = asking;
+	matchmaking_screen.asked_from = list->focused_child;
+	matchmaking_screen.asked_button = bar->focused_child;
+	focus_row(list, NONE);
+	matchmaking_bar_focus(bar, "button_no");
+	ui_play_audio_feedback_sound(SOUND_FORWARD);
+	return TRUE;
+}
+
+static boolean matchmaking_remove_ask(struct widget_instance *slot)
+{
+	struct p2p_party_status party;
+	short index = (short)(sibling_index(slot) - MATCHMAKING_ROWS);
+
+	p2p_party_get_status(&party);
+	if (index <= 0 || index >= party.count)
+		return campaign_fail();
+	matchmaking_screen.asked = index;
+	strcpy(matchmaking_screen.asked_name, party.members[index].name);
+	return matchmaking_ask(slot, _matchmaking_ask_remove);
+}
+
+static boolean matchmaking_answer(struct widget_instance *widget, boolean yes)
+{
+	struct widget_instance *list = named(screen_of(widget), "options_menu", 0);
+	struct widget_instance *bar = named(list, "button_bar", 0);
+	struct p2p_party_status party;
+	short asking = matchmaking_screen.asking, index;
+
+	if (!list || !bar)
+		return FALSE;
+	matchmaking_screen.asking = _matchmaking_ask_none;
+	matchmaking_refocus(list, matchmaking_screen.asked_from);
+	matchmaking_refocus(bar, matchmaking_screen.asked_button);
+	if (yes && asking == _matchmaking_ask_leave)
+		p2p_party_leave();
+	else if (yes && asking == _matchmaking_ask_remove)
+	{
+		p2p_party_get_status(&party);
+		index = matchmaking_party_find(&party, matchmaking_screen.asked, matchmaking_screen.asked_name);
+		if (index < party.count)
+			p2p_party_remove(index);
+	}
+	ui_play_audio_feedback_sound(yes ? SOUND_FORWARD : SOUND_BACK);
+	return TRUE;
+}
+
+/* right enters the members; the stick and left step the value */
+static boolean matchmaking_row_right(struct widget_instance *row, struct event_record *event, boolean *widget_deleted)
+{
+	struct widget_instance *spinner = named(row, "size_spinner", 0);
+	struct p2p_party_status party;
+
+	p2p_party_get_status(&party);
+	ui_play_audio_feedback_sound(SOUND_CURSOR);
+	if (party.count > 1 && !ui_widget_port_pointer_focused())
+	{
+		focus_row(row->parent, MATCHMAKING_ROWS + 1);
+		return TRUE;
+	}
+	return widget_event_function_list_widget_goto_next_item(spinner ? spinner : named(row, "playlist_spinner", 0), event,
+		widget_deleted);
+}
+
+static boolean matchmaking_slot_left(struct widget_instance *slot)
+{
+	focus_row(slot->parent, matchmaking_screen.row);
+	ui_play_audio_feedback_sound(SOUND_CURSOR);
+	return TRUE;
+}
+
 static boolean matchmaking_invite(void)
 {
 	char link[P2P_PARTY_LINK_SIZE];
@@ -5819,7 +5936,7 @@ static boolean matchmaking_invite(void)
 	return TRUE;
 }
 
-static void matchmaking_party_show(struct widget_instance *list, const struct p2p_party_status *party,
+static void matchmaking_party_show(struct widget_instance *list, const struct p2p_party_status *party, short index,
 	boolean size_focused)
 {
 	struct widget_instance *screen = screen_of(list);
@@ -5833,8 +5950,18 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 	unsigned buttons;
 	short shown = (short)MAX(party->count, 1), slot;
 
-	rows = !member;
-	buttons = matchmaking_party_bar(party);
+	if (matchmaking_screen.asking == _matchmaking_ask_remove)
+		matchmaking_screen.asked = matchmaking_party_find(party, matchmaking_screen.asked, matchmaking_screen.asked_name);
+	if ((matchmaking_screen.asking == _matchmaking_ask_remove && matchmaking_screen.asked >= party->count) ||
+		(matchmaking_screen.asking == _matchmaking_ask_leave && !member))
+	{
+		matchmaking_answer(list, FALSE);
+	}
+	rows = !member && !matchmaking_screen.asking;
+	buttons = matchmaking_party_bar(party, matchmaking_screen.asking);
+	view.asking = matchmaking_screen.asking;
+	view.focused = view.asking == _matchmaking_ask_remove ? matchmaking_screen.asked :
+		index >= MATCHMAKING_ROWS && index < MATCHMAKING_ROWS + shown ? (short)(index - MATCHMAKING_ROWS) : NONE;
 	view.size_focused = size_focused;
 	view.invited = matchmaking_screen.invited;
 	view.discord = config_string("discord.application_id")[0] != 0;
@@ -5850,13 +5977,13 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 		if (!widget)
 			continue;
 		widget->visible = slot < shown;
-		widget->disabled = TRUE;
+		widget->disabled = !slot || !rows;
 		widget->animation.current_frame_index = (short)(party->count && !party->members[slot].you ?
 			_search_slot_matched : _search_slot_you);
 		mods_wide_text(party->members[slot].name, text, P2P_PARTY_NAME_SIZE + 1);
 		text_set_length(named(widget, "party_slot_name", 0), party->count ? text : matchmaking_screen.name,
 			MATCHMAKING_TEXT_LENGTH);
-		text_set_length(named(widget, "party_slot_mark", 0), matchmaking_party_mark(party, slot),
+		text_set_length(named(widget, "party_slot_mark", 0), matchmaking_party_mark(party, &view, slot),
 			MATCHMAKING_TEXT_LENGTH);
 	}
 	for (slot = 0; slot < NUMBER_OF_MATCHMAKING_BAR_BUTTONS; slot++)
@@ -5959,6 +6086,8 @@ static void matchmaking_screen_update(struct widget_instance *list)
 		p2p_mm_set_choice(&choice);
 	}
 	index = list->focused_child ? sibling_index(list->focused_child) : NONE;
+	if (index >= 0 && index < MATCHMAKING_ROWS)
+		matchmaking_screen.row = index;
 	if (matchmaking_screen.refusal != MATCHMAKING_SEARCH)
 		help = (short)(_matchmaking_help_search + matchmaking_screen.refusal);
 	else if (index == 0)
@@ -5972,7 +6101,7 @@ static void matchmaking_screen_update(struct widget_instance *list)
 		help = _matchmaking_help_none;
 	if (description)
 		description->parameters.text_box.string_list_index = help;
-	matchmaking_party_show(list, &party, index == 0 && mm_playlist_has_size(playlists, shown));
+	matchmaking_party_show(list, &party, index, index == 0 && mm_playlist_has_size(playlists, shown));
 }
 
 /* a join refuses this profile, and each refused join marks a good host failed */
@@ -6001,6 +6130,8 @@ static boolean matchmaking_screen_search(void)
 
 static boolean matchmaking_screen_back(struct widget_instance *widget, boolean *widget_deleted)
 {
+	if (matchmaking_screen.asking)
+		return matchmaking_answer(widget, FALSE);
 	p2p_mm_cancel();
 	ui_widget_port_go_back(widget);
 	*widget_deleted = TRUE;
@@ -8747,10 +8878,35 @@ boolean pc_menu_event_function_invoke(
 		{
 			matchmaking_screen.loaded = FALSE;
 			matchmaking_screen.invited = FALSE;
+			matchmaking_screen.asking = _matchmaking_ask_none;
+		}
+		else if (!strcmp(name, "port matchmaking right"))
+		{
+			return matchmaking_row_right(widget, event, widget_deleted);
+		}
+		else if (!strcmp(name, "port matchmaking left"))
+		{
+			return matchmaking_slot_left(widget);
+		}
+		else if (!strcmp(name, "port matchmaking remove"))
+		{
+			return matchmaking_remove_ask(widget);
 		}
 		else if (!strcmp(name, "port matchmaking invite"))
 		{
 			return matchmaking_invite();
+		}
+		else if (!strcmp(name, "port matchmaking leave"))
+		{
+			return matchmaking_ask(widget, _matchmaking_ask_leave);
+		}
+		else if (!strcmp(name, "port matchmaking yes"))
+		{
+			return matchmaking_answer(widget, TRUE);
+		}
+		else if (!strcmp(name, "port matchmaking no"))
+		{
+			return matchmaking_answer(widget, FALSE);
 		}
 		else if (!strcmp(name, "port matchmaking defaults"))
 		{

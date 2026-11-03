@@ -34,8 +34,10 @@ NEGATIVE_CONTROLS = {
     "forced-size-saved": (("after != before && mm_party_size_allowed(party, before)", "after != before"), "party_sizes"),
     "unchanged-size-saved": (("after != before && mm_party_size_allowed(party, before)", "mm_party_size_allowed(party, before)"),
                              "party_sizes"),
-    "waiting-for-nobody": (("if (leader[0])\n\t\t\tusnprintf(line", "if (1)\n\t\t\tusnprintf(line"), "party_panel"),
+    "waiting-for-nobody": (("if (leader[0] && view", "if (view"), "party_panel"),
     "big-party-not-skipped": (("while (first < P2P_MM_BIG_TEAM", "while (first < P2P_MM_FFA_6"), "party_panel"),
+    "moved-member-lost": (("if (index < party->count && !strcmp(party->members[index].name, name))\n\t\treturn index;\n", ""),
+                          "party_panel"),
 }
 
 
@@ -43,7 +45,7 @@ def generated(fault=None):
     source = read("port/linux/game/menu_functions.c")
     header = read("port/linux/src/p2p.h")
     search = read("port/linux/src/p2p_matchmaking.c")
-    enums = "\n".join(["#define usnprintf swprintf", "#define PIN(x, lo, hi) ((x) < (lo) ? (lo) : (x) > (hi) ? (hi) : (x))",
+    enums = "\n".join(["#define usnprintf swprintf", "#define PIN(x, lo, hi) ((x) < (lo) ? (lo) : (x) > (hi) ? (hi) : (x))", "#define NONE (-1)",
                        "#define MM_MAXIMUM_PARTY P2P_PARTY_MAXIMUM", "#define P2P_LISTING_REGION_SIZE 16",
                        "#define NUMBEROF(array) (sizeof(array) / sizeof((array)[0]))",
                        enum_with(header, "P2P_MM_SLAYER"), enum_with(header, "P2P_MM_1V1"),
@@ -51,7 +53,7 @@ def generated(fault=None):
                        enum_with(header, "P2P_PARTY_MAXIMUM"), enum_with(header, "P2P_PARTY_NOTICE_NONE"),
                        structure(header, "p2p_mm_choice"), structure(header, "p2p_mm_status"),
                        structure(header, "p2p_party_member"), structure(header, "p2p_party_status"),
-                       enum_with(source, "_matchmaking_bar_defaults"),
+                       enum_with(source, "_matchmaking_ask_none"), enum_with(source, "_matchmaking_bar_defaults"),
                        "#define MATCHMAKING_BAR(button) (1u << _matchmaking_bar_##button)",
                        structure(source, "matchmaking_party_view")]) + "\n"
     words = re.findall(r"^static wchar_t const \*const matchmaking_\w+_words\[.*?\};", source, re.M | re.S)
@@ -61,7 +63,7 @@ def generated(fault=None):
                       function(source, "region_to_wide"),
                       *(function(source, name) for name in (
                           "matchmaking_party_member", "matchmaking_party_size", "matchmaking_size_saved", "matchmaking_size_after",
-                          "matchmaking_party_bar",
+                          "matchmaking_party_find", "matchmaking_party_bar",
                           "matchmaking_party_name_utf8", "matchmaking_party_mark", "matchmaking_party_words",
                           "matchmaking_lines", "matchmaking_lobby_line"))])
     if fault:
