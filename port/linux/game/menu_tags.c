@@ -404,6 +404,7 @@ static char const *const port_function_names[] =
 	"port controller clear", "port controller cancel",
 	"port matchmaking init", "port matchmaking defaults", "port matchmaking search", "port matchmaking back",
 	"port matchmaking widen", "port matchmaking start now", "port matchmaking host", "port matchmaking search back",
+	"port matchmaking invite",
 };
 
 /* the PC version's game data functions that the Xbox's have not, from
