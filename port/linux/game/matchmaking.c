@@ -359,7 +359,8 @@ boolean matchmaking_can_start_now(void)
 	struct network_game *game = server ? network_game_server_get_game(server) : NULL;
 
 	return game && matchmaking.role == _matchmaking_hosting && matchmaking.player_added && !matchmaking.start_now &&
-		network_game_server_get_state(server, NULL) == SERVER_PREGAME && game->player_count < game->maximum_players;
+		network_game_server_get_state(server, NULL) == SERVER_PREGAME && game->player_count < game->maximum_players &&
+		network_game_server_port_ok_to_countdown(server);
 }
 
 void matchmaking_start_now(void)
