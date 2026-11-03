@@ -5804,6 +5804,77 @@ static void matchmaking_lobby_line(short seconds, wchar_t *line, short size)
 }
 
 #define MATCHMAKING_TEXT_LENGTH 96
+/* the bitmaps' frames (port_settings.py's search_step_frames,
+search_link_frames, search_slot_frames) */
+enum { _search_step_ahead, _search_step_passed, _search_step_current };
+#define SEARCH_LINK_DOTS 12
+enum { _search_slot_you, _search_slot_matched, _search_slot_looking };
+#define SEARCH_SLOT_SPINNER_FRAMES 8
+#define SEARCH_SLOTS 8
+
+static void search_link_fill(struct widget_instance *link, int seconds, int length)
+{
+	if (link)
+		link->animation.current_frame_index = (short)PIN(seconds * SEARCH_LINK_DOTS / length, 0, SEARCH_LINK_DOTS);
+}
+
+static void matchmaking_search_tracker_show(struct widget_instance *screen, struct p2p_mm_status const *status)
+{
+	struct widget_instance *widget;
+	short step, index, filled, slots;
+	boolean queued, strict, found;
+
+	queued = status->state == P2P_MM_QUEUED || (status->state == P2P_MM_FOUND &&
+		(status->seconds >= P2P_MM_LOOK_SECONDS || status->widened));
+	step = status->state == P2P_MM_HOSTING || status->hosts ? 4 : queued ? (status->widened ? 3 : 2) :
+		status->state == P2P_MM_OFF ? 0 : 1;
+	strict = status->state != P2P_MM_OFF && status->can_host <= 0;
+	for (index = 0; index < 4; index++)
+	{
+		wchar_t number[2] = { (wchar_t)(L'1' + index), 0 };
+
+		widget = named(screen, "search_step", index);
+		if (widget)
+		{
+			widget->visible = index < 3 || !strict;
+			widget->animation.current_frame_index = (short)(index + 1 == step ? _search_step_current :
+				index + 1 < step ? _search_step_passed : _search_step_ahead);
+			widget->alpha_modifier = index + 1 <= step ? 1.0f : TAB_UNFOCUSED_ALPHA;
+			text_set_length(named(widget, "search_step_number", 0), number, NUMBEROF(number));
+		}
+	}
+	search_link_fill(named(screen, "search_link", 0), step > 1 ? P2P_MM_LOOK_SECONDS : status->seconds,
+		P2P_MM_LOOK_SECONDS);
+	search_link_fill(named(screen, "search_link", 1), step > 2 ? P2P_MM_WIDEN_SECONDS : step == 2 ?
+		status->mark_seconds : 0, P2P_MM_WIDEN_SECONDS);
+	search_link_fill(named(screen, "search_link", 2), step > 3 ? P2P_MM_HOST_SECONDS : step == 3 ?
+		status->mark_seconds - P2P_MM_WIDEN_SECONDS : 0, P2P_MM_HOST_SECONDS - P2P_MM_WIDEN_SECONDS);
+	visible_set(named(screen, "search_link", 2), !strict);
+	visible_set(named(screen, "search_step_4_label", 0), !strict && step < 4);
+	visible_set(named(screen, "search_step_3_label", 0), step < 3);
+	visible_set(named(screen, "search_step_3_widened", 0), step == 3);
+	found = status->state == P2P_MM_FOUND && !status->hosts;
+	filled = (short)PIN(found ? status->players : status->widened ? status->all_sizes_count : MAX(status->count, 1), 1,
+		SEARCH_SLOTS);
+	slots = (short)PIN(status->state == P2P_MM_OFF ? 1 : found ? status->most_players : status->widened ? filled :
+		status->needed ? status->needed : p2p_mm_size_players(matchmaking_screen.size), filled, SEARCH_SLOTS);
+	profile_name_show(named(screen, "search_slot_you", 0));
+	for (index = 1; index < SEARCH_SLOTS; index++)
+	{
+		struct widget_instance *name;
+
+		widget = named(screen, "search_slot", index - 1);
+		name = named(widget, "search_slot_name", 0);
+		if (!widget || !name)
+			continue;
+		widget->visible = index < slots;
+		widget->animation.current_frame_index = (short)(index < filled ? _search_slot_matched : _search_slot_looking +
+			(system_milliseconds() / 125 + index) % SEARCH_SLOT_SPINNER_FRAMES);
+		text_set(name, index < filled ? L"Matched player" : L"Looking for player...");
+		name->alpha_modifier = index < filled ? 1.0f : TAB_UNFOCUSED_ALPHA;
+	}
+}
+
 static void matchmaking_search_update(struct widget_instance *list)
 {
 	struct widget_instance *screen = screen_of(list);
@@ -5822,6 +5893,7 @@ static void matchmaking_search_update(struct widget_instance *list)
 	text_set_length(named(screen, "search_notice", 0), notice, MATCHMAKING_TEXT_LENGTH);
 	usnprintf(text, MATCHMAKING_TEXT_LENGTH - 1, L"%d:%02d", status.seconds / 60, status.seconds % 60);
 	text_set_length(named(screen, "search_clock", 0), status.state != P2P_MM_OFF ? text : L"", MATCHMAKING_TEXT_LENGTH);
+	matchmaking_search_tracker_show(screen, &status);
 	text[0] = 0;
 	for (index = 0; index < NUMBER_OF_P2P_MM_PLAYLISTS; index++)
 	{
