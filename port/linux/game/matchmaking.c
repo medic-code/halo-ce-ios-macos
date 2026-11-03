@@ -25,6 +25,8 @@
 /* the server's setup clears a map set sooner */
 #define MATCHMAKING_MAP_SECONDS 1.0f
 #define MATCHMAKING_PLAYER_SECONDS 2.0f
+/* menu_functions.c's SOUND_ERROR */
+#define MATCHMAKING_SOUND_ERROR 4
 
 char const *pc_menus_screen(char const *name);
 unsigned long system_milliseconds(void);
@@ -136,7 +138,8 @@ static void matchmaking_begin_host(struct p2p_mm_decision const *decision)
 	player_ui_fast_setup_network_server();
 	if (!global_network_game_server_get())
 	{
-		p2p_mm_cancel();
+		p2p_mm_host_gave_up();
+		ui_play_audio_feedback_sound(MATCHMAKING_SOUND_ERROR);
 		return;
 	}
 	/* before p2p_set_hosting_public: a limit set later is not the one listed */
