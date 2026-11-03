@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -443,14 +444,34 @@ def matchmaking_check(tmp_path, fault=None, *arguments, party_fault=None):
     return subprocess.run([str(program), *arguments], capture_output=True, text=True, timeout=300).stdout
 
 
+# each control builds the whole check program, so they run at once; each stops once its cases have failed
+@pytest.fixture(scope="session")
+def control_outputs(tmp_path_factory):
+    cases = {}
+    for fault, case in MATCHMAKING_FAULTS:
+        cases.setdefault((fault, None), []).append(case)
+    for fault, case in PARTY_FAULTS:
+        cases.setdefault((None, fault), []).append(case)
+    jobs = list(cases)
+    folders = [tmp_path_factory.mktemp("control") for _ in jobs]
+
+    def check(job, folder):
+        try:
+            return matchmaking_check(folder, job[0], "stop", *dict.fromkeys(cases[job]), party_fault=job[1])
+        except AssertionError as error:
+            return str(error)
+
+    with ThreadPoolExecutor(os.cpu_count()) as pool:
+        return dict(zip(jobs, pool.map(check, jobs, folders)))
+
+
 @linux_host_only
 def test_p2p_matchmaking(tmp_path):
     output = matchmaking_check(tmp_path, None, "sweep")
     assert output.strip().endswith("PASS"), output
 
 
-@linux_host_only
-@pytest.mark.parametrize("fault,case", [
+MATCHMAKING_FAULTS = [
     (("if (!p2p_ed25519_verify(", "if (0 && !p2p_ed25519_verify("), "records"),
     (("bytes[2] != MM_FORMAT)", "0)"), "records"),
     (("if (!record->held)\n\t\t{\n\t\t\tmemcpy(bytes + at, record->token",
@@ -608,14 +629,17 @@ def test_p2p_matchmaking(tmp_path):
     (("restart = left && !mm.search.party.following;", "restart = left;"), "party wiring"),
     (("restart = left && !mm.search.party.following;", "restart = 0;"), "party wiring"),
     (("restarted = !mm.search.party.following;", "restarted = 1;"), "party wiring"),
-])
-def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
-    output = matchmaking_check(tmp_path, fault)
-    assert f"FAIL {case}:" in output, output
+]
 
 
 @linux_host_only
-@pytest.mark.parametrize("fault,case", [
+@pytest.mark.parametrize("fault,case", MATCHMAKING_FAULTS)
+def test_p2p_matchmaking_negative_control(control_outputs, fault, case):
+    output = control_outputs[fault, None]
+    assert f"FAIL {case}:" in output, output
+
+
+PARTY_FAULTS = [
     (("memcmp(record->key, party->members[0].key, P2P_KEY_SIZE) ||\n", "0 ||\n"), "e42_leaked_link"),
     (("return p2p_ed25519_verify(record->key,", "return 1 || p2p_ed25519_verify(record->key,"), "e42_leaked_link"),
     (("if (other == index || !pair_key(party, party->members[other].key, key))", "if (1)"), "e50_removed"),
@@ -694,9 +718,13 @@ def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
     (("&&\n\t\t\tbody[base + 1] < NUMBER_OF_P2P_MM_SIZES", ""), "party_record_search"),
     ((" || block[5] >= NUMBER_OF_P2P_MM_SIZES", ""), "party_record_search"),
     ((" || block[4] >= 1u << NUMBER_OF_P2P_MM_PLAYLISTS", ""), "party_record_search"),
-])
-def test_p2p_party_negative_control(tmp_path, fault, case):
-    output = matchmaking_check(tmp_path, party_fault=fault)
+]
+
+
+@linux_host_only
+@pytest.mark.parametrize("fault,case", PARTY_FAULTS)
+def test_p2p_party_negative_control(control_outputs, fault, case):
+    output = control_outputs[None, fault]
     assert f"FAIL {case}:" in output, output
 
 

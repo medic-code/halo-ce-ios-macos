@@ -153,9 +153,29 @@ void p2p_signal_mm_publish(const char *topic, const unsigned char *payload, int 
 static int failures;
 
 #define CHECK(condition, ...) do { if (!(condition)) { failures++; printf("FAIL %s: ", case_name); \
-	printf(__VA_ARGS__); printf("\n"); } } while (0)
+	printf(__VA_ARGS__); printf("\n"); check_stop(); } } while (0)
 
 static const char *case_name;
+static char **stop_cases;
+static int stop_count;
+
+/* stop <case>...: a negative control ends once each case it names has failed */
+static void check_stop(void)
+{
+	int index, left = 0;
+
+	for (index = 0; index < stop_count; index++)
+	{
+		if (stop_cases[index] && !strcmp(stop_cases[index], case_name))
+			stop_cases[index] = NULL;
+		left += stop_cases[index] != NULL;
+	}
+	if (stop_count && !left)
+	{
+		printf("FAILED %d\n", failures);
+		exit(1);
+	}
+}
 
 static void seed_of(int machine, unsigned char *seed)
 {
@@ -4385,7 +4405,11 @@ static void check_party_wiring(void)
 /* under loss two machines can elect themselves at once, so the lossy runs check only the end state */
 int main(int argc, char **argv)
 {
-	(void)argv;
+	if (argc > 1 && !strcmp(argv[1], "stop"))
+	{
+		stop_cases = argv + 2;
+		stop_count = argc - 2;
+	}
 	check_pool();
 	check_election();
 	check_records();
@@ -4394,7 +4418,6 @@ int main(int argc, char **argv)
 	check_topics();
 	check_party_topic();
 	check_topic_moves();
-	check_verify_budget();
 	check_run_key();
 	check_joined_then_lost();
 	check_lost_in_verify();
@@ -4410,7 +4433,6 @@ int main(int argc, char **argv)
 	check_party_pool();
 	check_party_search();
 	check_party_record_search();
-	check_party_journeys();
 	check_party_pool_invited();
 	check_e28_room();
 	check_team_counts();
@@ -4430,9 +4452,11 @@ int main(int argc, char **argv)
 	check_party_machine();
 	check_party_verify_window();
 	check_party_wiring();
+	check_verify_budget();
+	check_party_journeys();
 	check_worlds();
 	check_faults();
-	if (argc > 1)
+	if (argc > 1 && !strcmp(argv[1], "sweep"))
 	{
 		sweep_drop = 10;
 		for (sweep_seed = 2; sweep_seed <= 31; sweep_seed++)
