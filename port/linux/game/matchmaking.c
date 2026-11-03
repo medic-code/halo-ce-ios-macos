@@ -21,6 +21,8 @@
 /* one under 5000: a countdown message rounds down, so 4999 reads 4 and the lobby's line adds 1 */
 #define MATCHMAKING_START_MILLISECONDS 4999
 #define MATCHMAKING_JOIN_SECONDS 25.0f
+/* MATCH FOUND stays up this long however fast the join */
+#define MATCHMAKING_FOUND_SECONDS 2.0f
 
 /* the server's setup clears a map set sooner */
 #define MATCHMAKING_MAP_SECONDS 1.0f
@@ -287,6 +289,8 @@ static void matchmaking_update_join(float seconds)
 	p2p_join_progress(&stage, NULL, 0);
 	if (client && network_game_client_get_state(client, &state_data) == _client_state_pregame)
 	{
+		if (matchmaking.seconds < MATCHMAKING_FOUND_SECONDS)
+			return;
 		matchmaking_open_lobby();
 		p2p_mm_joined(1);
 		matchmaking.role = _matchmaking_joined;
