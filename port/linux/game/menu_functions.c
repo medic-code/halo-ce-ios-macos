@@ -573,6 +573,13 @@ boolean pc_menu_profile_edit_begin(void)
 	return TRUE;
 }
 
+boolean pc_menu_player1_profile(void)
+{
+	struct player_profile profile;
+
+	return campaign_profile(0, &profile);
+}
+
 /* the game's own function of the name (as its tags name it), run for the
 widget: for ours of a name of the game's, which do more than it */
 static boolean game_function(char const *name, struct widget_instance *widget, struct event_record *event,
@@ -3278,6 +3285,11 @@ static boolean multiplayer_player(short controller)
 	if (!campaign_profile(controller, &profile))
 		return campaign_fail();
 	return ui_widget_port_multiplayer_player(controller, player_ui_get_active_player_profile_index(0));
+}
+
+boolean pc_menu_multiplayer_player(short controller)
+{
+	return multiplayer_player(controller);
 }
 
 /* Create Game's ("join controller to mp game", first): player 1 in, and
