@@ -7151,8 +7151,7 @@ static void lobby_update(struct widget_instance *list)
 	}
 	start_now_shown = start_now;
 	/* (a joiner's rows do nothing, and the bar draws SWITCH TEAM or LEAVE focused) */
-	if (bar && lobby_first_focus && matchmaking_game_locked() && !global_network_game_server_get() &&
-		state >= _client_state_pregame)
+	if (bar && lobby_first_focus && !global_network_game_server_get() && state >= _client_state_pregame)
 	{
 		lobby_first_focus = FALSE;
 		focus_row(list, NONE);
