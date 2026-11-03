@@ -402,6 +402,7 @@ enum
 	NUMBER_OF_P2P_MM_SMALL_SIZES,
 	NUMBER_OF_P2P_MM_SIZES = NUMBER_OF_P2P_MM_SMALL_SIZES
 };
+int p2p_mm_size_players(int size);
 /* CTF has no free-for-all variant; playlists has a bit per playlist */
 int mm_playlist_has_size(unsigned playlists, int size);
 
@@ -417,6 +418,18 @@ enum
 	P2P_MM_QUEUED,
 	P2P_MM_FOUND,
 	P2P_MM_HOSTING,
+};
+enum
+{
+	P2P_MM_DECIDE_NONE,
+	P2P_MM_DECIDE_HOST,
+	P2P_MM_DECIDE_JOIN,
+};
+struct p2p_mm_decision
+{
+	int kind;
+	int playlist, size;
+	char invite[P2P_LISTING_INVITE_SIZE];
 };
 
 #endif
