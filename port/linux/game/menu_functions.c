@@ -6204,9 +6204,12 @@ static struct widget_instance *focused_leaf(struct widget_instance *widget)
 time: the lobby opening) */
 extern void halo_virtual_gamepads_start(void);
 
+static boolean lobby_first_focus;
+
 /* "port lobby open" (the lobby made, or come back to): no player being added */
 static boolean lobby_join_reset(void)
 {
+	lobby_first_focus = TRUE;
 	halo_virtual_gamepads_start();
 	lobby_join.adding = FALSE;
 	lobby_join.controller = NONE;
@@ -6531,7 +6534,15 @@ static void lobby_update(struct widget_instance *list)
 	/* (the buttons' focus, off Switch Team when it is hidden; to the first
 	shown as START NOW appears, the lobby being open by then) */
 	if (bar && start_now && !start_now_shown)
+	{
 		bar->focused_child = bar->child;
+		/* (a first focus on the rows leaves A there, off the button drawn focused) */
+		if (lobby_first_focus)
+		{
+			lobby_first_focus = FALSE;
+			focus_row(list, NONE);
+		}
+	}
 	start_now_shown = start_now;
 	focus_off_hidden(bar);
 	visible_set(named(description, "lobby_right_item", 0), game != NULL && state >= _client_state_pregame);
