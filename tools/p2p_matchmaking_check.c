@@ -16,7 +16,12 @@ pthread_mutex_t p2p_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static unsigned long clock_now = 1800000000UL;
 
-void posix_random_bytes(void *buffer, unsigned long size) { memset(buffer, 0x5a, size); }
+void posix_random_bytes(void *buffer, unsigned long size)
+{
+	static unsigned char next = 0x5a;
+
+	memset(buffer, next++, size);
+}
 unsigned long p2p_now(void) { return clock_now; }
 int config_boolean(const char *name) { (void)name; return 1; }
 void platform_log(const char *format, ...) { (void)format; }
@@ -56,6 +61,35 @@ const unsigned char *p2p_signing_key(void)
 }
 void p2p_signal_mm_topics(const char topics[][P2P_MM_TOPIC_SIZE], int count) { (void)topics; (void)count; }
 
+static char signal_topic[P2P_PARTY_TOPIC_SIZE], publish_topic[P2P_PARTY_TOPIC_SIZE];
+static char clipboard[P2P_PARTY_LINK_SIZE], offered_link[P2P_PARTY_LINK_SIZE];
+static unsigned char party_published[MM_MAXIMUM_RECORD_SIZE];
+static int party_published_size, offered_count;
+static char resent_topic[P2P_PARTY_TOPIC_SIZE];
+static unsigned char resent[MM_MAXIMUM_RECORD_SIZE];
+static int resent_size;
+
+void p2p_signal_party_topic(const char *topic) { strcpy(signal_topic, topic); }
+void p2p_signal_party_publish(const unsigned char *payload, int size)
+{
+	strcpy(publish_topic, signal_topic);
+	memcpy(party_published, payload, (size_t)size);
+	party_published_size = size;
+}
+void p2p_signal_party_publish_on(const char *topic, const unsigned char *payload, int size)
+{
+	strcpy(resent_topic, topic);
+	memcpy(resent, payload, (size_t)size);
+	resent_size = size;
+}
+void p2p_clipboard_offer(const char *text) { strcpy(clipboard, text); }
+void p2p_discord_set_party(const char *link, int count, int maximum)
+{
+	(void)maximum;
+	strcpy(offered_link, link);
+	offered_count = count;
+}
+
 static struct p2p_listing listings[8];
 static int listing_count, browsing, browse_calls;
 
@@ -86,6 +120,19 @@ void lobby_mark_failed_unlocked(const unsigned char *identifier)
 }
 /* lobby_pick.inc: written by tools/test_linux_port.py from p2p_lobby.c */
 #include "lobby_pick.inc"
+
+static int verifies;
+static void (*verify_window)(void);
+
+int __real_p2p_ed25519_verify(const unsigned char *public_key, const void *message, int size, const unsigned char *signature);
+
+int __wrap_p2p_ed25519_verify(const unsigned char *public_key, const void *message, int size, const unsigned char *signature)
+{
+	verifies++;
+	if (verify_window)
+		verify_window();
+	return __real_p2p_ed25519_verify(public_key, message, size, signature);
+}
 int p2p_lobby_browsing(void) { return browsing; }
 void p2p_lobby_browse(int on)
 {
@@ -154,7 +201,7 @@ static void check_records(void)
 	bytes[30] ^= 1;
 	CHECK(!mm_record_read(bytes, size - 1, &read_back), "cut short");
 	/* (signed again, so that only the format is wrong) */
-	bytes[2] = MM_FORMAT + 1;
+	bytes[2] = MM_FORMAT_PARTY + 1;
 	memcpy(message, "hceu-mm-1", 9);
 	memcpy(message + 9, bytes, (size_t)(size - P2P_SIGNATURE_SIZE));
 	p2p_ed25519_sign(seed, record.key, message, 9 + size - P2P_SIGNATURE_SIZE, bytes + size - P2P_SIGNATURE_SIZE);
@@ -186,6 +233,19 @@ static void check_topics(void)
 	CHECK(mm_interval(25) * MM_RECORDS_PER_SECOND >= 25 * 10, "E44: at most 4 a second");
 }
 
+static void check_party_topic(void)
+{
+	unsigned char secret[P2P_PARTY_SECRET_SIZE];
+	char topic[P2P_PARTY_TOPIC_SIZE];
+	int index;
+
+	case_name = "party topic";
+	for (index = 0; index < P2P_PARTY_SECRET_SIZE; index++)
+		secret[index] = (unsigned char)index;
+	mm_party_topic(secret, topic, sizeof(topic));
+	CHECK(!strcmp(topic, "hceu/3/party/" HALO_PORT_NETWORK_VERSION_TEXT "/be45cb2605bf36bebde684841a28f0fd"), "%s", topic);
+}
+
 static void check_topic_moves(void)
 {
 	static const char *const had[3] = { "A", "B", "C" };
@@ -204,22 +264,24 @@ static void check_topic_moves(void)
 	CHECK(unsubscribed == 1 && !unsubscribed_wanted, "[A,B,C] to [B,C]: only A is unsubscribed: %d", unsubscribed);
 }
 
-static void check_verify_budget(void)
+static struct mm_record party_of(int leader, int members, unsigned long sequence);
+
+static void verify_budget_of(int members, int queue_size, double limit_ms)
 {
-	struct p2p_mm_choice choice = { 1u << P2P_MM_SLAYER, P2P_MM_2V2 };
+	struct p2p_mm_choice choice = { 1u << P2P_MM_SLAYER, queue_size };
 	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
 	struct p2p_mm_status status;
 	struct timespec before, after;
 	int index, size, passes, left;
 	double first_pass_ms;
 
-	case_name = "verify_budget";
 	p2p_mm_search(&choice);
 	/* MAXIMUM_QUEUED (64) are kept: 21 keys of three records, and one more */
 	for (index = 0; index < 300; index++)
 	{
-		struct mm_record record = searching(index / 3 + 10, (unsigned long)(index % 3 + 1));
+		struct mm_record record = party_of(index / 3 + 10, members, (unsigned long)(index % 3 + 1));
 
+		record.size = queue_size;
 		seed_of(index / 3 + 10, seed);
 		size = mm_record_write(&record, seed, bytes, sizeof(bytes));
 		pthread_mutex_lock(&p2p_lock);
@@ -234,12 +296,21 @@ static void check_verify_budget(void)
 	for (passes = 1; left && passes < 100; passes++)
 		left = p2p_mm_verify_pass(clock_now);
 	pthread_mutex_unlock(&p2p_lock);
-	CHECK(first_pass_ms < 4.0, "one pass took %.1f ms", first_pass_ms);
+	CHECK(first_pass_ms < limit_ms, "one pass took %.1f ms", first_pass_ms);
 	CHECK(passes > 1 || first_pass_ms < 2.5, "a pass of %.1f ms past the budget stopped early: %d passes", first_pass_ms, passes);
 	CHECK(!left, "the queue drains over later passes: %d left", left);
 	p2p_mm_get_status(&status);
-	CHECK(status.count == 22, "64 kept, all verified into the search: %d searchers counted, 21 and this machine", status.count);
+	CHECK(status.count == 1 + 21 * (members + 1), "64 kept, all verified into the search: %d searchers counted, 21 and this machine",
+		status.count);
 	p2p_mm_cancel();
+}
+
+static void check_verify_budget(void)
+{
+	case_name = "verify_budget";
+	verify_budget_of(0, P2P_MM_2V2, 4.0);
+	case_name = "verify_budget_party";
+	verify_budget_of(3, P2P_MM_4V4, 8.0);
 }
 
 static void check_run_key(void)
@@ -300,11 +371,11 @@ static void check_big_listing(void)
 	pthread_mutex_lock(&p2p_lock);
 	p2p_mm_update(clock_now, 1, token);
 	pthread_mutex_unlock(&p2p_lock);
-	p2p_mm_game(1, 128, 0);
+	p2p_mm_game(1, 0, 128, 0);
 	p2p_mm_get_status(&status);
 	CHECK(status.state == P2P_MM_HOSTING && p2p_mm_hosts_big_game(), "a big host still says so once it hosts");
 	CHECK(browsing, "a lone big host keeps the browser open for the pings it merges by");
-	p2p_mm_game(2, 128, 0);
+	p2p_mm_game(2, 0, 128, 0);
 	CHECK(!browsing, "a big host with a player leaves the browser as it was");
 	p2p_mm_cancel();
 	CHECK(!p2p_mm_hosts_big_game(), "a search cancelled hosts no big game");
@@ -694,6 +765,7 @@ static struct mm_unit unit(int machine, int can_host)
 	p2p_ed25519_to_x25519(result.key, x25519);
 	p2p_key_hash(x25519, result.key_hash);
 	result.can_host = can_host;
+	result.players = 1;
 	return result;
 }
 
@@ -715,25 +787,25 @@ static void check_pool(void)
 	case_name = "pool";
 	for (index = 0; index < 6; index++)
 		units[index] = unit(index, 1);
-	count = mm_pool(units, 6, 4, pool);
+	count = mm_pool(units, 6, 4, 1, pool);
 	CHECK(count == 4, "E4: a pool of 4 from 6: %d", count);
 	for (index = 0; index < count; index++)
 		CHECK(hash_rank(units, 6, pool[index]) == index, "E4: the 4 lowest key hashes, in order: %d at %d",
 			pool[index], index);
 	for (index = 0; index < 6; index++)
 		shuffled[index] = units[5 - index];
-	CHECK(mm_pool(shuffled, 6, 4, again) == 4, "shuffled: a pool");
+	CHECK(mm_pool(shuffled, 6, 4, 1, again) == 4, "shuffled: a pool");
 	for (index = 0; index < 4; index++)
 		CHECK(!memcmp(units[pool[index]].key, shuffled[again[index]].key, P2P_KEY_SIZE), "shuffled: the same pool at %d", index);
 	host = mm_elect(units, pool, count);
 	host_again = mm_elect(shuffled, again, 4);
 	CHECK(host >= 0 && host_again >= 0 && !memcmp(units[host].key, shuffled[host_again].key, P2P_KEY_SIZE),
 		"E4: the same host on every machine");
-	CHECK(mm_pool(units, 3, 4, pool) == 0, "3 of 4: no pool");
+	CHECK(mm_pool(units, 3, 4, 1, pool) == 0, "3 of 4: no pool");
 	for (index = 0; index < MM_MAXIMUM_UNITS; index++)
-		every[index].failed = 1;
-	every[MM_MAXIMUM_UNITS].can_host = 1;
-	CHECK(mm_pool(every, MM_MAXIMUM_UNITS + 1, 1, pool) == 1 && pool[0] == MM_MAXIMUM_UNITS,
+		every[index].failed = every[index].players = 1;
+	every[MM_MAXIMUM_UNITS].can_host = every[MM_MAXIMUM_UNITS].players = 1;
+	CHECK(mm_pool(every, MM_MAXIMUM_UNITS + 1, 1, 0, pool) == 1 && pool[0] == MM_MAXIMUM_UNITS,
 		"this machine and a full peers table: every unit is walked");
 	/* four strict, then one that can host with the highest key hash: it can take only the last place */
 	for (index = 0; index < 5; index++)
@@ -742,13 +814,13 @@ static void check_pool(void)
 		if (hash_rank(units, 5, index) == 4)
 			last = index;
 	units[last].can_host = 1;
-	CHECK(mm_pool(units, 5, 4, pool) == 4 && pool[3] == last && mm_elect(units, pool, 4) == last,
+	CHECK(mm_pool(units, 5, 4, 1, pool) == 4 && pool[3] == last && mm_elect(units, pool, 4) == last,
 		"E38: the host takes the last place and hosts");
 	units[last].can_host = 0;
-	CHECK(mm_pool(units, 5, 4, pool) == 0, "E38: five strict routers form no pool");
+	CHECK(mm_pool(units, 5, 4, 1, pool) == 0, "E38: five strict routers form no pool");
 	units[last].can_host = 1;
 	units[last].failed = 1;
-	CHECK(mm_pool(units, 5, 4, pool) == 0, "E12: the only host failed: no pool until another arrives");
+	CHECK(mm_pool(units, 5, 4, 1, pool) == 0, "E12: the only host failed: no pool until another arrives");
 }
 
 static void check_election(void)
@@ -788,6 +860,9 @@ int lobby_ping_unlocked(const unsigned char *key_hash)
 	return 0;
 }
 
+/* the first of machines that are in the party of parties[] */
+static int party_machines;
+static void party_machine_step(int index);
 static unsigned long now_ms, now_unix;
 static int drop_percent;
 static int sweep_seed = 1, sweep_drop;
@@ -900,6 +975,14 @@ static void game_side(int index)
 
 	memset(token, index + 1, sizeof(token));
 	machine->search.decision.kind = P2P_MM_DECIDE_NONE;
+	if (machine->search.left_game)
+	{
+		machine->search.left_game = 0;
+		if (machine->in >= 0)
+			machines[machine->in].players--;
+		machine->in = -1;
+		machine->hosting = 0;
+	}
 	if (machine->in >= 0 && (machines[machine->in].quit || !machines[machine->in].hosting))
 	{
 		machine->in = -1;
@@ -929,7 +1012,7 @@ static void game_side(int index)
 		machine->hosting = 0;
 		if (fail_join == index)
 		{
-			mm_hosted(&machine->search, token, 1, 4, 0, now_ms);
+			mm_hosted(&machine->search, token, 1, 1, 4, 0, now_ms);
 			hosted_while_joining = machine->search.state == P2P_MM_HOSTING;
 			mm_joined(&machine->search, 0, now_ms);
 			return;
@@ -958,7 +1041,8 @@ static void game_side(int index)
 	}
 	if (machine->hosting)
 	{
-		mm_hosted(&machine->search, token, machine->players, machine->most, machine->players == machine->most, now_ms);
+		mm_hosted(&machine->search, token, machine->players, (machine->players + 1) / 2, machine->most,
+			machine->players == machine->most, now_ms);
 	}
 }
 
@@ -980,6 +1064,8 @@ static void run(double seconds)
 			publish(index, out,
 				mm_step(&machines[index].search, now_ms, out, MM_MAXIMUM_OUT));
 			game_side(index);
+			if (index < party_machines)
+				party_machine_step(index);
 		}
 	}
 }
@@ -988,6 +1074,7 @@ static void world(int count)
 {
 	memset(machines, 0, sizeof(machines));
 	machine_count = count;
+	party_machines = 0;
 	for (count = 0; count < 8; count++)
 		machines[count].in = -1;
 	ignore_first_host = fail_first_host = 0;
@@ -1558,6 +1645,35 @@ static struct mm_record heard_as(struct mm_search *search, int machine, unsigned
 	return read_back;
 }
 
+static struct mm_record party_of(int leader, int members, unsigned long sequence)
+{
+	struct mm_record record = searching(leader, sequence);
+	unsigned char seed[P2P_SEED_SIZE];
+	int index;
+
+	record.party = members + 1;
+	record.size = P2P_MM_4V4;
+	for (index = 0; index < members; index++)
+	{
+		seed_of(leader + 1 + index, seed);
+		p2p_ed25519_public(seed, record.member_keys[index], NULL);
+		mm_party_sign(seed, record.key, record.party_hash, record.member_signatures[index]);
+	}
+	return record;
+}
+
+static void heard_party(struct mm_search *search, int leader, int members, unsigned long sequence, int playlist, int size)
+{
+	struct mm_record record = party_of(leader, members, sequence), read_back;
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+
+	record.playlist = playlist;
+	record.size = size;
+	seed_of(leader, seed);
+	if (mm_record_read(bytes, mm_record_write(&record, seed, bytes, sizeof(bytes)), &read_back))
+		mm_heard(search, &read_back, now_ms);
+}
+
 static void check_strict_lowest(void)
 {
 	int strict = 300, sequence;
@@ -1623,7 +1739,7 @@ static void check_host_now_before_join(void)
 	CHECK(machines[0].hosting && machines[0].in < 0, "HOST NOW is served before a game is joined");
 }
 
-static int game_most_players = 4;
+static int game_most_players = 4, game_red_players, game_size = P2P_MM_2V2;
 
 static void hear_game(int host, int players, int held, unsigned long sequence, unsigned char *key_hash)
 {
@@ -1633,7 +1749,9 @@ static void hear_game(int host, int players, int held, unsigned long sequence, u
 	seed_of(host, seed);
 	memset(token, host, sizeof(token));
 	record.kind = MM_KIND_HOSTING;
+	record.size = game_size;
 	record.players = players;
+	record.red_players = game_red_players;
 	record.most_players = game_most_players;
 	memcpy(record.token, token, P2P_TOKEN_SIZE);
 	if (held)
@@ -2123,6 +2241,584 @@ static void check_two_queues(void)
 		"machine 0 and the CTF machine end in one game: the CTF pool re-elects machine 0");
 }
 
+static void check_party_pool(void)
+{
+	static const int sizes[5] = { 2, 2, 2, 1, 1 };
+	struct mm_unit units[8];
+	int pool[8], index, count;
+
+	case_name = "e21_party_pool";
+	for (index = 0; index < 3; index++)
+		units[index] = unit(index, 1);
+	units[0].players = 2;
+	CHECK(mm_pool(units, 3, 4, 1, pool) == 3, "E21: a party of 2 and two solos are one pool of three units");
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	for (index = 1; index <= 3; index++)
+	{
+		heard_party(&machines[0].search, 300, 1, index, P2P_MM_SLAYER, P2P_MM_2V2);
+		heard_party(&machines[0].search, 302, 0, index, P2P_MM_SLAYER, P2P_MM_2V2);
+	}
+	run(1.0);
+	CHECK(machines[0].search.pool_count == 3, "E21: a searcher pools a heard party as one unit of 2: %d",
+		machines[0].search.pool_count);
+
+	case_name = "e26_parties_3v3";
+	for (index = 0; index < 5; index++)
+		units[index] = unit(index, 1);
+	for (index = 0; index < 5; index++)
+		units[index].players = sizes[hash_rank(units, 5, index)];
+	count = mm_pool(units, 5, 6, 1, pool);
+	CHECK(count == 4, "E26: four units in the pool: %d", count);
+	if (count == 4)
+	{
+		CHECK(hash_rank(units, 5, pool[0]) == 0 && hash_rank(units, 5, pool[1]) == 1 &&
+			hash_rank(units, 5, pool[2]) == 3 && hash_rank(units, 5, pool[3]) == 4, "E26: A, B, D and E; C waits");
+	}
+	count = mm_pool(units, 5, 6, 0, pool);
+	CHECK(count == 3, "a free-for-all takes three parties of 2: %d", count);
+	for (index = 0; index < 3; index++)
+		units[index].players = 3 - hash_rank(units, 3, index);
+	count = mm_pool(units, 3, 4, 0, pool);
+	CHECK(count == 2 && units[pool[0]].players == 3 && units[pool[1]].players == 1,
+		"a party that does not fit is passed over: %d", count);
+	units[0].players = units[1].players = 2;
+	units[0].can_host = units[1].can_host = 0;
+	CHECK(mm_pool(units, 2, 4, 1, pool) == 0, "two strict parties form no pool");
+}
+
+static void check_party_sizes(void)
+{
+	static const int refused[] = { P2P_MM_1V1, P2P_MM_2V2 };
+	static const int allowed[] = { P2P_MM_3V3, P2P_MM_4V4, P2P_MM_FFA_6, P2P_MM_BIG_TEAM, P2P_MM_BIG_FFA };
+	unsigned index;
+
+	case_name = "e22_sizes";
+	for (index = 0; index < sizeof(refused) / sizeof(*refused); index++)
+		CHECK(!mm_party_size_allowed(3, refused[index]), "E22: a party of 3 is refused on %s",
+			p2p_mm_size_names[refused[index]]);
+	for (index = 0; index < sizeof(allowed) / sizeof(*allowed); index++)
+		CHECK(mm_party_size_allowed(3, allowed[index]), "E22: a party of 3 is allowed on %s",
+			p2p_mm_size_names[allowed[index]]);
+	CHECK(mm_party_size_allowed(1, P2P_MM_1V1), "a solo stands on every size");
+	CHECK(!mm_party_size_allowed(4, P2P_MM_FFA_6), "FFA 6 takes a party of 3 at most");
+	CHECK(mm_party_size_allowed(MM_MAXIMUM_PARTY, P2P_MM_BIG_TEAM) && mm_party_size_allowed(MM_MAXIMUM_PARTY, P2P_MM_BIG_FFA),
+		"a full party has BIG TEAM and BIG FFA");
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	heard_party(&machines[0].search, 300, 2, 1, P2P_MM_SLAYER, P2P_MM_2V2);
+	CHECK(!has_peer(&machines[0].search, 300), "a party too large for its queue is not heard");
+}
+
+static void party_key(int machine, unsigned char *key)
+{
+	unsigned char seed[P2P_SEED_SIZE];
+
+	seed_of(machine, seed);
+	p2p_ed25519_public(seed, key, NULL);
+}
+
+static void resign(int machine, unsigned char *bytes, int size)
+{
+	unsigned char seed[P2P_SEED_SIZE], key[P2P_KEY_SIZE], message[MM_MAXIMUM_RECORD_SIZE + 9];
+
+	seed_of(machine, seed);
+	party_key(machine, key);
+	memcpy(message, "hceu-mm-1", 9);
+	memcpy(message + 9, bytes, (size_t)(size - P2P_SIGNATURE_SIZE));
+	p2p_ed25519_sign(seed, key, message, 9 + size - P2P_SIGNATURE_SIZE, bytes + size - P2P_SIGNATURE_SIZE);
+}
+
+static int party_refused(const struct mm_record *record)
+{
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+	struct mm_record read_back;
+
+	int size;
+
+	seed_of(300, seed);
+	size = mm_record_write(record, seed, bytes, sizeof(bytes));
+	verifies = 0;
+	return !mm_record_read(bytes, size, &read_back);
+}
+
+static void heard_strict(struct mm_search *search, int machine, unsigned long sequence)
+{
+	struct mm_record record = searching(machine, sequence), read_back;
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+
+	record.playlist = P2P_MM_SLAYER;
+	record.size = P2P_MM_2V2;
+	record.can_host = 0;
+	seed_of(machine, seed);
+	if (mm_record_read(bytes, mm_record_write(&record, seed, bytes, sizeof(bytes)), &read_back))
+		mm_heard(search, &read_back, now_ms);
+}
+
+static void set_party(struct mm_search *search, const struct mm_record *record, int member_hosts)
+{
+	struct mm_search_party party;
+
+	memset(&party, 0, sizeof(party));
+	party.count = record->party;
+	party.member_hosts = member_hosts;
+	memcpy(party.keys, record->member_keys, sizeof(party.keys));
+	memcpy(party.signatures, record->member_signatures, sizeof(party.signatures));
+	mm_set_party(search, &party, now_ms);
+}
+
+static void check_party_search(void)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct mm_record read_back, keys, flags = { 0 };
+	int count, index, hosts = 0;
+
+	case_name = "party_search";
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_4V4, 1);
+	keys = party_of(100, 3, 1);
+	set_party(&machines[0].search, &keys, 0);
+	count = mm_step(&machines[0].search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(count == 1 && mm_record_read(out[0].bytes, out[0].size, &read_back) && read_back.party == 4 &&
+		!memcmp(read_back.member_keys, keys.member_keys, 3 * P2P_KEY_SIZE),
+		"the leader's search is a format 2 record of its 4 players");
+	keys = party_of(100, 1, 1);
+	set_party(&machines[0].search, &keys, 0);
+	CHECK(machines[0].search.next_record == now_ms, "a smaller party is told at once, start kept");
+	mm_step(&machines[0].search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(machines[0].search.started == now_unix, "the start kept");
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_4V4, 1);
+	keys = party_of(100, 3, 1);
+	set_party(&machines[0].search, &keys, 0);
+	mm_widen_now(&machines[0].search);
+	CHECK(machines[0].search.queue_count == 1 && machines[0].search.queues[0][1] == P2P_MM_4V4,
+		"a party of 4 widens to no size it cannot fit: %d queues", machines[0].search.queue_count);
+
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 0);
+	keys = party_of(100, 1, 1);
+	set_party(&machines[0].search, &keys, 1);
+	mm_step(&machines[0].search, now_ms, out, MM_MAXIMUM_OUT);
+	for (index = 0; index < 16; index++)
+	{
+		now_ms += 500;
+		heard_strict(&machines[0].search, 301, 300 + (unsigned long)index);
+		heard_strict(&machines[0].search, 302, 300 + (unsigned long)index);
+		count = mm_step(&machines[0].search, now_ms, out, MM_MAXIMUM_OUT);
+		hosts += machines[0].search.decided == P2P_MM_DECIDE_HOST;
+		if (count && mm_record_read(out[0].bytes, out[0].size, &read_back) && read_back.kind == MM_KIND_SEARCHING)
+			flags = read_back;
+	}
+	CHECK(flags.can_host, "a strict leader's party can host through its member");
+	CHECK(machines[0].search.pool_count == 3, "the party of 2 and two others fill 2V2: pool of %d",
+		machines[0].search.pool_count);
+	CHECK(!hosts, "a strict leader never takes the party's host");
+}
+
+static int pool_names(const struct mm_record *record, const unsigned char *key)
+{
+	unsigned char x25519[P2P_KEY_SIZE], hash[P2P_KEY_HASH_SIZE];
+	int index;
+
+	p2p_ed25519_to_x25519(key, x25519);
+	p2p_key_hash(x25519, hash);
+	for (index = 0; index < record->pool_count; index++)
+		if (!memcmp(record->pool[index], hash, P2P_KEY_HASH_SIZE))
+			return index + 1;
+	return 0;
+}
+
+/* E28, through the records: a hosting record's team counts, on the wire, decide a party's join */
+static void check_e28_room(void)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct mm_record keys;
+	unsigned char even[P2P_KEY_HASH_SIZE], red[P2P_KEY_HASH_SIZE];
+	char text[2 * P2P_KEY_HASH_SIZE + 1];
+	struct mm_search *search;
+
+	case_name = "e28_room";
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	keys = party_of(100, 1, 1);
+	set_party(search, &keys, 0);
+	game_red_players = 1;
+	hear_game(300, 2, 0, 1, even);
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_NONE, "1 and 1 is passed over");
+	game_red_players = 2;
+	hear_game(301, 2, 0, 1, red);
+	game_red_players = 0;
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	p2p_hex(red, P2P_KEY_HASH_SIZE, text);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_JOIN &&
+		!strncmp(search->decision.invite + strlen("halo://join/"), text, strlen(text)), "2 on red is joined");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	game_red_players = 1;
+	hear_game(300, 2, 0, 1, even);
+	game_red_players = 0;
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_JOIN, "a solo takes 1 and 1");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	keys = party_of(100, 1, 1);
+	set_party(search, &keys, 0);
+	game_red_players = 1;
+	hear_game(300, 3, 1, 1, even);
+	game_red_players = 0;
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_JOIN, "a held seat is the party's whatever the counts");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	game_red_players = 2;
+	hear_game(300, 4, 1, 1, even);
+	game_red_players = 0;
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_NONE, "a held seat in a full game is not taken");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	game_red_players = 3;
+	hear_game(300, 4, 0, 1, even);
+	game_red_players = 0;
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_NONE, "3 and 1 is full, whatever its short team");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_FFA_6, 1);
+	keys = party_of(100, 1, 1);
+	set_party(search, &keys, 0);
+	game_red_players = 2;
+	game_most_players = 6;
+	game_size = P2P_MM_FFA_6;
+	hear_game(300, 4, 0, 1, even);
+	game_red_players = 0;
+	game_most_players = 4;
+	game_size = P2P_MM_2V2;
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_JOIN, "a free-for-all has no teams to be short of");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	keys = party_of(100, 1, 1);
+	set_party(search, &keys, 0);
+	hear_game(300, 2, 0, 1, even);
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_NONE, "no red count hides the short team: a party passes it by");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	hear_game(300, 2, 0, 1, even);
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_JOIN, "a player alone fits without a red count");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_FFA_6, 1);
+	keys = party_of(100, 1, 1);
+	set_party(search, &keys, 0);
+	game_most_players = 6;
+	game_size = P2P_MM_FFA_6;
+	hear_game(300, 2, 0, 1, even);
+	game_most_players = 4;
+	game_size = P2P_MM_2V2;
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decision.kind == P2P_MM_DECIDE_JOIN, "a free-for-all needs no red count");
+}
+
+static void check_team_counts(void)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct mm_record read_back, record = searching(300, 1);
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE], token[P2P_TOKEN_SIZE] = { 1 };
+	struct mm_search *search;
+	int count, index, red = -1, size;
+
+	case_name = "team_counts";
+	seed_of(300, seed);
+	record.kind = MM_KIND_HOSTING;
+	record.most_players = 4;
+	record.players = 2;
+	size = mm_record_write(&record, seed, bytes, sizeof(bytes));
+	record.red_players = 2;
+	CHECK(mm_record_write(&record, seed, bytes, sizeof(bytes)) == size, "the counts add no bytes");
+	CHECK(bytes[2] == MM_FORMAT, "and take no new format");
+	CHECK(mm_record_read(bytes, size, &read_back) && read_back.red_players == 2 && read_back.can_host,
+		"they read back beside the flags: %d", read_back.red_players);
+	record.red_players = 20;
+	mm_record_write(&record, seed, bytes, sizeof(bytes));
+	CHECK(mm_record_read(bytes, size, &read_back) && read_back.red_players == MM_RED_MAXIMUM && read_back.can_host,
+		"a count past four bits stops at the top: %d", read_back.red_players);
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	search->hosting_playlist = P2P_MM_SLAYER;
+	search->hosting_size = P2P_MM_2V2;
+	search->state = P2P_MM_FOUND;
+	search->decided = P2P_MM_DECIDE_HOST;
+	mm_hosted(search, token, 2, 1, 4, 0, now_ms);
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	now_ms += 100;
+	mm_hosted(search, token, 2, 2, 4, 0, now_ms);
+	count = mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	for (index = 0; index < count; index++)
+	{
+		if (mm_record_read(out[index].bytes, out[index].size, &read_back) && read_back.kind == MM_KIND_HOSTING)
+			red = read_back.red_players;
+	}
+	CHECK(red == 2, "a player's move is published at once: %d", red);
+}
+
+static int team_party_named(const struct mm_search *search, int machine, int *reserved)
+{
+	struct p2p_mm_team_party parties[P2P_MM_TEAM_PARTIES];
+	struct mm_record named = heard_as(NULL, machine, 1, 1);
+	int count = mm_team_parties(search, now_ms, parties), index, member;
+
+	for (index = 0; index < count; index++)
+	{
+		for (member = 0; member < parties[index].players; member++)
+		{
+			if (!memcmp(parties[index].key_hashes[member], named.key_hash, P2P_KEY_HASH_SIZE))
+			{
+				*reserved = parties[index].reserved;
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+static void heard_strict_party(struct mm_search *search, int leader, unsigned long sequence)
+{
+	struct mm_record record = party_of(leader, 1, sequence), read_back;
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+
+	record.playlist = P2P_MM_SLAYER;
+	record.size = P2P_MM_2V2;
+	record.can_host = 0;
+	seed_of(leader, seed);
+	if (mm_record_read(bytes, mm_record_write(&record, seed, bytes, sizeof(bytes)), &read_back))
+		mm_heard(search, &read_back, now_ms);
+}
+
+static void check_team_parties(void)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct mm_record own;
+	struct mm_search *search;
+	unsigned char token[P2P_TOKEN_SIZE] = { 1 };
+	int reserved = 0, index;
+
+	case_name = "team_parties";
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	heard_strict_party(search, 200, 1);
+	CHECK(!team_party_named(search, 201, &reserved), "no parties before this machine hosts");
+	for (index = 0; index < 16 && search->decided != P2P_MM_DECIDE_HOST; index++)
+	{
+		now_ms += 500;
+		heard_strict(search, 300, 300 + (unsigned long)index);
+		heard_strict_party(search, 200, 300 + (unsigned long)index);
+		mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	}
+	CHECK(search->decided == P2P_MM_DECIDE_HOST, "the one machine that can host hosts");
+	mm_hosted(search, token, 1, 1, 4, 0, now_ms);
+	CHECK(team_party_named(search, 200, &reserved) && reserved, "a pool party's leader, seats held");
+	CHECK(team_party_named(search, 201, &reserved) && reserved, "and its member");
+	CHECK(!team_party_named(search, 300, &reserved), "a solo is in no party");
+	now_ms += 100;
+	heard_kind(search, 200, 400, MM_KIND_CANCEL);
+	CHECK(team_party_named(search, 201, &reserved) && reserved, "the leader's cancel, as it joins, keeps its member");
+	heard_party(search, 200, 1, 500, P2P_MM_SLAYER, P2P_MM_2V2);
+	CHECK(team_party_named(search, 201, &reserved) && reserved, "heard again, a party keeps its seats");
+	heard_party(search, 210, 1, 1, P2P_MM_SLAYER, P2P_MM_2V2);
+	CHECK(team_party_named(search, 211, &reserved) && !reserved, "a party heard while hosting holds no seats");
+	heard_party(search, 210, 1, 2, P2P_MM_SLAYER, P2P_MM_2V2);
+	CHECK(search->team_party_count == 2, "heard again, it is the same party: %d", search->team_party_count);
+	now_ms += MM_PARTY_SEATS;
+	CHECK(team_party_named(search, 201, &reserved) && !reserved, "held seats lapse, and the party stays known");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	own = party_of(100, 1, 1);
+	set_party(search, &own, 0);
+	mm_host_now(search);
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	CHECK(search->decided == P2P_MM_DECIDE_HOST, "its leader hosts");
+	mm_hosted(search, token, 1, 1, 4, 0, now_ms);
+	CHECK(team_party_named(search, 100, &reserved) && reserved, "the host's own party, seats held");
+	CHECK(team_party_named(search, 101, &reserved) && reserved, "and its member");
+
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	mm_host_now(search);
+	mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	mm_hosted(search, token, 1, 1, 4, 0, now_ms);
+	own = party_of(100, 1, 1);
+	set_party(search, &own, 0);
+	CHECK(team_party_named(search, 101, &reserved) && reserved, "a member gained while hosting is placed");
+}
+
+static void check_party_pool_invited(void)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct mm_record read_back, heard, own, other = party_of(200, 1, 300);
+	struct mm_search *search;
+	unsigned char token[P2P_TOKEN_SIZE], seed[P2P_SEED_SIZE], opened[P2P_TOKEN_SIZE];
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+	int count, index, found = 0;
+
+	case_name = "party_pool_invited";
+	world(1);
+	search = &machines[0].search;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_3V3, 1);
+	own = party_of(100, 1, 1);
+	set_party(search, &own, 0);
+	memset(token, 7, sizeof(token));
+	for (index = 0; index < 3; index++)
+		heard_party(search, 200, 1, 300 + (unsigned long)index, P2P_MM_SLAYER, P2P_MM_3V3);
+	memcpy(search->pool[0], search->key_hash, P2P_KEY_HASH_SIZE);
+	other.playlist = P2P_MM_SLAYER;
+	other.size = P2P_MM_3V3;
+	seed_of(200, seed);
+	CHECK(mm_record_read(bytes, mm_record_write(&other, seed, bytes, sizeof(bytes)), &heard), "read");
+	memcpy(search->pool[1], heard.key_hash, P2P_KEY_HASH_SIZE);
+	search->pool_count = 2;
+	search->hosting_playlist = P2P_MM_SLAYER;
+	search->hosting_size = P2P_MM_3V3;
+	search->state = P2P_MM_FOUND;
+	search->decided = P2P_MM_DECIDE_HOST;
+	mm_hosted(search, token, 1, 0, 6, 0, now_ms);
+	count = mm_step(search, now_ms, out, MM_MAXIMUM_OUT);
+	for (index = 0; index < count; index++)
+		found |= mm_record_read(out[index].bytes, out[index].size, &read_back) && read_back.kind == MM_KIND_HOSTING;
+	CHECK(found && read_back.pool_count == 3, "the host's own member and the other party's two are invited: %d",
+		read_back.pool_count);
+	CHECK(pool_names(&read_back, own.member_keys[0]) && pool_names(&read_back, other.key) &&
+		pool_names(&read_back, other.member_keys[0]), "each by its own key");
+	seed_of(201, seed);
+	index = pool_names(&read_back, other.member_keys[0]) - 1;
+	CHECK(index >= 0 && mm_open_token(seed, read_back.key, read_back.sealed[index], opened) &&
+		!memcmp(opened, token, P2P_TOKEN_SIZE), "the other party's member opens its own token");
+}
+
+static void check_party_records(void)
+{
+	enum { HEADER = MM_HEADER_SIZE + 1 + P2P_KEY_HASH_SIZE };
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE + 1];
+	struct mm_record record = party_of(300, 2, 7), full = party_of(300, 3, 7), big = party_of(300, MM_MAXIMUM_PARTY - 1, 7), bad, read_back;
+	unsigned char x25519[P2P_KEY_SIZE];
+	int size, index;
+
+	case_name = "e42_member_signatures";
+	seed_of(300, seed);
+	size = mm_record_write(&record, seed, bytes, MM_MAXIMUM_RECORD_SIZE);
+	CHECK(size == HEADER + 2 * MM_MEMBER_SIZE + P2P_SIGNATURE_SIZE && bytes[2] == MM_FORMAT_PARTY && bytes[MM_HEADER_SIZE] == 3,
+		"format 2, N and two members: %d bytes", size);
+	CHECK(mm_record_read(bytes, size, &read_back) && read_back.party == 3 &&
+		!memcmp(read_back.member_keys, record.member_keys, 2 * P2P_KEY_SIZE), "a party of 3 read back");
+
+	bad = record;
+	seed_of(303, seed);
+	mm_party_sign(seed, record.key, record.party_hash, bad.member_signatures[1]);
+	CHECK(party_refused(&bad), "E42: a member's signature that is another key's is refused");
+	bad = record;
+	memset(bad.member_signatures[0], 0, P2P_SIGNATURE_SIZE);
+	CHECK(party_refused(&bad), "an unsigned member is refused");
+	bad = record;
+	party_key(301, bad.member_keys[1]);
+	memcpy(bad.member_signatures[1], bad.member_signatures[0], P2P_SIGNATURE_SIZE);
+	CHECK(party_refused(&bad), "a member named twice is refused");
+	bad = record;
+	memcpy(bad.member_keys[0], bad.key, P2P_KEY_SIZE);
+	seed_of(300, seed);
+	mm_party_sign(seed, bad.key, bad.party_hash, bad.member_signatures[0]);
+	CHECK(party_refused(&bad), "the leader named as a member is refused");
+	bad = party_of(304, 2, 7);
+	memcpy(bad.key, record.key, P2P_KEY_SIZE);
+	CHECK(party_refused(&bad), "signatures made for another leader are refused");
+	bad = record;
+	bad.party_hash[0] ^= 1;
+	CHECK(party_refused(&bad), "signatures made for another link are refused");
+	bad = record;
+	memcpy(bad.member_keys[1], bad.member_keys[0], P2P_KEY_SIZE);
+	bad.member_keys[1][P2P_KEY_SIZE - 1] ^= 0x80;
+	CHECK(party_refused(&bad) && verifies == 2, "a member's negative is the same machine, unchecked: %d signatures", verifies);
+	bad = record;
+	memset(bad.member_keys[1], 0, P2P_KEY_SIZE);
+	CHECK(!p2p_ed25519_to_x25519(bad.member_keys[1], x25519), "the zero key has no X25519 form");
+	CHECK(party_refused(&bad) && verifies == 2, "a member with no X25519 form goes unchecked: %d signatures", verifies);
+
+	seed_of(300, seed);
+	size = mm_record_write(&full, seed, bytes, MM_MAXIMUM_RECORD_SIZE);
+	CHECK(mm_record_read(bytes, size, &read_back) && read_back.party == 4, "the largest party a queue takes read back");
+	size = mm_record_write(&big, seed, bytes, MM_MAXIMUM_RECORD_SIZE);
+	CHECK(size == MM_MAXIMUM_PARTY_SIZE && !mm_record_read(bytes, size, &read_back),
+		"the largest party the format holds is written and 4v4 refuses it: %d bytes", size);
+	bad = big;
+	bad.party = MM_MAXIMUM_PARTY + 1;
+	CHECK(!mm_record_write(&bad, seed, bytes, MM_MAXIMUM_RECORD_SIZE), "a party too large is not written");
+	bad = record;
+	bad.kind = MM_KIND_HOSTING;
+	CHECK(!mm_record_write(&bad, seed, bytes, MM_MAXIMUM_RECORD_SIZE), "only a searching record names a party");
+
+	size = mm_record_write(&record, seed, bytes, MM_MAXIMUM_RECORD_SIZE);
+	CHECK(!mm_record_read(bytes, size - 1, &read_back), "cut short");
+	bytes[size] = 0;
+	resign(300, bytes, size + 1);
+	CHECK(!mm_record_read(bytes, size + 1, &read_back), "a byte too long");
+	size = mm_record_write(&record, seed, bytes, MM_MAXIMUM_RECORD_SIZE);
+	for (index = 0; index < 2; index++)
+	{
+		bytes[MM_HEADER_SIZE] = (unsigned char)index;
+		resign(300, bytes, HEADER + P2P_SIGNATURE_SIZE);
+		CHECK(!mm_record_read(bytes, HEADER + P2P_SIGNATURE_SIZE, &read_back), "a count of %d is refused", index);
+	}
+	size = mm_record_write(&record, seed, bytes, MM_MAXIMUM_RECORD_SIZE);
+	bytes[MM_HEADER_SIZE] = 4;
+	resign(300, bytes, size);
+	CHECK(!mm_record_read(bytes, size, &read_back), "a count past the bytes is refused");
+	bytes[MM_HEADER_SIZE] = 3;
+	bytes[5] = MM_KIND_CANCEL;
+	resign(300, bytes, size);
+	CHECK(!mm_record_read(bytes, size, &read_back), "a cancel in format 2 is refused");
+	size = mm_record_write(&record, seed, bytes, MM_MAXIMUM_RECORD_SIZE);
+	bytes[size - 1] ^= 1;
+	CHECK(!mm_record_read(bytes, size, &read_back), "unsigned by the leader");
+	size = mm_record_write(&record, seed, bytes, MM_MAXIMUM_RECORD_SIZE);
+	bytes[2] = MM_FORMAT;
+	resign(300, bytes, size);
+	CHECK(!mm_record_read(bytes, size, &read_back), "format 1 with a party's bytes is refused");
+	record = searching(300, 7);
+	size = mm_record_write(&record, seed, bytes, MM_MAXIMUM_RECORD_SIZE);
+	CHECK(size == MM_HEADER_SIZE + P2P_SIGNATURE_SIZE && bytes[2] == MM_FORMAT && mm_record_read(bytes, size, &read_back) &&
+		read_back.party == 1, "a solo's record stays format 1");
+
+	case_name = "party_no_signature";
+	bad = party_of(300, 2, 7);
+	bad.size = P2P_MM_2V2;
+	CHECK(party_refused(&bad) && !verifies, "a party too large for its queue spends no signature: %d", verifies);
+	CHECK(party_refused(&big) && !verifies, "a party of 8 on 4v4 spends no signature: %d", verifies);
+}
+
 static void check_pool_never_hosts(void)
 {
 	int low = lowest_key_hash(4), index;
@@ -2216,6 +2912,1438 @@ static void check_faults(void)
 	check_pool_never_hosts();
 }
 
+static struct mm_party parties[P2P_PARTY_MAXIMUM + 2];
+static unsigned long party_now;
+static int party_silent;
+
+static void party_seed(int machine, unsigned char *seed)
+{
+	seed_of(machine + 400, seed);
+}
+
+static int party_quit(int index)
+{
+	return machines[index].quit;
+}
+
+static void party_send(int machines, const char *topic, const unsigned char *bytes, int size)
+{
+	int index;
+
+	for (index = 0; index < machines; index++)
+	{
+		struct mm_party_record record;
+
+		if (index < party_machines && party_quit(index))
+			continue;
+		if (!strcmp(parties[index].topic, topic) && mm_party_read(&parties[index], bytes, size, &record) &&
+			mm_party_verify(&record))
+		{
+			mm_party_heard(&parties[index], &record, party_now);
+		}
+	}
+}
+
+static void party_run(int machines, int half_seconds)
+{
+	while (half_seconds--)
+	{
+		int index;
+
+		party_now += 500;
+		for (index = 0; index < machines; index++)
+		{
+			unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+			char topic[P2P_PARTY_TOPIC_SIZE];
+			int size;
+
+			if (index == party_silent)
+				continue;
+			strcpy(topic, parties[index].topic);
+			size = mm_party_step(&parties[index], party_now, bytes);
+			if (size)
+				party_send(machines, topic, bytes, size);
+		}
+	}
+}
+
+static void party_form(int machines)
+{
+	static const char *const names[] = { "CHIEF", "ROOK", "KAT", "JUN", "EMILE", "JORGE", "CARTER", "NOBLE", "SIX" };
+	unsigned char seed[P2P_SEED_SIZE], secret[P2P_PARTY_SECRET_SIZE];
+	int index;
+
+	memset(parties, 0, sizeof(parties));
+	memset(secret, 0x31, sizeof(secret));
+	party_now = 1000000;
+	party_silent = -1;
+	for (index = 0; index < machines; index++)
+		strcpy(parties[index].name, names[index]);
+	party_seed(0, seed);
+	mm_party_make(&parties[0], seed, secret, party_now);
+	for (index = 1; index < machines; index++)
+	{
+		party_seed(index, seed);
+		mm_party_join(&parties[index], seed, parties[0].link, party_now);
+	}
+	party_run(machines, 12);
+}
+
+static void party_machine_step(int index)
+{
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+	char topic[P2P_PARTY_TOPIC_SIZE];
+	int size;
+
+	party_now = now_ms;
+	mm_party_search(&parties[index], &machines[index].search, now_ms, now_unix);
+	strcpy(topic, parties[index].topic);
+	size = mm_party_step(&parties[index], now_ms, bytes);
+	if (size)
+		party_send(party_machines, topic, bytes, size);
+}
+
+static void party_world(int members, int total)
+{
+	world(total);
+	party_form(members);
+	now_ms = party_now;
+	party_machines = members;
+}
+
+/* can_host: a bit for each machine */
+static void party_start(int members, int size, unsigned can_host)
+{
+	struct p2p_mm_choice choice = { 1u << P2P_MM_SLAYER, size };
+	struct mm_search *search = &machines[0].search;
+	unsigned char seed[P2P_SEED_SIZE];
+	int index;
+
+	for (index = 1; index < members; index++)
+		machines[index].search.can_host = can_host >> index & 1;
+	party_seed(0, seed);
+	mm_start(search, seed, &choice, now_ms, now_unix);
+	search->state = P2P_MM_QUEUED;
+	search->can_host = can_host & 1;
+	mm_party_search_begin(&parties[0], search, now_ms);
+}
+
+static int party_size(void)
+{
+	return machines[0].search.party.count;
+}
+
+static void check_e24_leader_cancels(void)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct p2p_party_status status;
+
+	case_name = "e24_leader_cancels";
+	party_world(3, 3);
+	party_start(3, P2P_MM_4V4, 7);
+	run(8);
+	CHECK(party_size() == 3, "the leader's records carry 3: %d", party_size());
+	CHECK(machines[1].search.state == P2P_MM_QUEUED && machines[2].search.state == P2P_MM_QUEUED, "the members follow");
+	CHECK(!machines[1].search.next_queue && machines[1].search.party.following, "and publish no search of their own");
+	mm_party_status(&parties[1], &status);
+	CHECK(status.choice.size == P2P_MM_4V4 && status.choice.playlists == 1u << P2P_MM_SLAYER, "a member reads the choice");
+	publish(0, out, mm_cancel(&machines[0].search, out, MM_MAXIMUM_OUT));
+	run(4);
+	CHECK(machines[1].search.state == P2P_MM_OFF && machines[2].search.state == P2P_MM_OFF, "every member's state OFF");
+	CHECK(parties[0].count == 3 && parties[1].role == MM_PARTY_MEMBER && parties[2].role == MM_PARTY_MEMBER,
+		"the party intact");
+}
+
+static void check_e23_member_quits(void)
+{
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+	char topic[P2P_PARTY_TOPIC_SIZE];
+	unsigned long started;
+	int index, size;
+
+	case_name = "e23_member_quits";
+	party_world(3, 7);
+	party_start(3, P2P_MM_3V3, 1);
+	for (index = 3; index < 5; index++)
+		start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_3V3, 0);
+	run(8);
+	CHECK(party_size() == 3, "3 at first: %d", party_size());
+	started = machines[0].search.started;
+	machines[1].quit = 1;
+	run(10);
+	CHECK(party_size() == 2, "N-1 within 10 s: %d", party_size());
+	CHECK(machines[0].search.started == started, "the start kept");
+	for (index = 5; index < 7; index++)
+		start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_3V3, 0);
+	run(30);
+	CHECK(machines[0].hosting && machines[0].players == 6, "a pool not yet settled forms again: %d in the game",
+		machines[0].players);
+
+	party_world(3, 3);
+	party_start(3, P2P_MM_4V4, 7);
+	run(8);
+	strcpy(topic, parties[2].topic);
+	size = mm_party_leave(&parties[2], bytes);
+	party_send(3, topic, bytes, size);
+	run(3);
+	CHECK(party_size() == 2, "LEAVE PARTY: within 3 s: %d", party_size());
+	CHECK(machines[2].search.state == P2P_MM_OFF, "who leaves stops searching");
+	CHECK(machines[1].search.state == P2P_MM_QUEUED, "the other member searches on");
+}
+
+static void check_e60_member_b(void)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	unsigned long started;
+
+	case_name = "e60_member_b";
+	party_world(3, 3);
+	party_start(3, P2P_MM_4V4, 7);
+	run(8);
+	started = machines[0].search.started;
+	mm_party_search_left(&parties[1], now_ms);
+	mm_cancel(&machines[1].search, out, MM_MAXIMUM_OUT);
+	run(3);
+	CHECK(party_size() == 2, "N-1 within 3 s: %d", party_size());
+	CHECK(machines[0].search.started == started, "the start kept");
+	CHECK(parties[0].count == 3 && parties[1].role == MM_PARTY_MEMBER, "still in the party");
+	CHECK(parties[0].notice == P2P_PARTY_NOTICE_LEFT_SEARCH, "the leader told: %d", parties[0].notice);
+	run(6);
+	CHECK(machines[1].search.state == P2P_MM_OFF, "the member stays out of this search");
+	publish(0, out, mm_cancel(&machines[0].search, out, MM_MAXIMUM_OUT));
+	run(4);
+	party_start(3, P2P_MM_4V4, 7);
+	run(8);
+	CHECK(party_size() == 3 && machines[1].search.party.following, "the leader's next SEARCH takes the member again");
+}
+
+static void check_e30_leader_quits(void)
+{
+	case_name = "e30_leader_quits";
+	party_world(3, 3);
+	party_start(3, P2P_MM_4V4, 7);
+	run(8);
+	machines[0].quit = 1;
+	run(14);
+	CHECK(parties[1].notice == P2P_PARTY_NOTICE_ENDED, "ENDED: %d", parties[1].notice);
+	CHECK(parties[1].role == MM_PARTY_NONE && parties[2].role == MM_PARTY_NONE, "solo");
+	CHECK(machines[1].search.state == P2P_MM_OFF && machines[2].search.state == P2P_MM_OFF, "not searching");
+}
+
+static void check_e47_strict_leader(void)
+{
+	struct p2p_mm_team_party team_table[P2P_MM_TEAM_PARTIES];
+
+	case_name = "e47_strict_leader";
+	party_world(2, 2);
+	party_start(2, P2P_MM_2V2, 2);
+	run(100);
+	CHECK(!machines[1].hosting, "no host before 2:00");
+	run(40);
+	CHECK(machines[1].hosting, "the member hosts");
+	CHECK(machines[0].in == 1, "the leader joins");
+	CHECK(mm_team_parties(&machines[1].search, now_ms, team_table) == 1 && team_table[0].players == 2 &&
+		!memcmp(team_table[0].key_hashes[0], machines[0].search.key_hash, P2P_KEY_HASH_SIZE) &&
+		!memcmp(team_table[0].key_hashes[1], machines[1].search.key_hash, P2P_KEY_HASH_SIZE),
+		"the member hosting knows its party, to place the leader on its team");
+	CHECK(machines[0].search.in_game && !parties[0].notice, "and the party stays together: notice %d", parties[0].notice);
+}
+
+static void check_e47_big_strict_leader(void)
+{
+	static const int sizes[] = { P2P_MM_BIG_TEAM, P2P_MM_BIG_FFA };
+	struct p2p_mm_team_party team_table[P2P_MM_TEAM_PARTIES];
+	int index;
+
+	case_name = "e47_big_strict_leader";
+	for (index = 0; index < 2; index++)
+	{
+		party_world(3, 3);
+		party_start(3, sizes[index], 6);
+		run(20);
+		CHECK(machines[1].hosting && !machines[2].hosting, "size %d: the first member who can hosts: %d and %d",
+			sizes[index], machines[1].hosting, machines[2].hosting);
+		CHECK(mm_team_parties(&machines[1].search, now_ms, team_table) == 1 && team_table[0].players == 3 &&
+			!memcmp(team_table[0].key_hashes[0], machines[0].search.key_hash, P2P_KEY_HASH_SIZE) &&
+			!memcmp(team_table[0].key_hashes[1], machines[1].search.key_hash, P2P_KEY_HASH_SIZE) &&
+			!memcmp(team_table[0].key_hashes[2], machines[2].search.key_hash, P2P_KEY_HASH_SIZE),
+			"size %d: the member hosting knows its party, to place it on one team", sizes[index]);
+		run(20);
+		CHECK(machines[0].in == 1 && machines[2].in == 1, "size %d: the leader and the other member join it: in %d and %d",
+			sizes[index], machines[0].in, machines[2].in);
+	}
+}
+
+/* a removed member named again beside the new link's signatures */
+static void check_e50_old_signature(void)
+{
+	static const unsigned char secret[P2P_PARTY_SECRET_SIZE] = { 9, 8, 7 };
+	struct mm_search_party before, forged;
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct mm_record record;
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+	char old_topic[P2P_PARTY_TOPIC_SIZE];
+	int size, count, index, searching = 0, read = 0;
+
+	case_name = "e50_old_signature";
+	party_world(3, 3);
+	party_start(3, P2P_MM_4V4, 7);
+	run(8);
+	before = machines[0].search.party;
+	CHECK(before.count == 3, "the leader's search speaks for 3: %d", before.count);
+	strcpy(old_topic, parties[0].topic);
+	size = mm_party_remove(&parties[0], 2, secret, now_ms, bytes);
+	party_send(3, old_topic, bytes, size);
+	run(8);
+	forged = machines[0].search.party;
+	CHECK(forged.count == 2 && memcmp(forged.signatures[0], before.signatures[0], P2P_SIGNATURE_SIZE),
+		"Rook signs again for the new link: count %d", forged.count);
+	forged.count = 3;
+	memcpy(forged.keys[1], before.keys[1], P2P_KEY_SIZE);
+	memcpy(forged.signatures[1], before.signatures[1], P2P_SIGNATURE_SIZE);
+	mm_set_party(&machines[0].search, &forged, now_ms);
+	count = mm_step(&machines[0].search, now_ms, out, MM_MAXIMUM_OUT);
+	for (index = 0; index < count; index++)
+	{
+		if (out[index].bytes[2] != MM_FORMAT_PARTY || out[index].bytes[5] != MM_KIND_SEARCHING)
+			continue;
+		searching++;
+		read += mm_record_read(out[index].bytes, out[index].size, &record);
+	}
+	CHECK(searching && !read, "Kat's old signature beside the new link is refused: %d of %d read", read, searching);
+}
+
+static void check_e25_big_follow_count(void)
+{
+	int step;
+
+	case_name = "e25_big_follow_count";
+	party_world(2, 2);
+	party_start(2, P2P_MM_BIG_TEAM, 1);
+	for (step = 0; step < 400 && machines[1].search.state != P2P_MM_FOUND; step++)
+		run(0.1);
+	CHECK(machines[1].search.state == P2P_MM_FOUND, "the member follows the leader into its game");
+	CHECK(!machines[1].search.joining_most_players, "a big game's most players is not known to the member: %d",
+		machines[1].search.joining_most_players);
+}
+
+/* a game on the list, with its host running here so a join can reach it */
+static void list_game(int host, int players, int most)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	char hash[2 * P2P_KEY_HASH_SIZE + 1];
+
+	start_searching(host, 1u << P2P_MM_SLAYER, P2P_MM_4V4, 1);
+	mm_cancel(&machines[host].search, out, MM_MAXIMUM_OUT);
+	machines[host].hosting = 1;
+	machines[host].players = players;
+	machines[host].most = most;
+	listing_count = 0;
+	add_listing("listed", 2, players, most, 30);
+	p2p_hex(machines[host].search.key_hash, P2P_KEY_HASH_SIZE, hash);
+	snprintf(listings[0].invite, sizeof(listings[0].invite), "halo://join/%s", hash);
+}
+
+static void check_e25_follow_big(void)
+{
+	int index;
+
+	case_name = "e25_follow_big";
+	party_world(4, 5);
+	list_game(4, 1, 8);
+	party_start(4, P2P_MM_4V4, 15);
+	for (index = 0; index < 10 && machines[0].in < 0; index++)
+		run(1);
+	CHECK(machines[0].in == 4, "the leader joins the listed game");
+	run(20);
+	for (index = 1; index < 4; index++)
+		CHECK(machines[index].in == 4, "member %d followed within 20 s: in %d", index, machines[index].in);
+	CHECK(machines[4].players == 5, "the party's 4 in the game: %d", machines[4].players);
+	CHECK(!parties[0].notice, "no notice: %d", parties[0].notice);
+	listing_count = 0;
+}
+
+static void check_e28_listing(void)
+{
+	int index;
+
+	case_name = "e28_listing";
+	party_world(4, 5);
+	list_game(4, 2, 8);
+	party_start(4, P2P_MM_4V4, 15);
+	for (index = 0; index < 10 && machines[0].in < 0; index++)
+		run(1);
+	CHECK(machines[0].in < 0, "six seats free, a party of 4 needs seven: in %d", machines[0].in);
+	listing_count = 0;
+}
+
+static void check_e29_cannot_follow(void)
+{
+	int joined;
+
+	case_name = "e29_cannot_follow";
+	party_world(3, 4);
+	list_game(3, 2, 8);
+	listings[0].identifier[0] = 9;
+	marked_count = 0;
+	party_start(3, P2P_MM_4V4, 7);
+	fail_join = 2;
+	for (joined = 0; joined < 10 && machines[0].in < 0; joined++)
+		run(1);
+	CHECK(machines[0].in == 3, "the leader joins the listed game");
+	run(4);
+	CHECK(machines[1].in == 3, "one member follows");
+	joined = machines[3].players;
+	run(14);
+	CHECK(machines[0].in == 3 && machines[3].players == joined, "the party waits 20 s");
+	run(3);
+	CHECK(machines[0].in < 0 && machines[1].in < 0 && machines[3].players == 2, "the party leaves it: %d in", machines[3].players);
+	CHECK(marked_count == 1 && listings[0].failed, "marks it FAILED: %d", marked_count);
+	CHECK(parties[0].notice == P2P_PARTY_NOTICE_COULD_NOT_JOIN && !strcmp(parties[0].notice_name, "KAT"),
+		"names who could not: %d %s", parties[0].notice, parties[0].notice_name);
+	CHECK(machines[0].search.state != P2P_MM_OFF && machines[1].search.state == P2P_MM_QUEUED, "searches again");
+	listing_count = 0;
+}
+
+/* way: 0 the leader cancels, 1 quits, 2 removes the member */
+static void e75_leader_goes(int way)
+{
+	static const unsigned char secret[P2P_PARTY_SECRET_SIZE] = { 6 };
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+	char topic[P2P_PARTY_TOPIC_SIZE];
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct mm_search *host = &machines[1].search;
+
+	party_world(2, 3);
+	party_start(2, P2P_MM_2V2, 2);
+	run(140);
+	CHECK(machines[1].hosting && machines[0].in == 1, "way %d: the member hosts with the leader in", way);
+	if (way == 0)
+	{
+		publish(0, out, mm_cancel(&machines[0].search, out, MM_MAXIMUM_OUT));
+		machines[0].search.in_game = 0;
+	}
+	else if (way == 1)
+	{
+		machines[0].quit = 1;
+		machines[1].players--;
+	}
+	else
+	{
+		strcpy(topic, parties[0].topic);
+		party_send(2, topic, bytes, mm_party_remove(&parties[0], 1, secret, now_ms, bytes));
+	}
+	run(14);
+	CHECK(host->state == P2P_MM_HOSTING && !host->party.following, "way %d: the member keeps hosting: state %d", way,
+		host->state);
+	start_searching(2, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 0);
+	run(10);
+	CHECK(machines[2].in == 1, "way %d: its game refills: in %d", way, machines[2].in);
+	CHECK(host->state == P2P_MM_HOSTING, "way %d: and it hosts on: state %d", way, host->state);
+}
+
+static void check_e75_member_keeps_hosting(void)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct mm_search *member = &machines[1].search;
+	int way;
+
+	case_name = "e75_member_keeps_hosting";
+	for (way = 0; way < 3; way++)
+		e75_leader_goes(way);
+
+	party_world(2, 3);
+	party_start(2, P2P_MM_2V2, 2);
+	run(140);
+	publish(0, out, mm_cancel(&machines[0].search, out, MM_MAXIMUM_OUT));
+	machines[0].search.in_game = 0;
+	run(4);
+	parties[0].notice = P2P_PARTY_NOTICE_NONE;
+	party_start(2, P2P_MM_2V2, 1);
+	run(4);
+	CHECK(party_size() == 1 && parties[0].notice == P2P_PARTY_NOTICE_LEFT_SEARCH,
+		"the host is not counted in the leader's next search: %d, notice %d", party_size(), parties[0].notice);
+	CHECK(member->state == P2P_MM_HOSTING, "and hosts on: state %d", member->state);
+
+	party_world(2, 2);
+	party_start(2, P2P_MM_2V2, 2);
+	run(8);
+	member->state = P2P_MM_FOUND;
+	member->decided = P2P_MM_DECIDE_HOST;
+	publish(0, out, mm_cancel(&machines[0].search, out, MM_MAXIMUM_OUT));
+	run(1);
+	CHECK(member->state == P2P_MM_FOUND && !member->party.following, "a member starting its game keeps it: state %d",
+		member->state);
+}
+
+static void check_party_flags(void)
+{
+	static const unsigned char secret[P2P_PARTY_SECRET_SIZE] = { 8 };
+	static struct mm_search search;
+	struct p2p_mm_choice choice = { 1u << P2P_MM_SLAYER, P2P_MM_2V2 };
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+	int size;
+
+	case_name = "party flags";
+	memset(parties, 0, sizeof(parties));
+	memset(&search, 0, sizeof(search));
+	party_machines = 0;
+	party_now = 2000000;
+	strcpy(parties[0].name, "CHIEF");
+	strcpy(parties[1].name, "KAT");
+	party_seed(0, seed);
+	mm_party_make(&parties[0], seed, secret, party_now);
+	mm_start(&search, seed, &choice, party_now, 1);
+	party_seed(1, seed);
+	mm_party_join(&parties[1], seed, parties[0].link, party_now);
+	parties[1].sent = party_now - 3000;
+	size = mm_party_step(&parties[1], party_now, bytes);
+	party_send(1, parties[0].topic, bytes, size);
+	CHECK(parties[0].count == 2, "the leader lists KAT");
+	mm_party_search_begin(&parties[0], &search, party_now);
+	CHECK(parties[0].members[1].searching, "the search counts KAT");
+	parties[0].sent = party_now - 3000;
+	size = mm_party_step(&parties[0], party_now, bytes);
+	party_send(2, parties[1].topic, bytes, size);
+	party_now += 3000;
+	size = mm_party_step(&parties[1], party_now, bytes);
+	party_send(1, parties[0].topic, bytes, size);
+	CHECK(!parties[0].notice && parties[0].members[1].searching, "KAT's first record heard was the search: notice %d",
+		parties[0].notice);
+
+	mm_party_search_begin(&parties[0], &search, party_now);
+	parties[0].sent = party_now - 3000;
+	size = mm_party_step(&parties[0], party_now, bytes);
+	party_send(2, parties[1].topic, bytes, size);
+	mm_party_search_left(&parties[1], party_now);
+	size = mm_party_step(&parties[1], party_now, bytes);
+	party_send(1, parties[0].topic, bytes, size);
+	CHECK(parties[0].notice == P2P_PARTY_NOTICE_LEFT_SEARCH, "KAT leaving a search it had is told: %d",
+		parties[0].notice);
+
+	memset(&search, 0, sizeof(search));
+	parties[1].sent = party_now;
+	search.in_game = 1;
+	mm_party_search(&parties[1], &search, party_now, 1);
+	CHECK(mm_party_step(&parties[1], party_now, bytes) > 0, "a member's game goes out at once");
+
+	memset(&search, 0, sizeof(search));
+	search.state = P2P_MM_QUEUED;
+	search.choice.size = search.decision.size = P2P_MM_2V2;
+	parties[0].members[1].searching = 1;
+	parties[0].members[1].in_game = 1;
+	search.in_game = 1;
+	mm_party_search(&parties[0], &search, party_now, 1);
+	mm_party_search(&parties[0], &search, party_now, 1);
+	search.in_game = 0;
+	mm_party_search(&parties[0], &search, party_now, 1);
+	parties[0].members[1].in_game = 1;
+	search.in_game = 1;
+	mm_party_search(&parties[0], &search, party_now, 1);
+	parties[0].notice = 0;
+	party_now += 21000;
+	mm_party_search(&parties[0], &search, party_now, 1);
+	CHECK(parties[0].notice == P2P_PARTY_NOTICE_COULD_NOT_JOIN, "a second game asks again of the last one's players: %d",
+		parties[0].notice);
+}
+
+static void check_e76_party_stays_together(void)
+{
+	int waited;
+
+	case_name = "e76_party_stays_together";
+	party_world(2, 2);
+	party_start(2, P2P_MM_2V2, 2);
+	fail_join = 0;
+	run(125);
+	CHECK(machines[1].hosting && machines[0].search.state == P2P_MM_QUEUED, "the leader cannot reach the member's game");
+	run(14);
+	CHECK(machines[1].hosting, "the member waits 20 s");
+	run(10);
+	CHECK(!machines[1].hosting, "then stops hosting");
+	CHECK(machines[1].search.state == P2P_MM_QUEUED && machines[1].search.party.following, "and searches with the party");
+	CHECK(machines[0].search.state == P2P_MM_QUEUED && party_size() == 2, "the party searches together: %d", party_size());
+	CHECK(!parties[0].notice && parties[1].role == MM_PARTY_MEMBER, "intact: notice %d", parties[0].notice);
+	fail_join = -1;
+	run(130);
+	CHECK(machines[1].hosting && machines[0].in == 1, "the game the member hosted is not failed: the leader joins its next");
+
+	party_world(2, 3);
+	party_start(2, P2P_MM_2V2, 2);
+	fail_join = 0;
+	run(125);
+	CHECK(machines[1].hosting, "the member hosts");
+	start_searching(2, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 0);
+	for (waited = 0; waited < 20 && machines[2].in != 1; waited++)
+		run(1);
+	CHECK(machines[2].in == 1, "another player joins: in %d", machines[2].in);
+	run(40);
+	CHECK(machines[1].hosting && machines[1].players == 2 && machines[1].search.state == P2P_MM_HOSTING,
+		"the member hosts them on: state %d", machines[1].search.state);
+	machines[2].in = -1;
+	machines[2].quit = 1;
+	machines[1].players--;
+	run(2);
+	CHECK(!machines[1].hosting, "and stops once they have gone");
+
+	party_world(3, 3);
+	party_start(3, P2P_MM_4V4, 2);
+	fail_join = 2;
+	run(125);
+	CHECK(machines[1].hosting && machines[0].in == 1, "the leader joins its member's game");
+	run(30);
+	CHECK(parties[0].notice == P2P_PARTY_NOTICE_COULD_NOT_JOIN && !machines[1].hosting, "a member cannot: the party leaves");
+	fail_join = -1;
+	run(140);
+	CHECK(machines[1].hosting && machines[0].in == 1 && machines[2].in == 1,
+		"the member hosts again and the party joins: in %d %d", machines[0].in, machines[2].in);
+}
+
+static void friend_takes_link(int index, const char *name)
+{
+	unsigned char seed[P2P_SEED_SIZE];
+
+	strcpy(parties[index].name, name);
+	party_seed(index, seed);
+	mm_party_join(&parties[index], seed, parties[0].link, now_ms);
+	party_machines = index + 1;
+}
+
+static void check_e77_friend_joins_search(void)
+{
+	struct mm_search *const friend = &machines[1].search;
+	int index, joined;
+
+	case_name = "e77_friend_joins_search";
+	party_world(1, 4);
+	party_start(1, P2P_MM_2V2, 1);
+	start_searching(2, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	start_searching(3, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(19);
+	CHECK(machines[2].search.state == P2P_MM_QUEUED, "three of four wait: state %d", machines[2].search.state);
+	friend_takes_link(1, "KAT");
+	run(3);
+	CHECK(party_size() == 2 && friend->party.following, "KAT is in the search within 3 s: %d", party_size());
+	run(30);
+	for (index = joined = 0; index < 4; index++)
+		joined += machines[index].hosting ? machines[index].players == 4 : 0;
+	CHECK(joined == 1 && machines[1].in >= 0 && machines[1].in == machines[0].in, "the pool forms again with all four");
+	CHECK(!parties[0].notice, "no notice: %d", parties[0].notice);
+
+	party_world(1, 3);
+	list_game(2, 2, 8);
+	party_start(1, P2P_MM_4V4, 1);
+	for (index = 0; index < 10 && machines[0].in < 0; index++)
+		run(1);
+	CHECK(machines[0].in == 2, "the leader is in a game");
+	run(25);
+	fail_join = 1;
+	friend_takes_link(1, "KAT");
+	run(25);
+	CHECK(machines[0].in == 2 && !parties[0].notice, "a friend who cannot follow leaves the leader's game alone: %d",
+		parties[0].notice);
+	listing_count = 0;
+
+	party_world(1, 3);
+	list_game(2, 2, 8);
+	party_start(1, P2P_MM_4V4, 1);
+	for (index = 0; index < 10 && machines[0].in < 0; index++)
+		run(1);
+	run(5);
+	friend_takes_link(1, "KAT");
+	run(6);
+	CHECK(machines[1].in == 2, "the friend follows the leader into its game: in %d", machines[1].in);
+	CHECK(machines[0].in == 2 && !parties[0].notice, "and the leader stays: %d", parties[0].notice);
+	listing_count = 0;
+
+	party_world(1, 2);
+	party_start(1, P2P_MM_2V2, 1);
+	friend->in_game = 1;
+	friend_takes_link(1, "KAT");
+	run(6);
+	CHECK(party_size() == 1 && !friend->party.following, "a friend in a game stays out: %d", party_size());
+	CHECK(!parties[0].notice, "and it never had the search: %d", parties[0].notice);
+}
+
+static void check_e77_party_outgrows(void)
+{
+	struct mm_record record;
+	int cancels = 0, index;
+
+	case_name = "e77_party_outgrows";
+	party_world(2, 3);
+	party_start(2, P2P_MM_2V2, 3);
+	run(8);
+	CHECK(machines[1].search.party.following, "the member follows");
+	capture_from = 0;
+	captured_count = 0;
+	friend_takes_link(2, "JUN");
+	run(5);
+	capture_from = -1;
+	for (index = 0; index < captured_count; index++)
+		cancels += mm_record_read(captured[index].bytes, captured[index].size, &record) &&
+			record.kind == MM_KIND_CANCEL;
+	CHECK(cancels > 0, "the queue's cancel goes out: %d", cancels);
+	for (index = 0; index < 3; index++)
+	{
+		CHECK(machines[index].search.state == P2P_MM_OFF, "machine %d stops: state %d", index, machines[index].search.state);
+		CHECK(parties[index].notice == P2P_PARTY_NOTICE_TOO_BIG, "machine %d is told: %d", index, parties[index].notice);
+	}
+	CHECK(parties[0].count == 3 && parties[2].role == MM_PARTY_MEMBER, "the friend stays in the party: %d", parties[0].count);
+	run(150);
+	CHECK(!machines[0].hosting && !machines[1].hosting && !machines[2].hosting, "and nobody hosts it");
+
+	party_start(3, P2P_MM_4V4, 7);
+	run(5);
+	CHECK(party_size() == 3 && !parties[0].notice && !parties[1].notice && !parties[2].notice,
+		"a bigger game takes the three, the notice gone: %d %d", party_size(), parties[1].notice);
+
+	party_world(1, 2);
+	party_start(1, P2P_MM_1V1, 1);
+	run(130);
+	CHECK(machines[0].hosting, "the leader hosts its 1V1");
+	friend_takes_link(1, "KAT");
+	run(5);
+	CHECK(!machines[0].hosting && machines[0].search.state == P2P_MM_OFF && machines[1].in < 0, "a lobby stops too");
+	CHECK(parties[1].notice == P2P_PARTY_NOTICE_TOO_BIG, "and the friend is told: %d", parties[1].notice);
+
+	party_world(2, 4);
+	list_game(3, 1, 4);
+	party_start(2, P2P_MM_2V2, 3);
+	for (index = 0; index < 10 && machines[0].in < 0; index++)
+		run(1);
+	CHECK(machines[0].in == 3, "the leader is in a 2V2: in %d", machines[0].in);
+	run(10);
+	friend_takes_link(2, "JUN");
+	run(10);
+	CHECK(machines[0].in == 3 && machines[2].in < 0 && !machines[2].search.party.following,
+		"a game goes on without the friend: in %d %d", machines[0].in, machines[2].in);
+	CHECK(parties[2].notice == P2P_PARTY_NOTICE_TOO_BIG, "who is told: %d", parties[2].notice);
+	listing_count = 0;
+
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_1V1, 1);
+	machines[0].search.party.count = 2;
+	run(130);
+	CHECK(!machines[0].hosting, "host_open keeps to sizes the party fits");
+}
+
+static void check_member_stays_in_game(void)
+{
+	struct mm_out out[MM_MAXIMUM_OUT];
+	int index;
+
+	case_name = "member_stays_in_game";
+	party_world(2, 3);
+	list_game(2, 2, 8);
+	party_start(2, P2P_MM_4V4, 3);
+	for (index = 0; index < 20 && machines[1].in < 0; index++)
+		run(1);
+	CHECK(machines[0].in == 2 && machines[1].in == 2, "both are in the game");
+	publish(0, out, mm_cancel(&machines[0].search, out, MM_MAXIMUM_OUT));
+	machines[0].in = -1;
+	machines[2].players--;
+	run(4);
+	CHECK(machines[1].search.in_game && machines[1].in == 2, "the member stays in the game");
+	parties[0].notice = P2P_PARTY_NOTICE_NONE;
+	party_start(2, P2P_MM_4V4, 3);
+	run(4);
+	CHECK(party_size() == 1 && parties[0].notice == P2P_PARTY_NOTICE_LEFT_SEARCH,
+		"and is not counted in the leader's next search: %d, notice %d", party_size(), parties[0].notice);
+	CHECK(machines[1].search.state == P2P_MM_OFF, "nor follows it: state %d", machines[1].search.state);
+	run(25);
+	CHECK(parties[0].notice != P2P_PARTY_NOTICE_COULD_NOT_JOIN, "the leader does not wait for it: %d", parties[0].notice);
+	listing_count = 0;
+}
+
+/* the leader is refused the game the pool chose; the member gets in */
+static void leader_refused_start(void)
+{
+	int index;
+
+	party_world(2, 4);
+	fail_join = 0;
+	party_start(2, P2P_MM_2V2, 0);
+	for (index = 2; index < 4; index++)
+		start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	for (index = 0; index < 300 && machines[1].in < 0; index++)
+		run(0.1);
+	CHECK(machines[1].in >= 0 && machines[0].in < 0, "the member reached the game, the leader did not: %d, %d",
+		machines[1].in, machines[0].in);
+}
+
+static void check_e77_leader_follows_member(void)
+{
+	int index;
+
+	case_name = "e77_leader_follows_member";
+	leader_refused_start();
+	fail_join = -1;
+	run(4);
+	CHECK(machines[0].in == machines[1].in && !parties[0].following_member, "the leader takes the member's game: %d",
+		machines[0].in);
+	CHECK(parties[0].notice == P2P_PARTY_NOTICE_NONE, "with no notice: %d", parties[0].notice);
+
+	leader_refused_start();
+	run(8);
+	CHECK(machines[0].search.state == P2P_MM_OFF && !parties[0].search.searching, "a second refusal stops the search: %d",
+		machines[0].search.state);
+	for (index = 0; index < 2; index++)
+		CHECK(parties[index].notice == P2P_PARTY_NOTICE_APART, "with a notice for %d: %d", index, parties[index].notice);
+	CHECK(machines[1].search.in_game && machines[1].in >= 0, "the member stays in its game");
+	parties[0].notice = P2P_PARTY_NOTICE_NONE;
+	party_start(2, P2P_MM_2V2, 0);
+	CHECK(!parties[0].search.stopped, "a new search clears it");
+
+	leader_refused_start();
+	parties[0].search.left = (parties[0].search.left + 1) & 255;
+	fail_join = -1;
+	run(3);
+	CHECK(machines[0].in < 0, "a game the party left is not followed: %d", machines[0].in);
+}
+
+/* a friend joining at any point of the leader's send interval */
+static void check_listing_send(void)
+{
+	int phase;
+
+	case_name = "listing_send";
+	for (phase = 0; phase < 6; phase++)
+	{
+		unsigned long start;
+
+		party_world(1, 2);
+		party_start(1, P2P_MM_2V2, 1);
+		run(3 + phase * 0.5);
+		friend_takes_link(1, "KAT");
+		start = now_ms;
+		while (!machines[1].search.party.following && now_ms < start + 8000)
+			run(0.1);
+		CHECK(now_ms - start <= 1000, "phase %d: the leader lists the friend at once: %lu ms", phase, now_ms - start);
+	}
+}
+
+static void check_party_journeys(void)
+{
+	check_e24_leader_cancels();
+	check_e23_member_quits();
+	check_e60_member_b();
+	check_e30_leader_quits();
+	check_e47_strict_leader();
+	check_e47_big_strict_leader();
+	check_e25_big_follow_count();
+	check_e50_old_signature();
+	check_e75_member_keeps_hosting();
+	check_e76_party_stays_together();
+	check_e77_friend_joins_search();
+	check_e77_party_outgrows();
+	check_member_stays_in_game();
+	check_e77_leader_follows_member();
+	check_listing_send();
+	check_e25_follow_big();
+	check_e28_listing();
+	check_e29_cannot_follow();
+}
+
+static void check_party_record_search(void)
+{
+	struct mm_party_search *said = &parties[0].search;
+	int *const fields[] = { &said->game_playlist, &said->game_size, &said->size, &said->playlists };
+	const int bad[] = { NUMBER_OF_P2P_MM_PLAYLISTS, NUMBER_OF_P2P_MM_SIZES, NUMBER_OF_P2P_MM_SIZES,
+		1 << NUMBER_OF_P2P_MM_PLAYLISTS };
+	unsigned char hash[P2P_KEY_HASH_SIZE];
+	int index;
+
+	case_name = "party_record_search";
+	party_form(3);
+	party_run(3, 7);
+	CHECK(parties[0].members[1].signature_heard && parties[0].members[2].signature_heard,
+		"each member's record carries its signature for the leader's search");
+	mm_party_hash(parties[0].seal, hash);
+	CHECK(mm_party_signed(parties[0].members[1].key, parties[0].key, hash, parties[0].members[1].signature),
+		"signed over the leader's key and the link");
+	parties[1].can_host = 1;
+	parties[0].search.number = 7;
+	parties[0].search.searching = 1;
+	parties[0].search.playlists = 1 << P2P_MM_CTF;
+	parties[0].search.size = P2P_MM_4V4;
+	parties[0].search.has_game = 1;
+	parties[0].search.game = 3;
+	parties[0].search.game_playlist = P2P_MM_CTF;
+	parties[0].search.game_size = P2P_MM_4V4;
+	strcpy(parties[0].search.invite, "halo://join/0123");
+	parties[2].search_heard = 0;
+	party_run(3, 7);
+	CHECK(parties[0].members[1].can_host && !parties[0].members[2].can_host, "the member's can-host bit");
+	CHECK(parties[1].search.searching && parties[1].search.number == 7 && parties[1].search.size == P2P_MM_4V4,
+		"the member reads the search");
+	CHECK(parties[2].search.has_game && !strcmp(parties[2].search.invite, "halo://join/0123"),
+		"each member opens the invite sealed to it: %s", parties[2].search.invite);
+	CHECK(!parties[2].left_number && parties[2].followed_game == 3, "the first record heard leaves that search open");
+	strcpy(parties[1].game.invite, "halo://join/4567");
+	parties[1].game.left = 9;
+	parties[1].game.playlist = P2P_MM_CTF;
+	parties[1].game.size = P2P_MM_4V4;
+	parties[1].game.public_game = 1;
+	party_run(3, 7);
+	CHECK(!strcmp(parties[0].members[1].game.invite, "halo://join/4567") && parties[0].members[1].game.left == 9 &&
+		parties[0].members[1].game.playlist == P2P_MM_CTF && parties[0].members[1].game.size == P2P_MM_4V4 &&
+		parties[0].members[1].game.public_game, "the leader opens the game a member reached");
+	parties[1].game.playlist = NUMBER_OF_P2P_MM_PLAYLISTS;
+	parties[0].members[1].game.invite[0] = 0;
+	party_run(3, 7);
+	CHECK(!parties[0].members[1].game.invite[0], "a playlist out of range is dropped");
+	parties[1].game.playlist = P2P_MM_CTF;
+	parties[1].game.size = NUMBER_OF_P2P_MM_SIZES;
+	party_run(3, 7);
+	CHECK(!parties[0].members[1].game.invite[0], "a size out of range is dropped");
+	memset(&parties[1].game, 0, sizeof(parties[1].game));
+	for (index = 0; index < 4; index++)
+	{
+		int *const field = fields[index], good = *field;
+
+		*field = bad[index];
+		parties[0].search.number++;
+		party_run(3, 7);
+		CHECK(parties[1].search.number != parties[0].search.number, "out of range field %d is dropped", index);
+		*field = good;
+		party_run(3, 7);
+		CHECK(parties[1].search.number == parties[0].search.number, "the fixed record is read: field %d", index);
+	}
+}
+
+static int party_lists(const struct mm_party *party, const char *name)
+{
+	struct p2p_party_status status;
+	int index;
+
+	mm_party_status(party, &status);
+	for (index = 0; index < status.count; index++)
+		if (!strcmp(status.members[index].name, name))
+			return 1;
+	return 0;
+}
+
+static void check_party_link(void)
+{
+	unsigned char seed[P2P_SEED_SIZE];
+	char text[2 * P2P_PARTY_LINK_SIZE];
+	struct mm_party party;
+
+	case_name = "party link";
+	party_form(2);
+	CHECK(strlen(parties[0].link) == P2P_PARTY_LINK_SIZE - 1 && !strncmp(parties[0].link, "halo://party/", 13),
+		"%s", parties[0].link);
+	CHECK(strstr(parties[0].link, parties[0].topic + strlen(parties[0].topic) - 32) == NULL, "the link is not the topic");
+	party_seed(2, seed);
+	memset(&party, 0, sizeof(party));
+	sprintf(text, "come along: HALO://PARTY/%s tonight", parties[0].link + 13);
+	CHECK(mm_party_link_held(text) && mm_party_join(&party, seed, text, party_now), "a link among words, in any case");
+	CHECK(!strcmp(party.topic, parties[0].topic), "the link's topic");
+	memset(&party, 0, sizeof(party));
+	strcpy(text, parties[0].link);
+	text[strlen(text) - 1] = 0;
+	CHECK(!mm_party_link_held(text) && !mm_party_join(&party, seed, text, party_now), "a link cut short");
+	strcpy(text, parties[0].link);
+	strcat(text, "0");
+	CHECK(!mm_party_link_held(text) && !mm_party_join(&party, seed, text, party_now), "a link too long");
+	CHECK(!mm_party_link_held("halo://join/00") && !mm_party_link_held(""), "a game's invite is no party's");
+	memset(text, 0, sizeof(text));
+	memcpy(text, parties[0].link, 13 + 32);
+	memset(text + 45, '0', 64);
+	CHECK(!mm_party_join(&party, seed, text, party_now), "a leader's key with no X25519 form");
+	party_seed(0, seed);
+	CHECK(!mm_party_join(&party, seed, parties[0].link, party_now), "a leader's own link");
+	party_seed(2, seed);
+	CHECK(!mm_party_join(&parties[0], seed, parties[1].link, party_now), "a leader with members stays");
+	CHECK(!mm_party_join(&parties[1], seed, parties[0].link, party_now), "a member stays");
+	memset(&party, 0, sizeof(party));
+	party_seed(5, seed);
+	mm_party_make(&party, seed, (const unsigned char *)"0123456789abcdef", party_now);
+	CHECK(mm_party_join(&party, seed, parties[0].link, party_now) && party.role == MM_PARTY_MEMBER,
+		"a leader alone joins another's party");
+}
+
+static void check_party_status(void)
+{
+	struct p2p_party_status status;
+
+	case_name = "party status";
+	party_form(3);
+	mm_party_status(&parties[1], &status);
+	CHECK(status.count == 3, "three in the party: %d", status.count);
+	CHECK(!strcmp(status.members[0].name, "CHIEF") && status.members[0].leader && !status.members[0].you, "the leader first");
+	CHECK(party_lists(&parties[1], "KAT") && party_lists(&parties[1], "ROOK"), "a member sees the others' names");
+	CHECK(status.members[1].you != status.members[2].you && !status.members[1].leader, "this machine is marked");
+	mm_party_status(&parties[0], &status);
+	CHECK(status.count == 3 && status.members[0].you && status.members[0].leader, "the leader's own list");
+}
+
+static void check_party_leaked_link(void)
+{
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+	struct mm_party stranger;
+	int size;
+
+	case_name = "e42_leaked_link";
+	party_form(2);
+	memset(&stranger, 0, sizeof(stranger));
+	party_seed(7, seed);
+	CHECK(mm_party_join(&stranger, seed, parties[0].link, party_now), "a stranger holds the link");
+	stranger.role = MM_PARTY_LEADER;
+	stranger.sequence = 1000;
+	stranger.sent = party_now - 3000;
+	strcpy(stranger.name, "FAKE");
+	size = mm_party_step(&stranger, party_now, bytes);
+	party_send(2, parties[1].topic, bytes, size);
+	CHECK(strcmp(parties[1].members[0].name, "FAKE"), "E42: members ignore a record signed by another key");
+	memcpy(stranger.key, parties[0].key, P2P_KEY_SIZE);
+	stranger.sent = party_now - 3000;
+	size = mm_party_step(&stranger, party_now, bytes);
+	party_send(2, parties[1].topic, bytes, size);
+	CHECK(strcmp(parties[1].members[0].name, "FAKE") != 0, "E42: the leader's key without its signature is ignored");
+}
+
+static void check_party_removed(void)
+{
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE], old_record[MM_MAXIMUM_RECORD_SIZE];
+	static const unsigned char secret[P2P_PARTY_SECRET_SIZE] = { 9, 8, 7 };
+	char old_topic[P2P_PARTY_TOPIC_SIZE], old_link[P2P_PARTY_LINK_SIZE];
+	struct mm_party mallory, copy;
+	int size, old_size;
+
+	case_name = "e50_removed";
+	party_form(3);
+	strcpy(old_topic, parties[0].topic);
+	strcpy(old_link, parties[0].link);
+	copy = parties[2];
+	copy.sent = party_now - 3000;
+	old_size = mm_party_step(&copy, party_now, old_record);
+	mallory = parties[1];
+	party_seed(8, mallory.seed);
+	CHECK(mm_party_remove(&parties[1], 1, secret, party_now, bytes) == 0, "a member removes nobody");
+	CHECK(mm_party_remove(&parties[0], 0, secret, party_now, bytes) == 0, "the leader stays");
+	CHECK(mm_party_remove(&parties[0], 3, secret, party_now, bytes) == 0, "a place past the list");
+	CHECK(!strcmp(parties[0].members[2].name, "KAT"), "%s", parties[0].members[2].name);
+	size = mm_party_remove(&parties[0], 2, secret, party_now, bytes);
+	CHECK(size > 0 && size <= MM_MAXIMUM_RECORD_SIZE, "a new link's record: %d bytes", size);
+	CHECK(strcmp(parties[0].topic, old_topic) && strcmp(parties[0].link, old_link), "the leader has a new link");
+	party_send(3, old_topic, bytes, size);
+	CHECK(parties[2].role == MM_PARTY_NONE && !parties[2].topic[0], "E50: Kat is out of the party");
+	CHECK(parties[2].notice == P2P_PARTY_NOTICE_REMOVED && !strcmp(parties[2].notice_name, "CHIEF"),
+		"E50: CHIEF REMOVED YOU: %d %s", parties[2].notice, parties[2].notice_name);
+	CHECK(!strcmp(parties[1].topic, parties[0].topic), "E50: Rook moves to the new topic");
+	{
+		struct mm_party_record record;
+
+		CHECK(mm_party_read(&mallory, bytes, size, &record) && mm_party_verify(&record), "the record reads on the old topic");
+		mm_party_heard(&mallory, &record, party_now);
+		CHECK(!strcmp(mallory.topic, old_topic), "E50: the new secret opens for its member alone");
+	}
+	party_send(3, parties[0].topic, old_record, old_size);
+	party_send(3, old_topic, old_record, old_size);
+	party_run(2, 6);
+	CHECK(parties[0].count == 2 && !party_lists(&parties[0], "KAT") && !party_lists(&parties[1], "KAT"),
+		"E50: Kat's record on the old topic reaches nobody's list");
+	CHECK(parties[1].notice == P2P_PARTY_NOTICE_LEFT && !strcmp(parties[1].notice_name, "KAT"), "Rook is told");
+	party_seed(2, seed);
+	CHECK(mm_party_join(&parties[2], seed, old_link, party_now), "Kat opens the old link again");
+	party_run(3, 6);
+	CHECK(parties[0].count == 2 && !party_lists(&parties[0], "KAT"), "E50: the old link reaches nobody");
+	party_run(3, 16);
+	CHECK(parties[2].role == MM_PARTY_NONE && parties[2].notice == P2P_PARTY_NOTICE_ENDED, "a link nobody answers ends");
+}
+
+static void check_party_leaves(void)
+{
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE], late[MM_MAXIMUM_RECORD_SIZE];
+	char topic[P2P_PARTY_TOPIC_SIZE];
+	struct mm_party copy;
+	int size, late_size;
+
+	case_name = "e61_leave_party";
+	party_form(3);
+	strcpy(topic, parties[2].topic);
+	copy = parties[2];
+	copy.sent = party_now - 3000;
+	late_size = mm_party_step(&copy, party_now, late);
+	CHECK(mm_party_leave(&parties[0], bytes) == 0, "the leader has no LEAVE PARTY");
+	size = mm_party_leave(&parties[2], bytes);
+	party_send(3, topic, bytes, size);
+	CHECK(parties[2].role == MM_PARTY_NONE && !parties[2].topic[0] && parties[2].notice == P2P_PARTY_NOTICE_NONE,
+		"E61: the member is solo");
+	CHECK(parties[0].count == 2 && !party_lists(&parties[0], "KAT"), "E61: the leader's party is smaller at once");
+	CHECK(parties[0].notice == P2P_PARTY_NOTICE_LEFT && !strcmp(parties[0].notice_name, "KAT"), "KAT LEFT THE PARTY");
+	party_run(3, 6);
+	CHECK(parties[1].count == 2 && !party_lists(&parties[1], "KAT"), "E61: the others' lists within 3 s");
+	party_send(3, topic, late, late_size);
+	CHECK(parties[0].count == 2, "a copy that comes late from another broker brings nobody back");
+	party_seed(2, seed);
+	CHECK(mm_party_join(&parties[2], seed, parties[0].link, party_now), "Kat comes back");
+	party_run(3, 6);
+	CHECK(parties[0].count == 3 && party_lists(&parties[0], "KAT"), "a member who left may join again");
+}
+
+static void check_party_expiry(void)
+{
+	unsigned long heard;
+
+	case_name = "member_expiry";
+	party_form(3);
+	party_silent = 2;
+	heard = parties[0].members[2].heard;
+	while (parties[0].count == 3 && party_now - heard < 30000)
+		party_run(3, 1);
+	CHECK(party_now - heard == 10000 || party_now - heard == 10500, "E23: out of the list after 10 s: %lu",
+		party_now - heard);
+	CHECK(parties[0].count == 2 && !party_lists(&parties[0], "KAT"), "E23: Kat is gone");
+	CHECK(parties[0].notice == P2P_PARTY_NOTICE_LEFT && !strcmp(parties[0].notice_name, "KAT"), "KAT LEFT THE PARTY");
+	party_run(3, 6);
+	CHECK(parties[1].count == 2, "the others follow the leader's list");
+	party_silent = -1;
+	party_run(3, 6);
+	CHECK(parties[0].count == 3, "a member heard again is back");
+
+	party_form(3);
+	party_silent = 0;
+	heard = parties[1].members[0].heard;
+	while (parties[1].role != MM_PARTY_NONE && party_now - heard < 30000)
+		party_run(3, 1);
+	CHECK(party_now - heard == 10000 || party_now - heard == 10500, "E30: the party ends after 10 s: %lu",
+		party_now - heard);
+	CHECK(!parties[1].topic[0], "E30: the member leaves the topic");
+	CHECK(parties[1].notice == P2P_PARTY_NOTICE_ENDED && !strcmp(parties[1].notice_name, "CHIEF"),
+		"THE PARTY ENDED: CHIEF LEFT");
+}
+
+static void check_party_sealed(void)
+{
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE], secret[P2P_PARTY_SECRET_SIZE], digest[P2P_SHA256_SIZE];
+	unsigned char plain[MM_MAXIMUM_RECORD_SIZE];
+	int size, index;
+
+	case_name = "party sealed";
+	party_form(2);
+	parties[0].sent = party_now - 3000;
+	size = mm_party_step(&parties[0], party_now, bytes);
+	CHECK(size > 0, "a record");
+	memset(secret, 0x31, sizeof(secret));
+	p2p_sha256(secret, sizeof(secret), digest);
+	CHECK(p2p_open(digest, bytes, size, plain) < 0, "the hash a watcher reads in the topic does not open it");
+	for (index = 0; index + 5 <= size; index++)
+		CHECK(memcmp(bytes + index, "CHIEF", 5), "no name in the clear");
+}
+
+static void check_party_copies(void)
+{
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+	int size;
+
+	case_name = "party copies";
+	party_form(2);
+	parties[0].sent = party_now - 3000;
+	size = mm_party_step(&parties[0], party_now, bytes);
+	verifies = 0;
+	party_send(2, parties[0].topic, bytes, size);
+	CHECK(verifies == 1, "one signature for the first copy: %d", verifies);
+	party_send(2, parties[0].topic, bytes, size);
+	CHECK(verifies == 1, "none for a copy from another broker: %d", verifies);
+	parties[1].sent = party_now - 3000;
+	size = mm_party_step(&parties[1], party_now, bytes);
+	verifies = 0;
+	party_send(2, parties[1].topic, bytes, size);
+	party_send(2, parties[1].topic, bytes, size);
+	CHECK(verifies == 2, "a member's record too, with its search signature: %d", verifies);
+}
+
+static void check_party_full(void)
+{
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE], seed[P2P_SEED_SIZE];
+	static const unsigned char secret[P2P_PARTY_SECRET_SIZE] = { 5 };
+	char topic[P2P_PARTY_TOPIC_SIZE];
+	int index, size;
+
+	case_name = "party full";
+	party_form(P2P_PARTY_MAXIMUM);
+	memset(parties[3].name, 'J', P2P_PARTY_NAME_SIZE);
+	party_run(P2P_PARTY_MAXIMUM, 6);
+	CHECK(parties[0].count == P2P_PARTY_MAXIMUM && parties[7].count == P2P_PARTY_MAXIMUM, "a full party: %d %d",
+		parties[0].count, parties[7].count);
+	CHECK(party_lists(&parties[7], parties[3].name), "the longest name");
+	parties[0].sent = party_now - 3000;
+	size = mm_party_step(&parties[0], party_now, bytes);
+	CHECK(size + 7 * (2 * P2P_KEY_HASH_SIZE + P2P_SEAL_OVERHEAD) <= MM_MAXIMUM_RECORD_SIZE,
+		"a leader's record leaves room for each member's sealed invite: %d", size);
+	party_send(P2P_PARTY_MAXIMUM, parties[0].topic, bytes, size);
+	party_seed(8, seed);
+	mm_party_join(&parties[8], seed, parties[0].link, party_now);
+	strcpy(parties[8].name, "SIX");
+	party_run(P2P_PARTY_MAXIMUM + 1, 6);
+	CHECK(parties[0].count == P2P_PARTY_MAXIMUM && !party_lists(&parties[0], "SIX"), "a ninth is not taken");
+	CHECK(parties[8].notice == P2P_PARTY_NOTICE_FULL && parties[8].role == MM_PARTY_NONE && !parties[8].topic[0],
+		"the ninth is told and leaves: notice %d role %d", parties[8].notice, parties[8].role);
+	CHECK(parties[1].role == MM_PARTY_MEMBER && !parties[1].notice, "the eight stay");
+	memset(&parties[8], 0, sizeof(parties[8]));
+	strcpy(topic, parties[0].topic);
+	size = mm_party_remove(&parties[0], 7, secret, party_now, bytes);
+	CHECK(size > 0 && size <= MM_MAXIMUM_RECORD_SIZE, "a full party's new link fits: %d bytes", size);
+	party_send(P2P_PARTY_MAXIMUM, topic, bytes, size);
+	for (index = 1; index < P2P_PARTY_MAXIMUM; index++)
+		if (parties[index].role != MM_PARTY_NONE)
+			CHECK(!strcmp(parties[index].topic, parties[0].topic), "member %d moves", index);
+}
+
+/* as the p2p thread calls them */
+static void party_update_locked(void)
+{
+	pthread_mutex_lock(&p2p_lock);
+	p2p_party_update();
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+static int party_link_locked(const char *text)
+{
+	int received;
+
+	pthread_mutex_lock(&p2p_lock);
+	received = p2p_party_link_received(text);
+	pthread_mutex_unlock(&p2p_lock);
+	return received;
+}
+
+static void check_party_machine(void)
+{
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+	char link[P2P_PARTY_LINK_SIZE], old_topic[P2P_PARTY_TOPIC_SIZE];
+	struct p2p_party_status status;
+	int size;
+
+	case_name = "party machine";
+	CHECK(!p2p_party_active(), "no party yet");
+	p2p_party_set_name("CHIEF");
+	CHECK(!p2p_party_invite(link, 8), "a link needs its room");
+	CHECK(p2p_party_invite(link, sizeof(link)) && p2p_party_active(), "INVITE makes a party");
+	CHECK(!strcmp(clipboard, link), "INVITE puts the link on the clipboard");
+	CHECK(!p2p_party_can_join(link), "a leader's own link can't be joined, so it leaves its search running");
+	CHECK(signal_topic[0], "the brokers carry the party's topic");
+	party_update_locked();
+	CHECK(party_published_size > 0, "the leader publishes");
+	CHECK(!strcmp(offered_link, link) && offered_count == 1, "Discord offers the link: %d", offered_count);
+
+	memset(parties, 0, sizeof(parties));
+	party_seed(1, seed);
+	strcpy(parties[1].name, "ROOK");
+	CHECK(mm_party_join(&parties[1], seed, link, clock_now), "Rook holds the link");
+	parties[1].sent = clock_now - 3000;
+	size = mm_party_step(&parties[1], clock_now, bytes);
+	p2p_party_heard(bytes, 0);
+	p2p_party_heard(bytes, MM_MAXIMUM_RECORD_SIZE + 1);
+	p2p_party_get_status(&status);
+	CHECK(status.count == 1, "nothing is taken before its turn");
+	party_update_locked();
+	p2p_party_get_status(&status);
+	CHECK(status.count == 1, "sizes outside a record are dropped");
+	p2p_party_heard(bytes, size);
+	p2p_party_heard(bytes, size);
+	party_update_locked();
+	p2p_party_get_status(&status);
+	CHECK(status.count == 2 && !strcmp(status.members[1].name, "ROOK"), "a heard member joins: %d", status.count);
+	CHECK(!strcmp(status.members[0].name, "CHIEF") && status.members[0].you, "the name set is shown");
+	CHECK(offered_count == 2, "Discord's count follows: %d", offered_count);
+
+	strcpy(old_topic, signal_topic);
+	p2p_party_remove(1);
+	CHECK(!strcmp(publish_topic, old_topic), "the new link goes out on the old topic");
+	CHECK(strcmp(signal_topic, old_topic) && signal_topic[0], "and then the topic moves");
+	memcpy(bytes, party_published, sizeof(bytes));
+	size = party_published_size;
+	clock_now += 3000;
+	party_update_locked();
+	CHECK(!strcmp(resent_topic, old_topic) && resent_size == size && !memcmp(resent, bytes, (size_t)size),
+		"the new link goes out again for a member who missed it");
+	resent_size = 0;
+	clock_now += 9000;
+	party_update_locked();
+	CHECK(!resent_size, "and stops after ten seconds");
+	CHECK(strcmp(offered_link, link), "Discord offers the new link");
+	p2p_party_invite(link, sizeof(link));
+	CHECK(!strcmp(clipboard, link) && !strcmp(link, offered_link), "INVITE gives the new link");
+
+	memset(&parties[0], 0, sizeof(parties[0]));
+	party_seed(0, seed);
+	mm_party_make(&parties[0], seed, (const unsigned char *)"0123456789abcdef", clock_now);
+	CHECK(!party_link_locked("no link here"), "text with no party link is left for the game's invites");
+	CHECK(p2p_party_can_join(parties[0].link), "a lone leader may join another's party");
+	CHECK(party_link_locked(parties[0].link), "a party link joins the party");
+	CHECK(!p2p_party_can_join(parties[0].link), "a member may not join again");
+	CHECK(!strcmp(signal_topic, parties[0].topic), "the brokers carry the new party's topic");
+	CHECK(party_link_locked(parties[0].link), "a link for a party this machine is in is still a party link");
+	strcpy(old_topic, signal_topic);
+	p2p_party_leave();
+	CHECK(!strcmp(publish_topic, old_topic) && party_published_size > 0, "the goodbye goes out on the party's topic");
+	CHECK(!signal_topic[0] && !p2p_party_active(), "the machine leaves the topic");
+	CHECK(!offered_link[0], "Discord stops offering a link");
+}
+
+static unsigned char window_record[MM_MAXIMUM_RECORD_SIZE];
+static int window_member, window_size;
+
+/* the game thread while p2p_party_update has the lock released */
+static void remove_in_window(void)
+{
+	verify_window = NULL;
+	clock_now += 5;
+	party_published_size = 0;
+	p2p_party_remove(window_member);
+	memcpy(window_record, party_published, sizeof(window_record));
+	window_size = party_published_size;
+}
+
+static void party_machine_hears(int member, int window)
+{
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+	int size;
+
+	parties[member].sent = clock_now - 3000;
+	size = mm_party_step(&parties[member], clock_now, bytes);
+	p2p_party_heard(bytes, size);
+	window_member = window;
+	verify_window = window ? remove_in_window : NULL;
+	party_update_locked();
+}
+
+static void check_party_verify_window(void)
+{
+	static const char *const names[] = { "ROOK", "KAT", "PIP" };
+	unsigned char seed[P2P_SEED_SIZE];
+	char link[P2P_PARTY_LINK_SIZE];
+	struct p2p_party_status status;
+	int index;
+
+	case_name = "party verify window";
+	CHECK(p2p_party_invite(link, sizeof(link)), "the machine leads");
+	memset(parties, 0, sizeof(parties));
+	for (index = 1; index <= 3; index++)
+	{
+		party_seed(index, seed);
+		strcpy(parties[index].name, names[index - 1]);
+		CHECK(mm_party_join(&parties[index], seed, link, clock_now), "%s holds the link", names[index - 1]);
+		party_machine_hears(index, 0);
+	}
+	p2p_party_get_status(&status);
+	CHECK(status.count == 4, "the party forms: %d", status.count);
+
+	party_machine_hears(1, 2);
+	p2p_party_get_status(&status);
+	CHECK(status.count == 3 && !strcmp(status.members[2].name, "PIP"),
+		"a removal while a record is checked takes only that member: %d", status.count);
+
+	for (index = 1; index <= 3; index += 2)
+	{
+		struct mm_party_record record;
+
+		CHECK(mm_party_read(&parties[index], window_record, window_size, &record), "the new link reads");
+		mm_party_heard(&parties[index], &record, clock_now);
+	}
+	party_machine_hears(3, 2);
+	p2p_party_get_status(&status);
+	CHECK(status.count == 2, "a record being checked when its sender is removed does not bring them back: %d", status.count);
+}
+
+static void wiring_hears_leader(void)
+{
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
+	int size;
+
+	parties[0].sent = clock_now - 3000;
+	size = mm_party_step(&parties[0], clock_now, bytes);
+	p2p_party_heard(bytes, size);
+	clock_now += 3000;
+	party_update_locked();
+}
+
+static void wiring_leader_hears(void)
+{
+	party_send(1, parties[0].topic, party_published, party_published_size);
+}
+
+static void check_party_wiring(void)
+{
+	static const unsigned char secret[P2P_PARTY_SECRET_SIZE] = { 9 };
+	static struct mm_search leading;
+	struct p2p_mm_choice choice = { 1u << P2P_MM_SLAYER, P2P_MM_2V2 };
+	struct mm_search *search = p2p_mm_local();
+	unsigned char seed[P2P_SEED_SIZE];
+	char link[P2P_PARTY_LINK_SIZE];
+	int calls;
+
+	case_name = "party wiring";
+	party_machines = 0;
+	memset(parties, 0, sizeof(parties));
+	p2p_party_remove(1);
+	p2p_party_invite(link, sizeof(link));
+	party_seed(5, seed);
+	strcpy(parties[5].name, "EMILE");
+	mm_party_join(&parties[5], seed, link, clock_now);
+	party_machine_hears(5, 0);
+	choice.size = P2P_MM_1V1;
+	p2p_mm_search(&choice);
+	CHECK(search->state == P2P_MM_OFF && (p2p_party_mm_notice() == P2P_MM_NOTICE_TOO_BIG), "SEARCH refuses a size the party does not fit");
+	choice.size = P2P_MM_2V2;
+	p2p_mm_search(&choice);
+	CHECK(search->state != P2P_MM_OFF && !(p2p_party_mm_notice() == P2P_MM_NOTICE_TOO_BIG), "one it fits goes, and the notice with it");
+	party_update_locked();
+	CHECK(search->party.count == 2, "a leader's search carries its member: %d", search->party.count);
+	p2p_mm_cancel();
+	p2p_party_remove(1);
+
+	memset(parties, 0, sizeof(parties));
+	party_seed(0, seed);
+	strcpy(parties[0].name, "CHIEF");
+	mm_party_make(&parties[0], seed, secret, clock_now);
+	party_now = clock_now;
+	CHECK(party_link_locked(parties[0].link) && p2p_party_is_member(), "the machine joins as a member");
+	p2p_mm_search(&choice);
+	CHECK(search->state == P2P_MM_OFF, "a member cannot search: state %d", search->state);
+	clock_now += 3000;
+	party_update_locked();
+	wiring_leader_hears();
+	CHECK(parties[0].count == 2, "the leader lists the machine: %d", parties[0].count);
+	wiring_hears_leader();
+	party_seed(0, seed);
+	mm_start(&leading, seed, &choice, clock_now, 1);
+	mm_party_search_begin(&parties[0], &leading, clock_now);
+	wiring_hears_leader();
+	CHECK(search->party.following, "the member follows the leader's search");
+	party_published_size = 0;
+	p2p_mm_cancel();
+	party_update_locked();
+	wiring_leader_hears();
+	CHECK(parties[0].notice == P2P_PARTY_NOTICE_LEFT_SEARCH, "its cancel tells the leader: %d", parties[0].notice);
+
+	calls = browse_calls;
+	search->party.following = 1;
+	search->left_game = 1;
+	CHECK(p2p_mm_take_left_game() == 1 && !search->left_game, "the game thread takes the leaving");
+	CHECK(!p2p_mm_take_left_game(), "once");
+	CHECK(browse_calls == calls, "following, the browser is the leader's search's: %d", browse_calls - calls);
+	search->in_game = 1;
+	p2p_mm_game_lost();
+	CHECK(browse_calls == calls, "and a lost game does not hold it: %d", browse_calls - calls);
+	p2p_mm_cancel();
+	search->party.following = 0;
+	search->in_game = 1;
+	p2p_mm_game_lost();
+	CHECK(search->state == P2P_MM_OFF && !search->in_game && browse_calls == calls,
+		"a member left in a game does not search alone when it is lost: state %d", search->state);
+	calls = browse_calls;
+	search->left_game = 1;
+	CHECK(p2p_mm_take_left_game() == 1 && browse_calls == calls + 1 && browsing, "searching alone, the browser restarts");
+	p2p_mm_cancel();
+	p2p_party_leave();
+	CHECK(!p2p_party_active(), "the machine is out of the party");
+}
+
 /* under loss two machines can elect themselves at once, so the lossy runs check only the end state */
 int main(int argc, char **argv)
 {
@@ -2226,6 +4354,7 @@ int main(int argc, char **argv)
 	check_hosting();
 	check_playlists();
 	check_topics();
+	check_party_topic();
 	check_topic_moves();
 	check_verify_budget();
 	check_run_key();
@@ -2240,6 +4369,29 @@ int main(int argc, char **argv)
 	check_widened_pick();
 	check_failed_pick();
 	check_region();
+	check_party_pool();
+	check_party_search();
+	check_party_record_search();
+	check_party_journeys();
+	check_party_pool_invited();
+	check_e28_room();
+	check_team_counts();
+	check_team_parties();
+	check_party_sizes();
+	check_party_records();
+	check_party_link();
+	check_party_status();
+	check_party_leaked_link();
+	check_party_removed();
+	check_party_leaves();
+	check_party_expiry();
+	check_party_sealed();
+	check_party_copies();
+	check_party_full();
+	check_party_flags();
+	check_party_machine();
+	check_party_verify_window();
+	check_party_wiring();
 	check_worlds();
 	check_faults();
 	if (argc > 1)

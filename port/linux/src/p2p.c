@@ -63,6 +63,7 @@ only look up and create stand-ins.
 #include "server_master.h"
 #include "port_config.h"
 #include "p2p_internal.h"
+#include "p2p_matchmaking.h"
 #include "player_link.h"
 #include "log_address.h"
 #include "ikcp.h"
@@ -430,7 +431,7 @@ static struct
 	int join_gave_up;
 	int join_refused;
 
-	char clipboard[P2P_LINK_SIZE];
+	char clipboard[P2P_PARTY_LINK_SIZE];
 	int has_clipboard;
 
 	/* UPnP (posix_upnp.c): a thread asking the router; the port it forwards
@@ -2802,8 +2803,11 @@ static int join_invite(const char *text)
 {
 	unsigned char hash[P2P_KEY_HASH_SIZE], host[P2P_IDENTIFIER_SIZE], token[P2P_TOKEN_SIZE];
 	struct peer *peer;
-	int parsed = parse_invite(text, hash, token);
+	int parsed;
 
+	if (p2p_party_link_received(text))
+		return 1;
+	parsed = parse_invite(text, hash, token);
 	if (parsed < 0)
 		platform_log("Internet play: that invite is from an older version of the game, which this one "
 			"cannot join");
@@ -2887,6 +2891,17 @@ const char *p2p_invite_log_text(const char *invite, char *text, int size)
 	else
 		snprintf(text, (size_t)size, "%.*s... (the rest is left out of the log)", (int)kept, invite);
 	return text;
+}
+
+int p2p_invite_can_join(const char *text)
+{
+	unsigned char hash[P2P_KEY_HASH_SIZE], token[P2P_TOKEN_SIZE];
+	int can_join;
+
+	pthread_mutex_lock(&p2p_lock);
+	can_join = parse_invite(text, hash, token) > 0 || p2p_party_can_join(text);
+	pthread_mutex_unlock(&p2p_lock);
+	return can_join;
 }
 
 int p2p_join_invite(const char *text)
@@ -3181,8 +3196,7 @@ void p2p_new_invite_if_listed(void)
 	if (p2p.hosting)
 	{
 		p2p_signal_host(p2p.token);
-		memcpy(p2p.clipboard, p2p.invite, sizeof(p2p.clipboard));
-		p2p.has_clipboard = 1;
+		p2p_clipboard_offer(p2p.invite);
 		/* (Discord is told the new one) */
 		p2p.reported_player_count = -1;
 	}
@@ -3220,8 +3234,7 @@ static void update_hosting(void)
 		}
 		if (!p2p.invite_copied)
 		{
-			memcpy(p2p.clipboard, p2p.invite, sizeof(p2p.clipboard));
-			p2p.has_clipboard = 1;
+			p2p_clipboard_offer(p2p.invite);
 			p2p.invite_copied = 1;
 		}
 		p2p.reported_player_count = -1;
@@ -3557,9 +3570,15 @@ static void update_upnp(void)
 	pthread_detach(thread);
 }
 
+void p2p_clipboard_offer(const char *text)
+{
+	snprintf(p2p.clipboard, sizeof(p2p.clipboard), "%s", text);
+	p2p.has_clipboard = 1;
+}
+
 const char *p2p_take_clipboard_text(void)
 {
-	static char text[P2P_LINK_SIZE];
+	static char text[P2P_PARTY_LINK_SIZE];
 	const char *result = NULL;
 
 	if (!p2p.running)
@@ -3587,7 +3606,7 @@ static int command_line_invite(char *text, int size)
 	{
 		unsigned char hash[P2P_KEY_HASH_SIZE], token[P2P_TOKEN_SIZE];
 
-		if (parse_invite(text, hash, token))
+		if (parse_invite(text, hash, token) || mm_party_link_held(text))
 			return 1;
 	}
 	return 0;
@@ -3954,6 +3973,9 @@ static void *p2p_thread(void *unused)
 			p2p_signal_start();
 		}
 		p2p_mm_update(p2p_now(), nat_known() ? !nat_strict() : -1, p2p.hosting && p2p.has_token ? p2p.token : NULL);
+		if (p2p_party_active())
+			p2p_signal_start();
+		p2p_party_update();
 		update_joining();
 		update_answering();
 		update_reaching();

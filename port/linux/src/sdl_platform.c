@@ -1867,11 +1867,10 @@ BOOL platform_next_keystroke(struct platform_keystroke *keystroke)
 bool SDL_ShowAndroidToast(const char *message, int duration, int gravity, int xoffset, int yoffset);
 #endif
 
-/* whether the text has an invite link in it (its prefix, in any case) */
-static BOOL platform_text_has_invite_link(const char *text)
+/* whether the text has this prefix in it, in any case */
+static BOOL platform_text_has_prefix(const char *text, const char *prefix)
 {
-	static const char prefix[] = "halo://join/";
-	size_t length = sizeof(prefix) - 1;
+	size_t length = strlen(prefix);
 
 	for (; *text; text++)
 	{
@@ -1885,6 +1884,12 @@ static BOOL platform_text_has_invite_link(const char *text)
 			return TRUE;
 	}
 	return FALSE;
+}
+
+/* whether the text has a game's or a party's invite link in it */
+static BOOL platform_text_has_invite_link(const char *text)
+{
+	return platform_text_has_prefix(text, "halo://join/") || platform_text_has_prefix(text, "halo://party/");
 }
 
 /* the clipboard's text (the menus' text fields' Ctrl+V), and text put on it
@@ -1935,7 +1940,7 @@ static void platform_invite_clipboard(BOOL look)
 		platform_log("Internet play: the invite link is on the clipboard");
 #endif
 #ifdef HALO_ANDROID
-		SDL_ShowAndroidToast("Hosting: the invite link is on the clipboard", 1, -1, 0, 0);
+		SDL_ShowAndroidToast("The invite link is on the clipboard", 1, -1, 0, 0);
 #endif
 	}
 	if (look && config_boolean("network.join_from_clipboard"))
@@ -1946,12 +1951,20 @@ static void platform_invite_clipboard(BOOL look)
 		{
 			snprintf(seen, sizeof(seen), "%s", text);
 			/* (a link, not a bare code: 64 hex digits alone are as often a
-			checksum copied for something else) */
-			if (platform_text_has_invite_link(text) && (p2p_mm_cancel(), p2p_join_invite(text)))
+			checksum copied for something else; a link this copy refuses
+			leaves a search running) */
+			if (platform_text_has_invite_link(text))
 			{
+				int can_join = p2p_invite_can_join(text);
+
+				if (can_join)
+					p2p_mm_cancel();
+				if (p2p_join_invite(text) && can_join)
+				{
 #ifdef HALO_ANDROID
-				SDL_ShowAndroidToast("Joining the invite on the clipboard", 1, -1, 0, 0);
+					SDL_ShowAndroidToast("Joining the invite on the clipboard", 1, -1, 0, 0);
 #endif
+				}
 			}
 		}
 		SDL_free(text);

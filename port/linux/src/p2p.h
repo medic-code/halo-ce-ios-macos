@@ -73,6 +73,8 @@ void p2p_socket_closed(int socket, unsigned short datagram_port);
 /* text for the clipboard (a new invite link), once; NULL if none. Called
 from the main thread */
 const char *p2p_take_clipboard_text(void);
+/* a game's invite this copy can read, or a party's link it may join */
+int p2p_invite_can_join(const char *text);
 
 /* whether a game this machine hosts may be joined from the internet (an
 invite, Discord): the PC menus' Create Game > Internet (the default), not
@@ -220,6 +222,7 @@ struct p2p_lobby_wanted
 	int teams;
 	int big;
 	char region[P2P_LISTING_REGION_SIZE + 1];
+	int party;
 };
 int p2p_lobby_pick(const struct p2p_listing *games, int count, const struct p2p_lobby_wanted *wanted);
 /* the master servers' (port/linux/src/master_list.c, server_master.c): a
@@ -432,6 +435,7 @@ int p2p_mm_size_players(int size);
 int p2p_mm_size_big(int size);
 /* CTF has no free-for-all variant; playlists has a bit per playlist */
 int mm_playlist_has_size(unsigned playlists, int size);
+int mm_party_size_allowed(int party, int size);
 
 /* on the wire (queue topics) and in config.toml */
 extern const char *const p2p_mm_playlist_names[NUMBER_OF_P2P_MM_PLAYLISTS];
@@ -473,15 +477,19 @@ void p2p_mm_widen_now(void);
 void p2p_mm_host_now(void);
 void p2p_mm_cancel(void);
 /* each is ignored unless it answers its decision: p2p_mm_game a HOST, p2p_mm_joined a JOIN */
-void p2p_mm_game(int players, int most_players, int under_way);
+void p2p_mm_game(int players, int red_players, int most_players, int under_way);
 void p2p_mm_joined(int ok);
 void p2p_mm_game_lost(void);
 int p2p_mm_take_decision(struct p2p_mm_decision *decision);
+/* the party gave up the game this machine is in: the game side is to leave it */
+int p2p_mm_take_left_game(void);
 struct p2p_mm_status
 {
 	int state;
 	int seconds, mark_seconds;
 	int widened, can_host;
+	/* the players the search is for, its party's */
+	int party;
 	/* counts include this machine */
 	int playlist, size, count, needed, all_sizes_count;
 	int games_checked;
@@ -490,9 +498,60 @@ struct p2p_mm_status
 	char region[P2P_LISTING_REGION_SIZE + 1];
 	int notice;
 };
-enum { P2P_MM_NOTICE_NONE, P2P_MM_NOTICE_HOST_LEFT, P2P_MM_NOTICE_HOST_UNREACHED, P2P_MM_NOTICE_HOST_FAILED };
+enum { P2P_MM_NOTICE_NONE, P2P_MM_NOTICE_HOST_LEFT, P2P_MM_NOTICE_HOST_UNREACHED, P2P_MM_NOTICE_HOST_FAILED, P2P_MM_NOTICE_TOO_BIG,
+	P2P_MM_NOTICE_APART };
 enum { P2P_MM_LOOK_SECONDS = 6, P2P_MM_WIDEN_SECONDS = 45, P2P_MM_HOST_SECONDS = 120, P2P_MM_HOST_WAIT_SECONDS = 20 };
 void p2p_mm_get_status(struct p2p_mm_status *status);
+/* a party's leader's choice with no search running, for the members' screens */
+void p2p_mm_set_choice(const struct p2p_mm_choice *choice);
 void p2p_mm_host_gave_up(void);
+
+/* MATCHMAKING's party (p2p_party.c) */
+enum { P2P_PARTY_MAXIMUM = 8, P2P_PARTY_NAME_SIZE = 32, P2P_PARTY_LINK_SIZE = 110 };
+
+enum { P2P_MM_TEAM_PARTIES = 32 };
+struct p2p_mm_team_party
+{
+	int players, reserved;
+	unsigned char key_hashes[P2P_PARTY_MAXIMUM][P2P_PLAYER_KEY_HASH_SIZE];
+};
+/* the parties of the game this machine hosts: fills P2P_MM_TEAM_PARTIES at most, returns their count */
+int p2p_mm_team_parties(struct p2p_mm_team_party *parties, unsigned char *own_key_hash);
+enum
+{
+	P2P_PARTY_NOTICE_NONE,
+	P2P_PARTY_NOTICE_LEFT,
+	P2P_PARTY_NOTICE_LEFT_SEARCH,
+	P2P_PARTY_NOTICE_COULD_NOT_JOIN,
+	P2P_PARTY_NOTICE_ENDED,
+	P2P_PARTY_NOTICE_REMOVED,
+	P2P_PARTY_NOTICE_FULL,
+	P2P_PARTY_NOTICE_TOO_BIG,
+	P2P_PARTY_NOTICE_APART,
+};
+struct p2p_party_member
+{
+	char name[P2P_PARTY_NAME_SIZE + 1];
+	int leader, you, searching;
+};
+struct p2p_party_status
+{
+	int count;
+	struct p2p_party_member members[P2P_PARTY_MAXIMUM];
+	struct p2p_mm_choice choice;
+	int search_state;
+	/* notice_name is the member it names */
+	int notice;
+	char notice_name[P2P_PARTY_NAME_SIZE + 1];
+};
+/* these take p2p_lock: call from the game's thread, never the p2p thread */
+void p2p_party_set_name(const char *name);
+/* a leader's link, made if there is no party: on the clipboard and offered through Discord's INVITE; 0 for a member */
+int p2p_party_invite(char *link, int size);
+/* the leader: a member's place in the status, its removal making a new link sent sealed to the rest */
+void p2p_party_remove(int member);
+void p2p_party_leave(void);
+void p2p_party_get_status(struct p2p_party_status *status);
+void p2p_party_notice_clear(void);
 
 #endif

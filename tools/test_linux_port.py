@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -418,7 +419,7 @@ MATCHMAKING_SOURCES = ["port/linux/src/p2p_crypto.c", "port/third_party/monocyph
                        "port/third_party/monocypher/monocypher-ed25519.c"]
 
 
-def matchmaking_check(tmp_path, fault=None, *arguments):
+def matchmaking_check(tmp_path, fault=None, *arguments, party_fault=None):
     source = Path("port/linux/src/p2p_matchmaking.c").read_text()
     lobby = read("port/linux/src/p2p_lobby.c")
     if fault:
@@ -427,14 +428,36 @@ def matchmaking_check(tmp_path, fault=None, *arguments):
         lobby = lobby.replace(*fault)
     copy = tmp_path / "p2p_matchmaking.c"
     copy.write_text(source)
+    party = Path("port/linux/src/p2p_party.c").read_text()
+    if party_fault:
+        assert party.count(party_fault[0]) == 1, party_fault[0]
+        party = party.replace(*party_fault)
+    party_copy = tmp_path / "p2p_party.c"
+    party_copy.write_text(party)
     (tmp_path / "lobby_pick.inc").write_text("\n".join(function(lobby, name) for name in
                                                       ("pick_fits", "p2p_lobby_pick", "p2p_lobby_pick_unpinged")))
     program = tmp_path / "p2p_matchmaking_check"
     built = subprocess.run(["clang", *platform_flags(), "-Iport/linux/src", f"-I{tmp_path}", "-O1", "-no-pie",
-                            "-Wl,--unresolved-symbols=ignore-all", "-o", str(program), "tools/p2p_matchmaking_check.c", str(copy), *MATCHMAKING_SOURCES],
+                            "-Wl,--wrap=p2p_ed25519_verify", "-Wl,--unresolved-symbols=ignore-all", "-o", str(program), "tools/p2p_matchmaking_check.c", str(copy), str(party_copy), *MATCHMAKING_SOURCES],
                            capture_output=True, text=True)
     assert built.returncode == 0, built.stderr[-4000:]
     return subprocess.run([str(program), *arguments], capture_output=True, text=True, timeout=300).stdout
+
+
+# each control builds and runs the whole check program, so they run at once
+@pytest.fixture(scope="session")
+def control_outputs(tmp_path_factory):
+    jobs = [(fault, None) for fault, _ in MATCHMAKING_FAULTS] + [(None, fault) for fault, _ in PARTY_FAULTS]
+    folders = [tmp_path_factory.mktemp("control") for _ in jobs]
+
+    def check(job, folder):
+        try:
+            return matchmaking_check(folder, job[0], party_fault=job[1])
+        except AssertionError as error:
+            return str(error)
+
+    with ThreadPoolExecutor(os.cpu_count()) as pool:
+        return dict(zip(jobs, pool.map(check, jobs, folders)))
 
 
 @linux_host_only
@@ -443,30 +466,31 @@ def test_p2p_matchmaking(tmp_path):
     assert output.strip().endswith("PASS"), output
 
 
-@linux_host_only
-@pytest.mark.parametrize("fault,case", [
+MATCHMAKING_FAULTS = [
     (("if (!p2p_ed25519_verify(", "if (0 && !p2p_ed25519_verify("), "records"),
     (("bytes[2] != MM_FORMAT)", "0)"), "records"),
     (("if (!record->held)\n\t\t{\n\t\t\tmemcpy(bytes + at, record->token",
       "if (1)\n\t\t{\n\t\t\tmemcpy(bytes + at, record->token"), "hosting"),
-    (("if (!can_host && !has_host && taken + 1 == players)", "if (0)"), "pool"),
+    (("if (!can_host && !has_host && filled + candidate->players == players)", "if (0)"), "pool"),
     (("return memcmp(units[a].key_hash, units[b].key_hash, P2P_KEY_HASH_SIZE) < 0;", "return 1;"), "pool"),
     (("memcpy(material + at, units[unit].key, P2P_KEY_SIZE);\n\t\tp2p_sha256(material, at + P2P_KEY_SIZE",
       "memcpy(material, units[unit].key, P2P_KEY_SIZE);\n\t\tp2p_sha256(material, P2P_KEY_SIZE"), "election"),
     (("if (topic[0] && !strcmp(topics[index], topic))", "if (0)"), "topic moves"),
     (("queues <= 12", "queues <= 25"), "topics"),
     (("HALO_PORT_NETWORK_VERSION, p2p_mm_playlist_names", "38, p2p_mm_playlist_names"), "topics"),
+    (("\"hceu/3/party/%d/%s\", HALO_PORT_NETWORK_VERSION", "\"hceu/3/party/%d/%s\", 38"), "party topic"),
+    (("p2p_hex(digest, 16, text)", "p2p_hex(secret, 16, text)"), "party topic"),
     (("peer->refreshes >= MM_REFRESHES_COUNTED", "peer->refreshes >= 1"), "e14_two_refreshes"),
     (("peer->refreshes = -1;\n\t\tpeer->playlist", "peer->playlist"), "e14_two_refreshes"),
     (("MM_KIND_CANCEL)\n\t\tpeer->refreshes = -1;", "MM_KIND_CANCEL)\n\t\tpeer->refreshes = 0;"), "e14_after_cancel"),
-    (("record.can_host = search->can_host > 0;", "record.can_host = search->can_host != 0;"), "e48_stun_unknown"),
+    (("record.can_host = search->can_host > 0 ||", "record.can_host = search->can_host != 0 ||"), "e48_stun_unknown"),
     (("MM_EXPIRY_INTERVALS * peer->record.interval * 100", "100000"), "e19_lost_cancel"),
     (("if (record->kind == MM_KIND_CANCEL)", "if (0)"), "quit"),
     (("now - search->pool_since >= MM_SETTLE", "0"), "e4_four"),
     (("record->sequence <= peer->record.sequence", "0"), "e43_replay"),
-    (("if (!mm_playlist_has_size(1u << playlist, size))", "if (0)"), "e63_ffa_leaves_ctf"),
+    (("if (!mm_playlist_has_size(1u << playlist, size) ||", "if (0 ||"), "e63_ffa_leaves_ctf"),
     (("if (!mm_playlist_has_size(1u << playlist, queue_size))", "if (0)"), "e63_ffa_wanted"),
-    (("if (!looked && search->decision.kind == P2P_MM_DECIDE_NONE)\n\t\t\tcount = pick_game(", "if (0)\n\t\t\tcount = pick_game("), "look"),
+    (("if (!looked && search->decision.kind == P2P_MM_DECIDE_NONE && !search->party.following)\n\t\t\tcount = pick_game(", "if (0)\n\t\t\tcount = pick_game("), "look"),
     (("count = lobby_games_unlocked(games, MAXIMUM_GAMES);", "count = 0;"), "look"),
     (("waiting += wanted.big && !p2p_lobby_masters_were_heard();", "waiting += 0;"), "big_look"),
     (("search->decision.public_game = !games[index].big_game;", "search->decision.public_game = 1;"), "big_look"),
@@ -488,17 +512,40 @@ def test_p2p_matchmaking(tmp_path):
     (("return memcmp(units[a].key_hash, units[b].key_hash, P2P_KEY_HASH_SIZE) < 0;", "return 1;"),
      "e37_late_listener"),
     (("now - search->marks_from >= MM_WIDEN", "0"), "e5_alone"),
+    (("if (!mm_party_size_allowed(party_players(search), search->choice.size))\n\t\treturn 0;\n", ""), "e77_party_outgrows"),
+    (("if (p2p_party_is_member() && !mm.search.party.following)\n\t\tmm.search.in_game = 0;\n", ""), "party wiring"),
     (("if (search->can_host > 0 && !search->pool_count", "if (!search->pool_count"),
      "e13_strict"),
     (("peer->record.players >= peer->record.most_players", "peer->record.players > peer->record.most_players"),
-     "e8_full"),
+     "e28_room"),
+    (("return players + party <= most_players &&", "return players + party <= most_players + 1 &&"), "e28_room"),
+    (("+ party <= most_players / 2", "+ party <= most_players"), "e28_room"),
+    (("(!teamed || ", "("), "e28_room"),
+    (("if (teamed && party > 1 && !red && players)", "if (0)"), "e28_room"),
+    (("if (teamed && party > 1 && !red && players)", "if (party > 1 && !red && players)"), "e28_room"),
+    (("if (teamed && party > 1 && !red && players)", "if (teamed && !red && players)"), "e28_room"),
+    (("record.red_players = search->red_players;", ""), "team_counts"),
+    (("|| red_players != search->red_players", ""), "team_counts"),
+    (("record->red_players = bytes[11] >> MM_FLAG_RED_SHIFT;", ""), "team_counts"),
+    (("(record->red_players < MM_RED_MAXIMUM ? record->red_players : MM_RED_MAXIMUM)", "record->red_players"),
+     "team_counts"),
+    (("reserved |= party->reserved;", "reserved |= 0;"), "team_parties"),
+    (("team_party_add(search, record->key_hash, record->party, record->member_keys, 0);", ";"), "team_parties"),
+    (("party->count > 1)\n\t\town_team_party_add(search);", "party->count > 1)\n\t\t;"), "team_parties"),
+    (("team_party_add(search, search->party.following ? search->party.leader_hash : search->key_hash",
+      "team_party_add(search, search->key_hash"),
+     "e47_big_strict_leader"),
+    (("\tteam_parties_fill(search);\n", ""), "team_parties"),
+    (("search->team_seats_until = now + MM_PARTY_SEATS;", "search->team_seats_until = now;"), "team_parties"),
+    (("if ((long)(now - search->team_seats_until) >= 0)", "if (0)"), "team_parties"),
+    (("wanted->party = party_players(search);", ""), "e28_listing"),
     (("set_queues(search);\n\tsearch->state = P2P_MM_QUEUED;\n\tsearch->join_after",
       "search->widened = 0;\n\tset_queues(search);\n\tsearch->state = P2P_MM_QUEUED;\n\tsearch->join_after"),
      "widened_retry"),
     (("peer->record.can_host && !peer->failed &&\n\t\t\tmemcmp", "memcmp"), "strict_lowest"),
     (("!search->pool_count && now - search->marks_from >= MM_HOST", "now - search->marks_from >= MM_HOST"),
      "pool_forming"),
-    (("if (search->host_now && search->can_host > 0)\n\t\t\tcount = host_open(search, 1, out, out_size);\n\t\tif (!looked && search->decision.kind == P2P_MM_DECIDE_NONE)\n\t\t\tcount = pick_game(search, now, out, out_size);\n\t\tif (search->decision.kind == P2P_MM_DECIDE_NONE)\n\t\t\tcount = join(search, now, out, out_size);\n",
+    (("if (search->host_now && search->can_host > 0)\n\t\t\tcount = host_open(search, 1, out, out_size);\n\t\tif (!looked && search->decision.kind == P2P_MM_DECIDE_NONE && !search->party.following)\n\t\t\tcount = pick_game(search, now, out, out_size);\n\t\tif (search->decision.kind == P2P_MM_DECIDE_NONE)\n\t\t\tcount = join(search, now, out, out_size);\n",
       "count = join(search, now, out, out_size);\n\t\tif (search->decision.kind == P2P_MM_DECIDE_NONE && search->host_now && search->can_host > 0)\n\t\t\tcount = host_open(search, 1, out, out_size);\n"),
      "host_now_first"),
     (("now - search->joining_since >= MM_HOST_WAIT", "0"), "e12_never_hosts"),
@@ -512,8 +559,9 @@ def test_p2p_matchmaking(tmp_path):
     (("if (candidate->failed)", "if (0)"), "two_queues"),
     (("peer->failed == MM_FAILED_PASSED_OVER)\n\t\tpeer->failed = MM_FAILED_NONE;", "peer->failed == MM_FAILED_PASSED_OVER)\n\t\tpeer->failed = MM_FAILED_PASSED_OVER;"), "passed_over_hosts"),
     (("elapsed_ms(started) >= VERIFY_BUDGET", "0"), "verify_budget"),
+    (("elapsed_ms(started) >= VERIFY_BUDGET", "0"), "verify_budget_party"),
     (("p2p_signing_seed(),", "p2p_signing_key(),"), "run_key"),
-    (("mm.search.state != P2P_MM_OFF || mm.in_game", "mm.search.state != P2P_MM_OFF"), "joined_then_lost"),
+    (("mm.search.state != P2P_MM_OFF || mm.search.in_game", "mm.search.state != P2P_MM_OFF"), "joined_then_lost"),
     (("search->join_after = now + MM_JOIN_BACKOFF;", "(void)now;"), "failed_join_waits"),
     (("!mm_counted(peer) || !outranks", "!outranks"), "fake_fuller_game"),
     (("record->most_players <= p2p_mm_size_players(record->size)", "1"), "fake_fuller_game"),
@@ -521,9 +569,10 @@ def test_p2p_matchmaking(tmp_path):
     (("record->most_players <= HALO_PORT_MAXIMUM_NETWORK_PLAYERS", "record->most_players <= 16"), "big_records"),
     (("record->kind != MM_KIND_SEARCHING && ", ""), "big_records"),
     (("search->queue_count && !p2p_mm_size_big(search->choice.size) &&", "search->queue_count &&"), "e32_big_hosts"),
-    (("return search->can_host > 0 ? host_open(search, 1, out, out_size) : 0;",
-      "return host_open(search, 1, out, out_size);"), "e32_big_hosts"),
-    (("return search->can_host > 0 ? host_open(", "return search->can_host ? host_open("), "e32_big_hosts"),
+    (("return search->can_host > 0 && hosts_for_party(search) ? host_open(", "return hosts_for_party(search) ? host_open("),
+     "e32_big_hosts"),
+    (("return search->can_host > 0 && hosts_for_party(search) ? host_open(",
+      "return search->can_host && hosts_for_party(search) ? host_open("), "e32_big_hosts"),
     (("p2p_lobby_masters_forget();\n\t\tmm_game_lost", "mm_game_lost"), "big_lost"),
     (("if (restarted)\n\t\tbrowse_for(size);", "if (restarted)\n\t\tp2p_lobby_browse(1);"), "big_lost"),
     (("return wanted->big && !game->kind &&", "return wanted->big &&"), "big_look"),
@@ -538,14 +587,139 @@ def test_p2p_matchmaking(tmp_path):
     (("p2p_mm_size_big(best->size) &&\n\t\tbetter_host_settling(search, best)", "0"), "big_hold"),
     (("(ping < 0 && peer->refreshes < MM_REFRESHES_PINGED)", "ping < 0"), "big_hold"),
     (("!p2p_mm_size_big(search->hosting_size) || search->players == 1", "search->players == 1"), "small_hands_over"),
-    (("if (!mm_playlist_has_size(1u << playlist, size))", "if (0)"), "e64_big_ffa_no_ctf"),
+    (("if (!mm_playlist_has_size(1u << playlist, size) ||", "if ("), "e64_big_ffa_no_ctf"),
     (("size != P2P_MM_FFA_6 && size != P2P_MM_BIG_FFA", "size != P2P_MM_FFA_6"), "e64_big_ffa_no_ctf"),
     (("publish_out(out, mm_step(&mm.search, now, out, MM_MAXIMUM_OUT));\n\t\tsync_topics();", "sync_topics();"),
      "joined_then_lost"),
     (("count = mm_step(&mm.search, p2p_now(),", "count = mm_step(&mm.search, now,"), "lost_in_verify"),
-])
-def test_p2p_matchmaking_negative_control(tmp_path, fault, case):
-    output = matchmaking_check(tmp_path, fault)
+    (("if (teamed && !teams_split(units, pool, taken + 1, players / 2))", "if (0)"), "e26_parties_3v3"),
+    (("filled + candidate->players > players", "0"), "e26_parties_3v3"),
+    (("units[count].players = peer->record.party;", "units[count].players = 1;"), "e21_party_pool"),
+    (("units[0].players = party_players(search);", "units[0].players = 1;"), "party_search"),
+    (("|| !mm_party_size_allowed(party_players(search), size)", ""), "party_search"),
+    (("for (other = 0; other < member->record.party - 1; other++)", "for (other = 0; other < 0; other++)"), "party_pool_invited"),
+    (("for (other = 0; other < search->party.count - 1; other++)", "for (other = 0; other < 0; other++)"), "party_pool_invited"),
+    (("if (host == 0 && hosts_for_party(search))", "if (host == 0)"), "party_search"),
+    (("party * 2 <= p2p_mm_size_players(size)", "party <= p2p_mm_size_players(size)"), "e22_sizes"),
+    (("!mm_party_size_allowed(record->party, record->size) ||\n\t\t\tsize", "size"), "e22_sizes"),
+    (("!mm_party_size_allowed(record->party, record->size) ||\n\t\t\tsize", "size"), "party_no_signature"),
+    (("!mm_party_signed(record->member_keys[member - 1], record->key, record->party_hash,\n\t\t\t\trecord->member_signatures[member - 1])",
+      "0"), "e42_member_signatures"),
+    (("memcpy(message + sizeof(party_label) - 1 + P2P_KEY_SIZE, party_hash, P2P_KEY_HASH_SIZE);",
+      "memset(message + sizeof(party_label) - 1 + P2P_KEY_SIZE, 0, P2P_KEY_HASH_SIZE);"), "e50_old_signature"),
+    (("if (other < member ||\n\t\t\t!mm_party_signed", "if (!mm_party_signed"), "e42_member_signatures"),
+    (("memcpy(hashes[0], record->key_hash, P2P_KEY_HASH_SIZE);", "memset(hashes[0], 0, P2P_KEY_HASH_SIZE);"),
+     "e42_member_signatures"),
+    (("record->kind != MM_KIND_SEARCHING || size < at + 1", "size < at + 1"), "e42_member_signatures"),
+    (("record->party < 2 || ", ""), "e42_member_signatures"),
+    (("memcmp(hashes[other], hashes[member], P2P_KEY_HASH_SIZE)",
+      "memcmp(other ? record->member_keys[other - 1] : record->key, record->member_keys[member - 1], P2P_KEY_SIZE)"),
+     "e42_member_signatures"),
+    (("if (!key_hash_of(record->member_keys[member - 1], hashes[member]))\n\t\t\treturn 0;",
+      "key_hash_of(record->member_keys[member - 1], hashes[member]);"), "e42_member_signatures"),
+    (("if (p2p_party_is_member())\n\t{\n\t\tpthread_mutex_unlock(&p2p_lock);\n\t\treturn;\n\t}", ""), "party wiring"),
+    (("p2p_party_search_begin(&mm.search);", ""), "party wiring"),
+    (("if (mm.search.party.following)\n\t\tp2p_party_search_left();", ""), "party wiring"),
+    (("left = mm.search.left_game;\n\tmm.search.left_game = 0;", "left = mm.search.left_game;"), "party wiring"),
+    (("restart = left && !mm.search.party.following;", "restart = left;"), "party wiring"),
+    (("restart = left && !mm.search.party.following;", "restart = 0;"), "party wiring"),
+    (("restarted = !mm.search.party.following;", "restarted = 1;"), "party wiring"),
+]
+
+
+@linux_host_only
+@pytest.mark.parametrize("fault,case", MATCHMAKING_FAULTS)
+def test_p2p_matchmaking_negative_control(control_outputs, fault, case):
+    output = control_outputs[fault, None]
+    assert f"FAIL {case}:" in output, output
+
+
+PARTY_FAULTS = [
+    (("memcmp(record->key, party->members[0].key, P2P_KEY_SIZE) ||\n", "0 ||\n"), "e42_leaked_link"),
+    (("return p2p_ed25519_verify(record->key,", "return 1 || p2p_ed25519_verify(record->key,"), "e42_leaked_link"),
+    (("if (other == index || !pair_key(party, party->members[other].key, key))", "if (1)"), "e50_removed"),
+    (("p2p_x25519(shared, own, x25519);", "memset(shared, 0, P2P_KEY_SIZE);"), "e50_removed"),
+    (("p2p_hmac_sha256(secret, P2P_PARTY_SECRET_SIZE, \"seal\", 4, party->seal);",
+      "p2p_sha256(secret, P2P_PARTY_SECRET_SIZE, party->seal);"), "party sealed"),
+    (("return sequence <= member->sequence;", "return 0;"), "party copies"),
+    (("&& sequence <= party->gone[index].sequence", "&& 0"), "e61_leave_party"),
+    (("remember_gone(party, member, record->sequence);", ""), "e61_leave_party"),
+    (("PARTY_EXPIRY = 10000", "PARTY_EXPIRY = 20000"), "member_expiry"),
+    (("party->count == P2P_PARTY_MAXIMUM", "party->count == P2P_PARTY_MAXIMUM - 1"), "party full"),
+    (("if (!listed && count + 1 == P2P_PARTY_MAXIMUM)", "if (0)"), "party full"),
+    (("set_notice(party, P2P_PARTY_NOTICE_FULL, party->members[0].name);\n\t\tclear_party(party);", "set_notice(party, P2P_PARTY_NOTICE_FULL, party->members[0].name);"), "party full"),
+    (("listed |= !memcmp(hashes + index * P2P_KEY_HASH_SIZE, party->hash, P2P_KEY_HASH_SIZE);", "listed |= 0;"), "party full"),
+    (("return !isxdigit((unsigned char)*text);", "return 1;"), "party link"),
+    (("size = mm_party_remove(&local.party, member, secret, p2p_now(), bytes);\n\tif (size)\n\t{",
+      "size = mm_party_remove(&local.party, member, secret, p2p_now(), bytes);\n\tsync_topic();\n\tif (size)\n\t{"),
+     "party machine"),
+    ((" && p2p_ed25519_to_x25519(leader, x25519) &&", " &&"), "party link"),
+    (("party->role != MM_PARTY_MEMBER && party->count <= 1", "1"), "party machine"),
+    (("memcmp(leader, key, P2P_KEY_SIZE) && ", ""), "party machine"),
+    (("\t\tp2p_signal_party_publish_on(local.link_topic, local.link_record, local.link_size);\n", ""), "party machine"),
+    (("!elapsed(local.link_since, p2p_now(), LINK_RESEND) &&", ""), "party machine"),
+    (("mm_party_step(&local.party, p2p_now(), bytes)", "mm_party_step(&local.party, started, bytes)"),
+     "party verify window"),
+    ((" || memcmp(record->seal, party->seal, sizeof(party->seal))", ""), "party verify window"),
+    (("PARTY_FOLLOW_WAIT = 20000", "PARTY_FOLLOW_WAIT = 2000000"), "e29_cannot_follow"),
+    (("party->left_number = party->search.number;\n\tparty->sent", "party->sent"), "e60_member_b"),
+    (("if (member->can_host && !wanted->member_hosts && search->can_host <= 0)", "if (0)"), "e47_strict_leader"),
+    (("memcpy(wanted.keys[index - 1], party->members[index].key, P2P_KEY_SIZE);", ";"), "e47_big_strict_leader"),
+    (("\tmemcpy(member->key, record->key, P2P_KEY_SIZE);\n\tmember->sequence", "\tmember->sequence"),
+     "e47_big_strict_leader"),
+    (("memcmp(hash, party->hash, P2P_KEY_HASH_SIZE))\n\t\t\tmemcpy(member->key, party->key",
+      "memcmp(hash, party->hash, P2P_KEY_HASH_SIZE) && 0)\n\t\t\tmemcpy(member->key, party->key"), "e47_big_strict_leader"),
+    (("if (!said->searching)\n\t{\n\t\tstop_following(search);", "if (0)\n\t{\n\t\tstop_following(search);"), "e24_leader_cancels"),
+    (("else if (search->party.following)\n\t\tstop_following(search);", ""), "e30_leader_quits"),
+    (("mm_game_left(search, now);\n\t}\n\tfor (index = 1;", "}\n\tfor (index = 1;"), "e29_cannot_follow"),
+    (("search->has_game = pair_key(party, party->members[0].key, key) &&", "search->has_game = 0 &&"), "party_record_search"),
+    (("search->state == P2P_MM_HOSTING || (search->state == P2P_MM_FOUND && search->decided == P2P_MM_DECIDE_HOST))",
+      "search->state == P2P_MM_FOUND && search->decided == P2P_MM_DECIDE_HOST)"), "e75_member_keeps_hosting"),
+    (("search->state == P2P_MM_HOSTING || (search->state == P2P_MM_FOUND && search->decided == P2P_MM_DECIDE_HOST))",
+      "search->state == P2P_MM_HOSTING)"), "e75_member_keeps_hosting"),
+    (("if (said->searching && said->number != party->left_number)\n\t\t\tmm_party_search_left(party, now);\n", ""),
+     "e75_member_keeps_hosting"),
+    (("member->searching = party->search.searching && !(flags & PARTY_FLAG_IN_GAME);", ""), "e77_friend_joins_search"),
+    ((" && !(flags & PARTY_FLAG_IN_GAME);", ";"), "e77_friend_joins_search"),
+    (("party->search_heard = 1;\n", "party->search_heard = 1;\n\t\tparty->left_number = search->number;\n"), "party flags"),
+    (("if (search->in_game || search->state == P2P_MM_HOSTING", "if (search->state == P2P_MM_HOSTING"), "member_stays_in_game"),
+    (("if (in_game != party->in_game)\n\t\tparty->sent = now - PARTY_INTERVAL;", ""), "party flags"),
+    (("party->follow_done = 0;\n\tfor (index = 1; index < party->count; index++)\n\t\tparty->members[index].in_game = 0;\n}",
+      "party->follow_done = 0;\n}"), "party flags"),
+    (("leader_game(party, search, &said, now);\n\tleader_follow(party, search, &said, now);\n\tsearch_members(party, search, said.searching, &wanted, &late);",
+      "leader_follow(party, search, &said, now);\n\tsearch_members(party, search, said.searching, &wanted, &late);\n\tleader_game(party, search, &said, now);"), "party flags"),
+    (("mm_forget_game(search, party->members[index].key);", ";"), "e76_party_stays_together"),
+    (("search->players <= 1 + other_members_in_game(party)", "1"), "e76_party_stays_together"),
+    (("while (said.searching && !mm_party_size_allowed(wanted.count,", "while (0 && !mm_party_size_allowed(wanted.count,"),
+     "e77_party_outgrows"),
+    ((" | (search->public_game ? PARTY_PUBLIC : 0) |\n\t\t(search->stopped == P2P_PARTY_NOTICE_TOO_BIG ? PARTY_OUTGROWN : 0) |\n\t\t(search->stopped == P2P_PARTY_NOTICE_APART ? PARTY_APART : 0));",
+      " | (search->public_game ? PARTY_PUBLIC : 0));"), "e77_party_outgrows"),
+    (("said->searching || said->stopped ||", "said->searching ||"), "e77_party_outgrows"),
+    (("\t\tparty->sent = now - PARTY_INTERVAL;\n\t}\n\tget_name", "\t}\n\tget_name"), "listing_send"),
+    (("\t\t\tparty->following_member = 1;\n\t\t\tmm_follow_game(search, member->game.invite, member->game.playlist, member->game.size, member->game.public_game,\n\t\t\t\tnow);\n",
+      ""), "e77_leader_follows_member"),
+    (("\t\tleader_stop(party, search, said, P2P_PARTY_NOTICE_APART, now);\n", ""), "e77_leader_follows_member"),
+    (("member->game.invite[0] && member->game.left == said->left", "member->game.invite[0]"), "e77_leader_follows_member"),
+    (("(search->stopped == P2P_PARTY_NOTICE_APART ? PARTY_APART : 0)", "0"), "e77_leader_follows_member"),
+    (("\t\t\treturn body[PARTY_MEMBER_SIZE + 1] < NUMBER_OF_P2P_MM_PLAYLISTS &&\n\t\t\t\tbody[PARTY_MEMBER_SIZE + 2] < NUMBER_OF_P2P_MM_SIZES && !member_record_stale(party, hash, record->sequence);",
+      "\t\t\treturn !member_record_stale(party, hash, record->sequence);"), "party_record_search"),
+    (("if (search->state == P2P_MM_HOSTING)\n\t\tsearch->left_game = 1;\n", ""), "e77_party_outgrows"),
+    (("	search->state = P2P_MM_OFF;\n	said->searching = 0;", "	mm_cancel(search, NULL, 0);\n	said->searching = 0;"),
+     "e77_party_outgrows"),
+    (("search->left_game = 1;\n\t\treturn;\n\t}\n\tif (said->widened)", "return;\n\t}\n\tif (said->widened)"),
+     "e76_party_stays_together"),
+    (("PARTY_FOLLOW_WAIT) &&\n\t\tsearch->players", "0) &&\n\t\tsearch->players"), "e76_party_stays_together"),
+    ((" && body[base] < NUMBER_OF_P2P_MM_PLAYLISTS", ""), "party_record_search"),
+    (("&&\n\t\t\tbody[base + 1] < NUMBER_OF_P2P_MM_SIZES", ""), "party_record_search"),
+    ((" || block[5] >= NUMBER_OF_P2P_MM_SIZES", ""), "party_record_search"),
+    ((" || block[4] >= 1u << NUMBER_OF_P2P_MM_PLAYLISTS", ""), "party_record_search"),
+]
+
+
+@linux_host_only
+@pytest.mark.parametrize("fault,case", PARTY_FAULTS)
+def test_p2p_party_negative_control(control_outputs, fault, case):
+    output = control_outputs[None, fault]
     assert f"FAIL {case}:" in output, output
 
 
