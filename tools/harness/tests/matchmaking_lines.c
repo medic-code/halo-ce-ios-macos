@@ -334,10 +334,12 @@ int main(int argc, char **argv)
 		CHECK(!wcscmp(read_out(help), L"X removes Kat from the party and makes a new link."), "on Kat: %ls", help);
 		CHECK(!wcscmp(matchmaking_party_mark(&party, &view, 2), L"X REMOVE"), "on Kat: the tag");
 		CHECK(!wcscmp(matchmaking_party_mark(&party, &view, 0), L"LEADER"), "on Kat: the leader's mark");
+		CHECK(!wcscmp(matchmaking_party_mark(&party, &view, 1), L"X"), "on Kat: Rook's X stays");
 		view.asking = _matchmaking_ask_remove;
 		matchmaking_party_words(&party, &view, help, line, 128);
 		CHECK(!wcscmp(read_out(help), L"Remove Kat from the party?"), "asking: %ls", help);
 		CHECK(!wcscmp(matchmaking_party_mark(&party, &view, 2), L"REMOVE?"), "asking: the tag");
+		CHECK(!wcscmp(matchmaking_party_mark(&party, &view, 1), L""), "asking: no X on Rook");
 		CHECK(matchmaking_party_bar(&party, view.asking) == (MATCHMAKING_BAR(yes) | MATCHMAKING_BAR(no)), "asking: YES and NO");
 		{
 			struct p2p_party_status alone = party_of(1, 1);

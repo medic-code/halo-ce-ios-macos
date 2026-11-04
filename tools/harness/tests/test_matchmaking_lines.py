@@ -41,6 +41,8 @@ NEGATIVE_CONTROLS = {
     "big-party-not-skipped": (("while (first < P2P_MM_BIG_TEAM", "while (first < P2P_MM_FFA_6"), "party_panel"),
     "moved-member-lost": (("if (index < party->count && !strcmp(party->members[index].name, name))\n\t\treturn index;\n", ""),
                           "party_panel"),
+    "no-standing-x": (("view->asking ? L\"\" : L\"X\"", "view->asking ? L\"\" : L\"\""), "party_panel"),
+    "x-while-asking": (("matchmaking_party_member(party) || view->asking ?", "matchmaking_party_member(party) ?"), "party_panel"),
 }
 
 

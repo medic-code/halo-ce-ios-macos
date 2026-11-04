@@ -5715,7 +5715,9 @@ static wchar_t const *matchmaking_party_mark(const struct p2p_party_status *part
 		return view->asking == _matchmaking_ask_remove ? L"REMOVE?" : L"X REMOVE";
 	if ((party->count > 1 || matchmaking_party_member(party)) && party->members[index].leader)
 		return L"LEADER";
-	return (party->count <= 1 && !matchmaking_party_member(party)) || party->members[index].you ? L"YOU" : L"";
+	if ((party->count <= 1 && !matchmaking_party_member(party)) || party->members[index].you)
+		return L"YOU";
+	return matchmaking_party_member(party) || view->asking ? L"" : L"X";
 }
 
 /* the help box's words (empty: the screen's own) and the line under the members */
