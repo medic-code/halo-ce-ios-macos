@@ -5947,7 +5947,7 @@ static boolean matchmaking_remove_ask(struct widget_instance *slot)
 	short index = (short)(sibling_index(slot) - MATCHMAKING_ROWS);
 
 	p2p_party_get_status(&party);
-	if (index <= 0 || index >= party.count)
+	if (index <= 0 || index >= party.count || matchmaking_party_member(&party))
 		return campaign_fail();
 	matchmaking_screen.asked = index;
 	strcpy(matchmaking_screen.asked_name, party.members[index].name);
@@ -6043,7 +6043,7 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 	buttons = matchmaking_party_bar(party, matchmaking_screen.asking);
 	view.asking = matchmaking_screen.asking;
 	view.focused = view.asking == _matchmaking_ask_remove ? matchmaking_screen.asked :
-		index >= MATCHMAKING_ROWS && index < MATCHMAKING_ROWS + shown ? (short)(index - MATCHMAKING_ROWS) : NONE;
+		rows && index >= MATCHMAKING_ROWS && index < MATCHMAKING_ROWS + shown ? (short)(index - MATCHMAKING_ROWS) : NONE;
 	view.size_focused = size_focused;
 	view.invited = matchmaking_screen.invited;
 	view.discord = config_string("discord.application_id")[0] != 0;
