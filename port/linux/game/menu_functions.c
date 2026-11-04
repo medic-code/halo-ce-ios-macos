@@ -5609,7 +5609,7 @@ static struct
 	short refusal;
 	struct widget_instance *focused;
 	boolean loaded;
-	boolean member, invited;
+	boolean member, invited, ctf_held;
 	short row, asking, asked;
 	char asked_name[P2P_PARTY_NAME_SIZE + 1];
 	struct widget_instance *asked_from, *asked_button;
@@ -5889,6 +5889,7 @@ static boolean matchmaking_screen_load(struct widget_instance *widget, boolean d
 		matchmaking_party_name_update();
 	}
 	matchmaking_screen.refusal = MATCHMAKING_SEARCH;
+	matchmaking_screen.ctf_held = FALSE;
 	matchmaking_screen.loaded = TRUE;
 	return TRUE;
 }
@@ -6098,10 +6099,11 @@ static void matchmaking_screen_update(struct widget_instance *list)
 	struct widget_instance *spinner = named(list, "size_spinner", 0);
 	struct widget_instance *description = list->parameters.list.extended_description;
 	struct widget_instance *focused = list;
+	struct widget_instance *ctf = matchmaking_playlist_spinner(list, P2P_MM_CTF);
 	struct p2p_party_status party;
 	unsigned playlists = 0;
 	short index, shown, size, help;
-	boolean member;
+	boolean member, ffa;
 	int players;
 
 	if (!spinner)
@@ -6134,6 +6136,14 @@ static void matchmaking_screen_update(struct widget_instance *list)
 	if (list->focused_child != spinner->parent)
 		spinner->parameters.list.selected_index = shown = size;
 	spinner->alpha_modifier = mm_playlist_has_size(playlists, shown) ? 1.0f : TAB_UNFOCUSED_ALPHA;
+	ffa = size == P2P_MM_FFA_6 || size == P2P_MM_BIG_FFA;
+	/* CTF has no free-for-all variant: off at those sizes, and back on past them */
+	if (ctf && !member && (ffa ? ctf->parameters.list.selected_index != 0 : matchmaking_screen.ctf_held))
+	{
+		matchmaking_screen.ctf_held = ffa;
+		ctf->parameters.list.selected_index = !ffa;
+		playlists ^= 1u << P2P_MM_CTF;
+	}
 	while (focused->focused_child)
 		focused = focused->focused_child;
 	if (focused != matchmaking_screen.focused || playlists != matchmaking_screen.playlists ||
@@ -6185,6 +6195,11 @@ static void matchmaking_screen_update(struct widget_instance *list)
 	if (description)
 		description->parameters.text_box.string_list_index = help;
 	matchmaking_party_show(list, &party, index, index == 0 && mm_playlist_has_size(playlists, shown));
+	if (ffa && ctf)
+	{
+		ctf->parent->disabled = TRUE;
+		ctf->parent->alpha_modifier = TAB_UNFOCUSED_ALPHA;
+	}
 }
 
 /* a join refuses this profile, and each refused join marks a good host failed */
