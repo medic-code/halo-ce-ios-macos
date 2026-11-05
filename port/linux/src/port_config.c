@@ -806,7 +806,12 @@ static const struct config_setting config_settings[] =
 		"A server region (\"eu\", \"na-east\", \"na-west\", \"oce\"): MATCHMAKING's big\n"
 		"sizes take only that region's dedicated servers, before any game a\n"
 		"player hosts. Empty: the region of the machine's UTC offset. \"any\", or\n"
-		"an offset with no region: a game a player hosts under 200 ms comes first." },
+		"an offset with no region: a game a player hosts within\n"
+		"network.matchmaking_max_ping comes first." },
+	{ "network.matchmaking_max_ping", _config_integer, "200", "HALO_NET_MATCHMAKING_MAX_PING", _environment_value,
+		_platform_all,
+		"The most ping, in ms, matchmaking accepts to a game it joins: 100, 150,\n"
+		"200 or 300; 0 for any. A game with no ping is skipped." },
 	{ "network.matchmaking_extended", _config_boolean, "false", "HALO_NET_MATCHMAKING_EXTENDED", _environment_value,
 		_platform_all,
 		"Matchmaking also takes the other small sizes after 0:45 without a game." },

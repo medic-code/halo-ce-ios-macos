@@ -361,11 +361,14 @@ void p2p_lobby_update(const unsigned char *token, int player_count, int maximum_
 int p2p_lobby_listed(void);
 int p2p_lobby_browsing(void);
 enum { MAXIMUM_GAMES = 256 };
+/* a game's ping against a search's limit: 0, any; an unknown ping never passes */
+int ping_allowed(int ping, int limit);
 /* caller holds p2p_lock */
 int lobby_games_unlocked(struct p2p_listing *games, int maximum_count);
 int lobby_ping_unlocked(const unsigned char *key_hash);
 void lobby_mark_failed_unlocked(const unsigned char *identifier);
 int p2p_lobby_pick_unpinged(const struct p2p_listing *games, int count, const struct p2p_lobby_wanted *wanted);
+/* log the games a search passed over for their ping alone */
 /* a message on a slot (its key hash in hex) through a broker; retained: the
 slot's retained copy, sent on subscribing */
 void p2p_lobby_slot_heard(const char *hash_text, const unsigned char *payload, int size, int retained);

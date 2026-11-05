@@ -435,7 +435,7 @@ def matchmaking_check(tmp_path, fault=None, *arguments, party_fault=None):
     party_copy = tmp_path / "p2p_party.c"
     party_copy.write_text(party)
     (tmp_path / "lobby_pick.inc").write_text("\n".join(function(lobby, name) for name in
-                                                      ("pick_fits", "p2p_lobby_pick", "p2p_lobby_pick_unpinged")))
+                                                      ("ping_allowed", "pick_fits", "p2p_lobby_pick", "p2p_lobby_pick_unpinged")))
     program = tmp_path / "p2p_matchmaking_check"
     built = subprocess.run(["clang", *platform_flags(), "-Iport/linux/src", f"-I{tmp_path}", "-O1", "-no-pie",
                             "-Wl,--wrap=p2p_ed25519_verify", "-Wl,--unresolved-symbols=ignore-all", "-o", str(program), "tools/p2p_matchmaking_check.c", str(copy), str(party_copy), *MATCHMAKING_SOURCES],
@@ -582,16 +582,23 @@ MATCHMAKING_FAULTS = [
     (("p2p_lobby_masters_forget();\n\t\tmm_game_lost", "mm_game_lost"), "big_lost"),
     (("if (restarted)\n\t\tbrowse_for(size);", "if (restarted)\n\t\tp2p_lobby_browse(1);"), "big_lost"),
     (("return wanted->big && !game->kind &&", "return wanted->big &&"), "big_look"),
-    (("p2p_mm_size_big(peer->size) && !big_host_near(peer)", "0"), "e33_lone_merge"),
-    (("p2p_mm_size_big(peer->size) && !big_host_near(peer)", "0"), "e32_big_hosts"),
-    (("return ping >= 0 && ping < P2P_LOBBY_PICK_PING;", "return ping < P2P_LOBBY_PICK_PING;"), "e33_lone_merge"),
-    (("return ping >= 0 && ping < P2P_LOBBY_PICK_PING;", "return ping <= P2P_LOBBY_PICK_PING;"), "e32_big_hosts"),
+    (("p2p_mm_size_big(peer->size) && !big_host_near(search, peer)", "0"), "e33_lone_merge"),
+    (("p2p_mm_size_big(peer->size) && !big_host_near(search, peer)", "0"), "e32_big_hosts"),
+    (("return ping >= 0 && (!limit || ping <= limit);", "return !limit || ping <= limit;"), "e33_lone_merge"),
+    (("return ping >= 0 && (!limit || ping <= limit);", "return ping >= 0 && (!limit || ping < limit);"), "e32_big_hosts"),
+    (("return ping >= 0 && (!limit || ping <= limit);", "return ping >= 0 && ping <= limit;"), "max_ping"),
+    (("wanted->max_ping = search->choice.max_ping;", "wanted->max_ping = 200;"), "max_ping"),
+    (("return ping_allowed(ping, search->choice.max_ping);", "return ping_allowed(ping, 200);"), "e33_lone_merge"),
+    (("if (labs(setting - p2p_mm_ping_limits[index]) <= labs(setting - p2p_mm_ping_limits[best]))",
+      "if (labs(setting - p2p_mm_ping_limits[index]) < labs(setting - p2p_mm_ping_limits[best]))"), "max_ping"),
+    (("if (setting <= 0 || setting > 450)", "if (setting <= 0)"), "max_ping"),
     (("if (kind == P2P_MM_DECIDE_HOST && !p2p_mm_size_big(mm.search.choice.size))", "if (kind == P2P_MM_DECIDE_HOST)"),
      "big_listing"),
     (("if (players > 1 || under_way)\n\t\t\twas = take_browser();", "(void)was;"), "big_listing"),
     (("!p2p_mm_size_big(search->hosting_size) || search->players == 1", "1"), "e33_lone_merge"),
     (("p2p_mm_size_big(best->size) &&\n\t\tbetter_host_settling(search, best)", "0"), "big_hold"),
     (("(ping < 0 && peer->refreshes < MM_REFRESHES_PINGED)", "ping < 0"), "big_hold"),
+    (("(ping < 0 || ping_allowed(ping, search->choice.max_ping))", "ping_allowed(ping, search->choice.max_ping)"), "big_hold"),
     (("!p2p_mm_size_big(search->hosting_size) || search->players == 1", "search->players == 1"), "small_hands_over"),
     (("if (!mm_playlist_has_size(1u << playlist, size) ||", "if ("), "e64_big_ffa_no_ctf"),
     (("size != P2P_MM_FFA_6 && size != P2P_MM_BIG_FFA", "size != P2P_MM_FFA_6"), "e64_big_ffa_no_ctf"),

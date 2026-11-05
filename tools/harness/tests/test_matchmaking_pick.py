@@ -13,19 +13,18 @@ def generated(fault=None):
     version = constant(read('port/linux/include/halo_port_limits.h'), 'HALO_PORT_NETWORK_VERSION')
     enums = '\n'.join([f'#define HALO_PORT_NETWORK_VERSION {version}',
                        enum_with(header, 'P2P_LISTING_NAME_SIZE = 32'),
-                       enum_with(header, 'P2P_LOBBY_PICK_PING = 200'),
                        structure(header, 'p2p_listing'),
                        structure(header, 'p2p_lobby_wanted')]) + '\n'
     source = read('port/linux/src/p2p_lobby.c')
     matchmaking = read('port/linux/src/p2p_matchmaking.c')
-    code = '\n'.join([function(source, 'pick_fits'), function(source, 'p2p_lobby_pick'),
+    code = '\n'.join([function(source, 'ping_allowed'), function(source, 'pick_fits'), function(source, 'p2p_lobby_pick'),
                       function(matchmaking, 'game_has_room')])
     if fault:
         code = mutated(code, *fault)
     return (('enums.inc', enums), ('under_test.inc', code))
 
 
-CASES = ['e1_fits', 'e2_most_players', 'e3_passed_over', 'e51_e56_dedicated', 'e31_big', 'e46_region_first',
+CASES = ['e1_fits', 'e2_most_players', 'e3_passed_over', 'e5_max_ping', 'e8_big_max_ping', 'e51_e56_dedicated', 'e31_big', 'e46_region_first',
          'e52_e57_region_only', 'e53_e58_no_region', 'e55_empty_dedicated', 'e54_no_masters', 'small_unchanged',
          'e28_room', 'public_room', 'in_progress']
 
@@ -39,7 +38,10 @@ def test_case(case):
 @pytest.mark.parametrize('fault,case', [
     (('game->player_count > games[best].player_count', 'game->player_count < games[best].player_count'),
      'e2_most_players'),
-    (('game->ping >= P2P_LOBBY_PICK_PING', 'game->ping > P2P_LOBBY_PICK_PING'), 'e3_passed_over'),
+    (('return ping >= 0 && (!limit || ping <= limit);', 'return !limit || ping <= limit;'), 'e3_passed_over'),
+    (('return ping >= 0 && (!limit || ping <= limit);', 'return ping >= 0 && (!limit || ping < limit);'), 'e5_max_ping'),
+    (('return ping >= 0 && (!limit || ping <= limit);', 'return ping >= 0 && ping <= limit;'), 'e5_max_ping'),
+    (('return ping_allowed(game->ping, wanted->max_ping);', 'return ping_allowed(game->ping, 200);'), 'e8_big_max_ping'),
     (('if (game->dedicated)', 'if (0)'), 'e51_e56_dedicated'),
     (('!game->has_teams != !wanted->teams', '0'), 'e3_passed_over'),
     (('!wanted->region[0] || !strcasecmp(game->region, wanted->region)', '1'), 'e52_e57_region_only'),

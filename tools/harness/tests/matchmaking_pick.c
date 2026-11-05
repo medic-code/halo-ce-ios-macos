@@ -24,9 +24,11 @@ static void add(const char *name, int engine, int players, int most, int ping, i
 	snprintf(game->region, sizeof(game->region), "%s", region);
 }
 
+static int wanted_max_ping = 200;
+
 static const char *picked_big(const char *region)
 {
-	struct p2p_lobby_wanted wanted = { 1u << 2, 0, 1, 1 };
+	struct p2p_lobby_wanted wanted = { 1u << 2, 0, 1, 1, "", 0, wanted_max_ping };
 	int index;
 
 	snprintf(wanted.region, sizeof(wanted.region), "%s", region);
@@ -38,7 +40,7 @@ static int wanted_players = 4, wanted_teams = 1, wanted_party;
 
 static const char *picked(void)
 {
-	struct p2p_lobby_wanted wanted = { 1u << 2, wanted_players, wanted_teams, 0, "", wanted_party };
+	struct p2p_lobby_wanted wanted = { 1u << 2, wanted_players, wanted_teams, 0, "", wanted_party, wanted_max_ping };
 	int index = p2p_lobby_pick(games, count, &wanted);
 
 	return index < 0 ? "none" : games[index].name;
@@ -70,7 +72,6 @@ int main(int argc, char **argv)
 		count = 0;
 		add("full", 2, 4, 4, 40, 0, "");
 		add("far", 2, 3, 4, 240, 0, "");
-		add("at_limit", 2, 3, 4, 200, 0, "");
 		add("unpinged", 2, 3, 4, -1, 0, "");
 		add("password", 2, 3, 4, 40, 0, "");
 		games[count - 1].locked = 1;
@@ -84,6 +85,34 @@ int main(int argc, char **argv)
 		add("old", 2, 3, 4, 40, 0, "");
 		games[count - 1].network_version = HALO_PORT_NETWORK_VERSION - 1;
 		CHECK(!strcmp(picked(), "none"), "E3: every one passed over: %s", picked());
+	}
+	CASE("e5_max_ping")
+	{
+		wanted_max_ping = 100;
+		count = 0;
+		add("far", 2, 3, 4, 120, 0, "");
+		add("near", 2, 2, 4, 100, 0, "");
+		add("unpinged", 2, 3, 4, -1, 0, "");
+		CHECK(!strcmp(picked(), "near"), "E5: at 100 the game at 100 ms is taken: %s", picked());
+		count = 0;
+		add("far", 2, 3, 4, 120, 0, "");
+		add("unpinged", 2, 3, 4, -1, 0, "");
+		CHECK(!strcmp(picked(), "none"), "E5: at 100 a 120 ms and an unpinged game are passed over: %s", picked());
+		wanted_max_ping = 200;
+		count = 0;
+		add("at_limit", 2, 3, 4, 200, 0, "");
+		CHECK(!strcmp(picked(), "at_limit"), "E5: at 200 a 200 ms game passes: %s", picked());
+		wanted_max_ping = 0;
+		count = 0;
+		add("near", 2, 2, 4, 100, 0, "");
+		add("far", 2, 3, 4, 400, 0, "");
+		add("unpinged", 2, 3, 4, -1, 0, "");
+		CHECK(!strcmp(picked(), "far"), "E5: with ANY more players wins: %s", picked());
+		count = 0;
+		add("far", 2, 3, 4, 400, 0, "");
+		add("unpinged", 2, 3, 4, -1, 0, "");
+		CHECK(!strcmp(picked(), "far"), "E5: with ANY an unpinged game is passed over: %s", picked());
+		wanted_max_ping = 200;
 	}
 	CASE("e51_e56_dedicated")
 	{
@@ -106,6 +135,18 @@ int main(int argc, char **argv)
 		add("flat", 2, 20, 128, 30, 0, "");
 		games[count - 1].has_teams = 0;
 		CHECK(!strcmp(picked_big(""), "large"), "a big game has more than 8 most players, and teams: %s", picked_big(""));
+	}
+	CASE("e8_big_max_ping")
+	{
+		wanted_max_ping = 100;
+		count = 0;
+		add("eu", 2, 9, 16, -1, 1, "eu");
+		add("players", 2, 12, 16, 120, 0, "");
+		CHECK(!strcmp(picked_big("eu"), "eu"), "E8: with REGION EU the server: %s", picked_big("eu"));
+		CHECK(!strcmp(picked_big(""), "eu"), "E8: with REGION ANY the 120 ms player game is passed over: %s", picked_big(""));
+		wanted_max_ping = 0;
+		CHECK(!strcmp(picked_big(""), "players"), "E8: with ANY ping a player game comes first: %s", picked_big(""));
+		wanted_max_ping = 200;
 	}
 	CASE("e46_region_first")
 	{

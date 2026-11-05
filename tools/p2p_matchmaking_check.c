@@ -511,9 +511,11 @@ static void add_listing(const char *name, int engine, int players, int most, int
 	game->network_version = HALO_PORT_NETWORK_VERSION;
 }
 
+static int search_max_ping = 200;
+
 static void look_start(struct mm_search *search, unsigned playlists, int size, unsigned long now)
 {
-	struct p2p_mm_choice choice = { playlists, size };
+	struct p2p_mm_choice choice = { playlists, size, "", 0, search_max_ping };
 	unsigned char seed[P2P_SEED_SIZE];
 
 	listing_count = 0;
@@ -573,6 +575,87 @@ static void check_look(void)
 	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
 	CHECK(search.decision.kind == P2P_MM_DECIDE_JOIN && !strcmp(search.decision.invite, "halo://join/quick"),
 		"at 6 s the timed fit is taken");
+	listing_count = 0;
+}
+
+static void check_max_ping(void)
+{
+	static struct mm_search search;
+	struct mm_out out[MM_MAXIMUM_OUT];
+	static const struct { long setting; int limit; } snaps[] = {
+		{ 175, 200 }, { 125, 150 }, { 100, 100 }, { 150, 150 }, { 200, 200 }, { 300, 300 }, { 250, 300 }, { 450, 300 },
+		{ 40, 100 }, { 0, 0 }, { -1, 0 }, { 451, 0 }, { 5000, 0 },
+	};
+	size_t index;
+
+	case_name = "max_ping";
+	for (index = 0; index < sizeof(snaps) / sizeof(snaps[0]); index++)
+		CHECK(p2p_mm_max_ping(snaps[index].setting) == snaps[index].limit, "E6: %ld snaps to %d, not %d",
+			snaps[index].setting, snaps[index].limit, p2p_mm_max_ping(snaps[index].setting));
+
+	search_max_ping = 100;
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1000);
+	add_listing("far", 2, 3, 4, 120);
+	add_listing("near", 2, 2, 4, 100);
+	add_listing("unknown", 2, 3, 4, -1);
+	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
+	CHECK(search.decision.kind == P2P_MM_DECIDE_JOIN && !strcmp(search.decision.invite, "halo://join/near"),
+		"E5: at 100 the game at 100 ms is joined, not the 120 ms or unknown one: %s", search.decision.invite);
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1000);
+	add_listing("far", 2, 3, 4, 120);
+	add_listing("unknown", 2, 3, 4, -1);
+	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
+	CHECK(search.decision.kind == P2P_MM_DECIDE_NONE && search.state == P2P_MM_QUEUED, "E5: a 120 ms and an unknown game are passed over");
+
+	search_max_ping = 200;
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1000);
+	add_listing("edge", 2, 3, 4, 200);
+	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
+	CHECK(search.decision.kind == P2P_MM_DECIDE_JOIN, "E5: at 200 a 200 ms game passes");
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1000);
+	add_listing("over", 2, 3, 4, 201);
+	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
+	CHECK(search.decision.kind == P2P_MM_DECIDE_NONE, "E5: at 200 a 201 ms game does not");
+
+	search_max_ping = 0;
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1000);
+	add_listing("near", 2, 2, 4, 100);
+	add_listing("far", 2, 3, 4, 400);
+	add_listing("unknown", 2, 3, 4, -1);
+	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
+	CHECK(!strcmp(search.decision.invite, "halo://join/far"), "E5: with ANY the game with more players wins: %s",
+		search.decision.invite);
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1000);
+	add_listing("slow", 2, 3, 4, 400);
+	add_listing("quick", 2, 3, 4, 100);
+	add_listing("unknown", 2, 3, 4, -1);
+	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
+	CHECK(!strcmp(search.decision.invite, "halo://join/quick"), "E5: with ANY, at equal players the lower ping wins: %s",
+		search.decision.invite);
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1000);
+	add_listing("unknown", 2, 3, 4, -1);
+	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
+	CHECK(search.decision.kind == P2P_MM_DECIDE_NONE, "E5: with ANY an unknown ping is still passed over");
+
+	masters_heard = 1;
+	search_max_ping = 100;
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1000);
+	strcpy(search.choice.region, "EU");
+	add_listing("server", 2, 9, 16, -1);
+	listings[0].dedicated = listings[0].master = 1;
+	strcpy(listings[0].region, "EU");
+	add_listing("player", 2, 12, 16, 120);
+	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
+	CHECK(!strcmp(search.decision.invite, "halo://join/server"), "E8: REGION EU joins the EU server: %s",
+		search.decision.invite);
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1000);
+	add_listing("server", 2, 9, 16, -1);
+	listings[0].dedicated = listings[0].master = 1;
+	add_listing("player", 2, 12, 16, 120);
+	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
+	CHECK(!strcmp(search.decision.invite, "halo://join/server"), "E8: with REGION ANY the 120 ms player game is passed over: %s",
+		search.decision.invite);
+	search_max_ping = 200;
 	listing_count = 0;
 }
 
@@ -1104,6 +1187,7 @@ static void world(int count)
 	now_ms = 1000;
 	now_unix = 1800000000UL;
 	search_extended = 1;
+	search_max_ping = 200;
 	drop_percent = flight_count = captured_count = cancel_on_join = cancel_sent = 0;
 	never_joins = capture_from = fail_join = -1;
 	hosted_while_joining = joins_taken = 0;
@@ -1121,6 +1205,7 @@ static void start_searching(int index, unsigned playlists, int size, int can_hos
 	choice.playlists = playlists;
 	choice.size = size;
 	choice.extended = search_extended;
+	choice.max_ping = search_max_ping;
 	seed_of(100 + index, seed);
 	mm_start(&machines[index].search, seed, &choice, now_ms, now_unix);
 	machines[index].search.state = P2P_MM_QUEUED;
@@ -2029,7 +2114,14 @@ static void check_big_hosts(void)
 	run(6.5);
 	start_big(1, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1);
 	run(7.0);
-	CHECK(machines[1].in < 0 && host_count() == 2, "E58: a searcher hosts rather than join a host at 200 ms");
+	CHECK(machines[1].in == 0 && host_count() == 1, "E5: a searcher joins a host at 200 ms, the limit");
+	world(2);
+	machines[0].ping = 201;
+	start_big(0, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1);
+	run(6.5);
+	start_big(1, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1);
+	run(7.0);
+	CHECK(machines[1].in < 0 && host_count() == 2, "E58: a searcher hosts rather than join a host at 201 ms");
 	CHECK(!published_kinds[MM_KIND_SEARCHING], "E32: no searching record: %d", published_kinds[MM_KIND_SEARCHING]);
 	world(1);
 	start_big(0, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 0);
@@ -2119,6 +2211,24 @@ static void check_lone_merge(void)
 	machines[lower].ping = 199;
 	run(15.0);
 	CHECK(machines[higher].in == lower && host_count() == 1, "E58: at 199 ms the merge goes ahead");
+	world(2);
+	search_max_ping = 100;
+	start_big(0, 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA, 1);
+	start_big(1, 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA, 1);
+	higher = memcmp(machines[0].search.key_hash, machines[1].search.key_hash, P2P_KEY_HASH_SIZE) > 0 ? 0 : 1;
+	lower = !higher;
+	machines[lower].ping = 150;
+	run(21.5);
+	CHECK(host_count() == 2, "MAX PING 100: a host at 150 ms is not merged with: %d hosts", host_count());
+	world(2);
+	search_max_ping = 0;
+	start_big(0, 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA, 1);
+	start_big(1, 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA, 1);
+	higher = memcmp(machines[0].search.key_hash, machines[1].search.key_hash, P2P_KEY_HASH_SIZE) > 0 ? 0 : 1;
+	lower = !higher;
+	machines[lower].ping = 400;
+	run(21.5);
+	CHECK(machines[higher].in == lower && host_count() == 1, "MAX PING ANY: a host at 400 ms is merged with");
 }
 
 static void check_big_hold(void)
@@ -2130,6 +2240,7 @@ static void check_big_hold(void)
 	{
 		case_name = "big_hold";
 		world(3);
+		search_max_ping = round ? 200 : 100;
 		for (i = 0; i < 3; i++)
 			start_big(i, 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA, 1);
 		for (i = 0; i < 3; i++)
@@ -4507,6 +4618,7 @@ int main(int argc, char **argv)
 	check_failed_join_waits();
 	check_fake_fuller_game();
 	check_look();
+	check_max_ping();
 	check_big_look();
 	check_big_listing();
 	check_ffa_wanted();

@@ -6,6 +6,7 @@
 
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #ifdef _WIN32
 #define strcasecmp _stricmp
@@ -21,6 +22,7 @@ static const char party_label[] = "hceu-mm-party-1";
 
 const char *const p2p_mm_playlist_names[NUMBER_OF_P2P_MM_PLAYLISTS] = { "slayer", "ctf", "king", "oddball", "race" };
 const char *const p2p_mm_size_names[NUMBER_OF_P2P_MM_SIZES] = { "1v1", "2v2", "3v3", "4v4", "ffa6", "big-team", "big-ffa" };
+const int p2p_mm_ping_limits[] = { 100, 150, 200, 300, 0 };
 
 void mm_topic(int playlist, int size, char *topic, int topic_size)
 {
@@ -461,6 +463,7 @@ void mm_wanted(const struct mm_search *search, int queue, struct p2p_lobby_wante
 	wanted->big = p2p_mm_size_big(queue_size);
 	snprintf(wanted->region, sizeof(wanted->region), "%s", search->choice.region);
 	wanted->party = party_players(search);
+	wanted->max_ping = search->choice.max_ping;
 }
 
 int mm_counted(const struct mm_peer *peer)
@@ -1125,11 +1128,11 @@ static int pick_game(struct mm_search *search, unsigned long now, struct mm_out 
 }
 
 /* a big queue's record says nothing of the host's ping: its lobby listing does */
-static int big_host_near(const struct mm_peer *peer)
+static int big_host_near(const struct mm_search *search, const struct mm_peer *peer)
 {
 	int ping = lobby_ping_unlocked(peer->record.key_hash);
 
-	return ping >= 0 && ping < P2P_LOBBY_PICK_PING;
+	return ping_allowed(ping, search->choice.max_ping);
 }
 
 static int better_host(const struct mm_record *record, const struct mm_record *than)
@@ -1156,7 +1159,8 @@ static int better_host_settling(const struct mm_search *search, const struct mm_
 			continue;
 		}
 		ping = lobby_ping_unlocked(peer->record.key_hash);
-		if (ping < P2P_LOBBY_PICK_PING && (!mm_counted(peer) || (ping < 0 && peer->refreshes < MM_REFRESHES_PINGED)))
+		if ((ping < 0 || ping_allowed(ping, search->choice.max_ping)) &&
+			(!mm_counted(peer) || (ping < 0 && peer->refreshes < MM_REFRESHES_PINGED)))
 			return 1;
 	}
 	return 0;
@@ -1201,7 +1205,7 @@ static int join(struct mm_search *search, unsigned long now, struct mm_out *out,
 			(peer->record.held && pool_index(&peer->record, search->key_hash) < 0) ||
 			(!peer->record.held && (search->party.following || (long)(now - search->join_after) < 0)) ||
 			(search->state == P2P_MM_HOSTING && (!mm_counted(peer) || !outranks(search, &peer->record))) ||
-			(p2p_mm_size_big(peer->size) && !big_host_near(peer)))
+			(p2p_mm_size_big(peer->size) && !big_host_near(search, peer)))
 		{
 			continue;
 		}
@@ -1669,6 +1673,20 @@ static void browse_for(int size)
 	if (p2p_mm_size_big(size))
 		master_list_refresh();
 	p2p_lobby_browse(1);
+}
+
+int p2p_mm_max_ping(long setting)
+{
+	int index, best = 0;
+
+	if (setting <= 0 || setting > 450)
+		return 0;
+	for (index = 1; index < P2P_MM_ANY; index++)
+	{
+		if (labs(setting - p2p_mm_ping_limits[index]) <= labs(setting - p2p_mm_ping_limits[best]))
+			best = index;
+	}
+	return p2p_mm_ping_limits[best];
 }
 
 const char *p2p_mm_region(const char *setting)
