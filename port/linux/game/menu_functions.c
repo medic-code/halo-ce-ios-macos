@@ -6004,6 +6004,8 @@ enum
 	MATCHMAKING_ONE_PLAYER,
 };
 
+#define MATCHMAKING_CLOCK_REGIONS P2P_MM_ANY
+
 /* indices into port_settings.py's MATCHMAKING_HELP: keep the order */
 enum
 {
@@ -6011,11 +6013,74 @@ enum
 	_matchmaking_help_no_ffa = _matchmaking_help_size + NUMBER_OF_P2P_MM_SIZES,
 	_matchmaking_help_playlist,
 	_matchmaking_help_search = _matchmaking_help_playlist + NUMBER_OF_P2P_MM_PLAYLISTS,
-	_matchmaking_help_none = _matchmaking_help_search + MATCHMAKING_ONE_PLAYER + 1,
+	_matchmaking_help_ping = _matchmaking_help_search + MATCHMAKING_ONE_PLAYER + 1,
+	_matchmaking_help_region,
+	_matchmaking_help_region_set = _matchmaking_help_region + MATCHMAKING_CLOCK_REGIONS + 1,
+	_matchmaking_help_none,
 };
 
 #define MATCHMAKING_TEXT_LENGTH 160
-#define MATCHMAKING_ROWS (1 + NUMBER_OF_P2P_MM_PLAYLISTS)
+
+/* the options_menu's children, in port_settings.py's rows order */
+enum
+{
+	_matchmaking_row_size,
+	_matchmaking_row_ping = 1 + NUMBER_OF_P2P_MM_PLAYLISTS,
+	_matchmaking_row_region,
+	MATCHMAKING_ROWS
+};
+
+/* port_settings.py's MATCHMAKING_PINGS and MATCHMAKING_REGION_ROWS */
+static int const matchmaking_ping_limits[] = { 100, 150, 200, 300, 0 };
+static char const *const matchmaking_ping_texts[] = { "100", "150", "200", "300", "0" };
+static char const *const matchmaking_region_settings[] = { "", "eu", "na-east", "na-west", "oce", "any" };
+#define MATCHMAKING_PING_ANY (NUMBEROF(matchmaking_ping_limits) - 1)
+#define MATCHMAKING_REGION_ROWS ((short)NUMBEROF(matchmaking_region_settings))
+
+static short matchmaking_ping_row(int max_ping)
+{
+	short row = 0;
+
+	while (row < (short)MATCHMAKING_PING_ANY && matchmaking_ping_limits[row] != max_ping)
+		row++;
+	return row;
+}
+
+static short matchmaking_region_row(char const *setting)
+{
+	short row = MATCHMAKING_REGION_ROWS - 1;
+
+	while (row > 0 && csstrcasecmp(setting, matchmaking_region_settings[row]))
+		row--;
+	return row;
+}
+
+static short matchmaking_clock_region(char const *resolved)
+{
+	short index = 0;
+
+	while (index < MATCHMAKING_CLOCK_REGIONS && strcmp(resolved, matchmaking_region_settings[index + 1]))
+		index++;
+	return index;
+}
+
+static short matchmaking_region_help(short region, char const *resolved)
+{
+	return region ? _matchmaking_help_region_set : (short)(_matchmaking_help_region + matchmaking_clock_region(resolved));
+}
+
+/* a leader's AUTO with no region from its clock is AUTO, not ANY */
+static short matchmaking_region_of_choice(const struct p2p_mm_choice *choice)
+{
+	return choice->region_auto ? 0 : matchmaking_region_row(choice->region[0] ? choice->region : "any");
+}
+
+static void matchmaking_choice_rows(struct p2p_mm_choice *choice, short ping, short region)
+{
+	choice->max_ping = matchmaking_ping_limits[ping];
+	choice->region_auto = !region;
+	snprintf(choice->region, sizeof(choice->region), "%s", p2p_mm_region(matchmaking_region_settings[region]));
+}
 
 #define SEARCH_SLOT_SPINNER_FRAMES 8
 enum
@@ -6108,6 +6173,7 @@ static struct
 	boolean loaded;
 	boolean member, invited;
 	short row, asking, asked;
+	short ping, region;
 	short scroll;
 	unsigned long shown_at, invited_at;
 	struct matchmaking_row slots[P2P_PARTY_MAXIMUM];
@@ -6602,20 +6668,40 @@ static void matchmaking_screen_show(struct widget_instance *widget, unsigned pla
 	}
 }
 
+static void matchmaking_rows_show(struct widget_instance *widget, short ping, short region)
+{
+	struct widget_instance *screen = screen_of(widget);
+	struct widget_instance *spinner = named(screen, "ping_spinner", 0);
+
+	if (spinner)
+		spinner->parameters.list.selected_index = ping;
+	spinner = named(screen, "region_spinner", 0);
+	if (spinner)
+		spinner->parameters.list.selected_index = region;
+}
+
 static boolean matchmaking_screen_load(struct widget_instance *widget, boolean defaults)
 {
+	char ping_text[16] = "", region_text[32] = "";
 	struct p2p_party_status party;
 	unsigned playlists = 1u << P2P_MM_SLAYER;
-	short size;
+	short size, ping, region;
 
 	p2p_party_get_status(&party);
 	size = matchmaking_size_after(playlists, P2P_MM_2V2,
 		matchmaking_party_member(&party) || !party.count ? 1 : party.count);
 	matchmaking_screen_show(widget, playlists, size);
+	setting_text("network.matchmaking_max_ping", ping_text, sizeof(ping_text), defaults);
+	setting_text("network.matchmaking_region", region_text, sizeof(region_text), defaults);
+	ping = matchmaking_ping_row(p2p_mm_max_ping(atol(ping_text)));
+	region = matchmaking_region_row(region_text);
+	matchmaking_rows_show(widget, ping, region);
 	if (!defaults)
 	{
 		matchmaking_screen.playlists = playlists;
 		matchmaking_screen.size = size;
+		matchmaking_screen.ping = ping;
+		matchmaking_screen.region = region;
 		matchmaking_party_name_update();
 	}
 	matchmaking_screen.refusal = MATCHMAKING_SEARCH;
@@ -7076,19 +7162,31 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 	text_set_length(named(screen, "party_notice", 0), text, MATCHMAKING_TEXT_LENGTH);
 }
 
+static void matchmaking_rows_save(short ping, short region)
+{
+	if (ping != matchmaking_screen.ping)
+		config_write("network.matchmaking_max_ping", matchmaking_ping_texts[ping]);
+	if (region != matchmaking_screen.region)
+		config_write("network.matchmaking_region", matchmaking_region_settings[region]);
+	matchmaking_screen.ping = ping;
+	matchmaking_screen.region = region;
+}
+
 /* the spinners are not under the list yet at "port matchmaking init", so the rows load at the first update */
 static void matchmaking_screen_update(struct widget_instance *list)
 {
 	struct widget_instance *spinner = named(list, "size_spinner", 0);
 	struct widget_instance *description = list->parameters.list.extended_description;
 	struct widget_instance *focused = list;
+	struct widget_instance *ping_spinner = named(list, "ping_spinner", 0);
+	struct widget_instance *region_spinner = named(list, "region_spinner", 0);
 	struct p2p_party_status party;
 	unsigned playlists = 0;
-	short index, shown, size, help;
+	short index, shown, size, help, ping, region;
 	boolean member;
 	int players;
 
-	if (!spinner)
+	if (!spinner || !ping_spinner || !region_spinner)
 		return;
 	matchmaking_screen.shown_at = system_milliseconds();
 	p2p_party_get_status(&party);
@@ -7099,12 +7197,15 @@ static void matchmaking_screen_update(struct widget_instance *list)
 	matchmaking_screen.member = member;
 	if (!matchmaking_screen.loaded)
 		matchmaking_screen_load(list, FALSE);
-	if (member)
+	if (member && party.search_heard)
 	{
 		matchmaking_screen_show(list, party.choice.playlists, (short)party.choice.size);
 		matchmaking_screen.playlists = party.choice.playlists;
 		matchmaking_screen.size = (short)party.choice.size;
+		matchmaking_rows_show(list, matchmaking_ping_row(party.choice.max_ping), matchmaking_region_of_choice(&party.choice));
 	}
+	ping = (short)PIN(ping_spinner->parameters.list.selected_index, 0, (short)MATCHMAKING_PING_ANY);
+	region = (short)PIN(region_spinner->parameters.list.selected_index, 0, MATCHMAKING_REGION_ROWS - 1);
 	for (index = 0; index < NUMBER_OF_P2P_MM_PLAYLISTS; index++)
 	{
 		struct widget_instance *playlist = matchmaking_playlist_spinner(list, index);
@@ -7126,6 +7227,8 @@ static void matchmaking_screen_update(struct widget_instance *list)
 	{
 		matchmaking_screen.refusal = MATCHMAKING_SEARCH;
 	}
+	if (!member)
+		matchmaking_rows_save(ping, region);
 	matchmaking_screen.playlists = playlists;
 	matchmaking_screen.size = size;
 	matchmaking_screen.focused = focused;
@@ -7135,6 +7238,7 @@ static void matchmaking_screen_update(struct widget_instance *list)
 
 		choice.playlists = playlists;
 		choice.size = size;
+		matchmaking_choice_rows(&choice, ping, region);
 		p2p_mm_set_choice(&choice);
 	}
 	index = list->focused_child ? sibling_index(list->focused_child) : NONE;
@@ -7147,6 +7251,10 @@ static void matchmaking_screen_update(struct widget_instance *list)
 			_matchmaking_help_no_ffa);
 	else if (index > 0 && index <= NUMBER_OF_P2P_MM_PLAYLISTS)
 		help = (short)(_matchmaking_help_playlist + index - 1);
+	else if (index == _matchmaking_row_ping)
+		help = _matchmaking_help_ping;
+	else if (index == _matchmaking_row_region)
+		help = matchmaking_region_help(region, p2p_mm_region(""));
 	else if (!strcmp(focused->name, "button_search"))
 		help = _matchmaking_help_search;
 	else
@@ -7174,8 +7282,7 @@ static boolean matchmaking_screen_search(void)
 		return FALSE;
 	choice.playlists = matchmaking_screen.playlists;
 	choice.size = matchmaking_screen.size;
-	snprintf(choice.region, sizeof(choice.region), "%s", p2p_mm_region(config_string("network.matchmaking_region")));
-	choice.max_ping = p2p_mm_max_ping(config_integer("network.matchmaking_max_ping"));
+	matchmaking_choice_rows(&choice, matchmaking_screen.ping, matchmaking_screen.region);
 	p2p_party_notice_clear();
 	p2p_mm_search(&choice);
 	ui_play_audio_feedback_sound(SOUND_FORWARD);
