@@ -1090,6 +1090,8 @@ static void run(double seconds)
 	}
 }
 
+static int search_extended;
+
 static void world(int count)
 {
 	memset(machines, 0, sizeof(machines));
@@ -1101,6 +1103,7 @@ static void world(int count)
 	ignored = failed_host = ignore_only = -1;
 	now_ms = 1000;
 	now_unix = 1800000000UL;
+	search_extended = 1;
 	drop_percent = flight_count = captured_count = cancel_on_join = cancel_sent = 0;
 	never_joins = capture_from = fail_join = -1;
 	hosted_while_joining = joins_taken = 0;
@@ -1117,6 +1120,7 @@ static void start_searching(int index, unsigned playlists, int size, int can_hos
 	memset(&choice, 0, sizeof(choice));
 	choice.playlists = playlists;
 	choice.size = size;
+	choice.extended = search_extended;
 	seed_of(100 + index, seed);
 	mm_start(&machines[index].search, seed, &choice, now_ms, now_unix);
 	machines[index].search.state = P2P_MM_QUEUED;
@@ -1553,7 +1557,7 @@ static void check_alone(void)
 	CHECK(!machines[0].search.widened, "not widened before 0:45");
 	run(1.0);
 	CHECK(machines[0].search.widened && machines[0].search.queue_count == NUMBER_OF_P2P_MM_SMALL_SIZES,
-		"E5: widened at 0:45 to every small size: %d queues", machines[0].search.queue_count);
+		"E2: ON, widened at 0:45 to every small size: %d queues", machines[0].search.queue_count);
 	CHECK(no_big_queue(&machines[0].search), "E34: widening takes no big size");
 	run(73.0);
 	CHECK(!machines[0].hosting, "not hosting before 2:00");
@@ -1561,6 +1565,81 @@ static void check_alone(void)
 	CHECK(machines[0].hosting && machines[0].search.hosting_size == P2P_MM_2V2,
 		"E5: hosts an open SLAYER 2V2 at 2:00");
 	CHECK(!host_record_held(&machines[0].search), "E5: open, not held");
+}
+
+static void check_extended_off(void)
+{
+	int index;
+
+	case_name = "e1_off";
+	world(6);
+	search_extended = 0;
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_4V4, 1);
+	for (index = 1; index < 6; index++)
+		start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(46.0);
+	CHECK(!machines[0].search.widened && machines[0].search.queue_count == 1 && machines[0].search.queues[0][1] == P2P_MM_4V4,
+		"E1: OFF, the queues are unchanged at 0:46: %d queues", machines[0].search.queue_count);
+	run(70.0);
+	CHECK(!machines[0].hosting && machines[0].in < 0, "E1: OFF, not hosting or joined before 2:00");
+	run(5.0);
+	CHECK(machines[0].hosting && machines[0].search.hosting_size == P2P_MM_4V4, "E1: OFF, hosts the chosen size at 2:00");
+}
+
+static void check_extended_playlists(void)
+{
+	unsigned all = (1u << NUMBER_OF_P2P_MM_PLAYLISTS) - 1;
+	int playlist, size, expected = 0;
+
+	case_name = "e4_playlists";
+	for (playlist = 0; playlist < NUMBER_OF_P2P_MM_PLAYLISTS; playlist++)
+		for (size = 0; size < NUMBER_OF_P2P_MM_SMALL_SIZES; size++)
+			expected += mm_playlist_has_size(1u << playlist, size);
+	world(1);
+	start_searching(0, all, P2P_MM_2V2, 1);
+	run(46.0);
+	CHECK(machines[0].search.queue_count == 24 && expected == 24,
+		"E4: 5 playlists ON, 24 queues and none dropped: %d queues of %d", machines[0].search.queue_count, expected);
+}
+
+static void check_extended_record(void)
+{
+	struct p2p_mm_choice choice = { 1u << P2P_MM_SLAYER, P2P_MM_2V2 };
+	static struct mm_search on, off;
+	struct mm_out on_out[MM_MAXIMUM_OUT], off_out[MM_MAXIMUM_OUT];
+	unsigned char seed[P2P_SEED_SIZE];
+	unsigned long hash = 2166136261UL;
+	int count, index;
+
+	case_name = "e13_extended_record";
+	seed_of(100, seed);
+	choice.extended = 1;
+	mm_start(&on, seed, &choice, 1000, 1800000000UL);
+	choice.extended = 0;
+	mm_start(&off, seed, &choice, 1000, 1800000000UL);
+	on.state = off.state = P2P_MM_QUEUED;
+	count = mm_step(&on, 1000, on_out, MM_MAXIMUM_OUT);
+	CHECK(count == 1 && mm_step(&off, 1000, off_out, MM_MAXIMUM_OUT) == 1 && on_out[0].size == off_out[0].size &&
+		!memcmp(on_out[0].bytes, off_out[0].bytes, (size_t)on_out[0].size), "E13: the extended flag is not in the searching record");
+	for (index = 0; index < off_out[0].size; index++)
+		hash = (hash ^ off_out[0].bytes[index]) * 16777619UL & 0xffffffffUL;
+	CHECK(hash == 0x5ea6b674UL, "E13: the record's bytes equal b04049f1's: %08lx", hash);
+}
+
+static void check_extended_pool(void)
+{
+	int index;
+
+	case_name = "e13_extended_pool";
+	world(4);
+	for (index = 0; index < 4; index++)
+	{
+		search_extended = index < 2;
+		start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	}
+	run(30.0);
+	CHECK(host_count() == 1 && machines[find_host()].players == 4,
+		"E13: two ON and two OFF machines pool in SLAYER 2V2: %d hosts", host_count());
 }
 
 static void check_widen_now(void)
@@ -2878,6 +2957,10 @@ static void check_worlds(void)
 	check_left_queue();
 	check_failed_join();
 	check_alone();
+	check_extended_off();
+	check_extended_playlists();
+	check_extended_record();
+	check_extended_pool();
 	check_widen_now();
 	check_host_now();
 	check_strict();

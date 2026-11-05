@@ -517,6 +517,7 @@ MATCHMAKING_FAULTS = [
     (("return memcmp(units[a].key_hash, units[b].key_hash, P2P_KEY_HASH_SIZE) < 0;", "return 1;"),
      "e37_late_listener"),
     (("now - search->marks_from >= MM_WIDEN", "0"), "e5_alone"),
+    (("search->choice.extended && !search->party.following", "!search->party.following"), "e1_off"),
     (("if (!mm_party_size_allowed(party_players(search), search->choice.size))\n\t\treturn 0;\n", ""), "e77_party_outgrows"),
     (("if (p2p_party_is_member() && !mm.search.party.following)\n\t\tmm.search.in_game = 0;\n", ""), "party wiring"),
     (("if (search->can_host > 0 && !search->pool_count", "if (!search->pool_count"),

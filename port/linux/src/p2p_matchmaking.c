@@ -1016,7 +1016,7 @@ static int marks(struct mm_search *search, unsigned long now, struct mm_out *out
 {
 	if (p2p_mm_size_big(search->choice.size))
 		return search->can_host > 0 && hosts_for_party(search) ? host_open(search, 1, out, out_size) : 0;
-	if (!search->party.following && !search->widened && now - search->marks_from >= MM_WIDEN)
+	if (search->choice.extended && !search->party.following && !search->widened && now - search->marks_from >= MM_WIDEN)
 		widen(search);
 	if (search->can_host > 0 && !search->pool_count && now - search->marks_from >= MM_HOST && hosts_for_party(search))
 		return host_open(search, 0, out, out_size);

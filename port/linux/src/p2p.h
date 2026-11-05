@@ -446,6 +446,7 @@ struct p2p_mm_choice
 	unsigned playlists;
 	int size;
 	char region[P2P_LISTING_REGION_SIZE + 1];
+	int extended;
 };
 enum
 {

@@ -911,7 +911,7 @@ static void member_search(struct mm_party *party, struct mm_search *search, unsi
 		return;
 	if (search->state == P2P_MM_OFF && !search->in_game)
 	{
-		struct p2p_mm_choice choice;
+		struct p2p_mm_choice choice = { 0 };
 
 		if (!said->searching || said->stopped || said->number == party->left_number)
 			return;

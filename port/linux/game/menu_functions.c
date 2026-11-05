@@ -6221,6 +6221,7 @@ static boolean matchmaking_screen_search(void)
 	choice.playlists = matchmaking_screen.playlists;
 	choice.size = matchmaking_screen.size;
 	snprintf(choice.region, sizeof(choice.region), "%s", p2p_mm_region(config_string("network.matchmaking_region")));
+	choice.extended = config_boolean("network.matchmaking_extended");
 	p2p_party_notice_clear();
 	p2p_mm_search(&choice);
 	ui_play_audio_feedback_sound(SOUND_FORWARD);

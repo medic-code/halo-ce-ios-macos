@@ -624,6 +624,7 @@ the setting for one start of the game. It has priority over the file.
 | `network.matchmaking_playlists` | `"slayer"` | `HALO_NET_MATCHMAKING_PLAYLISTS` | MATCHMAKING's playlists, comma-separated: `"slayer"`, `"ctf"`, `"king"`, `"oddball"`, `"race"`. |
 | `network.matchmaking_size` | `"2v2"` | `HALO_NET_MATCHMAKING_SIZE` | MATCHMAKING's game size: `"1v1"`, `"2v2"`, `"3v3"`, `"4v4"` or `"ffa6"`. |
 | `network.matchmaking_region` | `""` | `HALO_NET_MATCHMAKING_REGION` | A server region (`"eu"`, `"na-east"`, `"na-west"`, `"oce"`): MATCHMAKING's big sizes take only that region's dedicated servers, before any game a player hosts. Empty: the region of the machine's UTC offset. `"any"`, or an offset with no region: a game a player hosts under 200 ms comes first. |
+| `network.matchmaking_extended` | `false` | `HALO_NET_MATCHMAKING_EXTENDED` | Matchmaking also takes the other small sizes after 0:45 without a game. |
 | `server.enabled` | `false` | `HALO_SERVER` | `true`: run as a dedicated server, as `halo --server` does. Refer to "Dedicated server". The `server.*` settings are written to `config.toml` only by a dedicated server. |
 | `server.name` | `"OpenCE Server"` | `HALO_SERVER_NAME` | The game's name in the lobby and the server browser: 15 characters of printable ASCII. |
 | `server.max_players` | `16` | `HALO_SERVER_MAX_PLAYERS` | The most players (2 to 127). |
@@ -1263,9 +1264,10 @@ only invites, not listings.
 MATCHMAKING finds a game for a player who chooses playlists
 (`network.matchmaking_playlists`) and a size (`network.matchmaking_size`):
 1V1, 2V2, 3V3, 4V4, FFA 6, BIG TEAM or BIG FFA. The game searches the queues
-of those playlists at that size. After 0:45 without a game, the search widens
-to every small size. After 2:00 without one, the player hosts a game and
-waits for others. A matchmade small game is not listed in the Server Browser.
+of those playlists at that size. With `network.matchmaking_extended` on, the
+search widens to every small size after 0:45 without a game; off, it stays at
+the chosen size. After 2:00 without one, the player hosts a game and waits for
+others. A matchmade small game is not listed in the Server Browser.
 
 BIG TEAM and BIG FFA have no queue. The search takes a dedicated server of
 `network.matchmaking_region` that plays no SWAT, Infection, Gun Game or

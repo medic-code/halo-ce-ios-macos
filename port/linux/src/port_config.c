@@ -807,6 +807,9 @@ static const struct config_setting config_settings[] =
 		"sizes take only that region's dedicated servers, before any game a\n"
 		"player hosts. Empty: the region of the machine's UTC offset. \"any\", or\n"
 		"an offset with no region: a game a player hosts under 200 ms comes first." },
+	{ "network.matchmaking_extended", _config_boolean, "false", "HALO_NET_MATCHMAKING_EXTENDED", _environment_value,
+		_platform_all,
+		"Matchmaking also takes the other small sizes after 0:45 without a game." },
 	{ "network.browser_show_empty", _config_boolean, "true", "HALO_NET_BROWSER_SHOW_EMPTY", _environment_value,
 		_platform_all,
 		"The server browser lists games with no player (its Filters screen)." },
