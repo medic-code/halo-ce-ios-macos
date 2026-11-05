@@ -3099,6 +3099,7 @@ static void check_region(void)
 	};
 	size_t index;
 
+	case_name = "region";
 	for (index = 0; index < sizeof(offsets) / sizeof(offsets[0]); index++)
 	{
 		setenv("TZ", offsets[index].zone, 1);
@@ -3107,6 +3108,12 @@ static void check_region(void)
 	}
 	CHECK(!strcmp(p2p_mm_region("any"), "") && !strcmp(p2p_mm_region("ANY"), ""), "any is the worldwide path");
 	CHECK(!strcmp(p2p_mm_region("na-west"), "na-west"), "a set region stays");
+	setenv("TZ", "UTC-8", 1);
+	tzset();
+	CHECK(!strcmp(p2p_mm_region("EU"), "eu"), "E6: EU is the eu region: \"%s\"", p2p_mm_region("EU"));
+	CHECK(!strcmp(p2p_mm_region("uk"), p2p_mm_region("")) && !strcmp(p2p_mm_region("uk"), "oce"),
+		"E6: an unknown region falls back to auto's answer: \"%s\"", p2p_mm_region("uk"));
+	CHECK(!strcmp(p2p_mm_region("eu/#"), p2p_mm_region("")), "E6: a region with a path falls back to auto's answer: \"%s\"", p2p_mm_region("eu/#"));
 	unsetenv("TZ");
 	tzset();
 }

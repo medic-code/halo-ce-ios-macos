@@ -439,6 +439,7 @@ extern const char *const p2p_mm_playlist_names[NUMBER_OF_P2P_MM_PLAYLISTS];
 extern const char *const p2p_mm_size_names[NUMBER_OF_P2P_MM_SIZES];
 enum { P2P_MM_ANY = 4 };
 extern const int p2p_mm_ping_limits[P2P_MM_ANY + 1];
+extern const char *const p2p_mm_region_names[P2P_MM_ANY + 1];
 
 struct p2p_mm_choice
 {

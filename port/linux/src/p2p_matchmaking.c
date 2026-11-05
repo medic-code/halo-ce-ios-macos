@@ -23,6 +23,7 @@ static const char party_label[] = "hceu-mm-party-1";
 const char *const p2p_mm_playlist_names[NUMBER_OF_P2P_MM_PLAYLISTS] = { "slayer", "ctf", "king", "oddball", "race" };
 const char *const p2p_mm_size_names[NUMBER_OF_P2P_MM_SIZES] = { "1v1", "2v2", "3v3", "4v4", "ffa6", "big-team", "big-ffa" };
 const int p2p_mm_ping_limits[] = { 100, 150, 200, 300, 0 };
+const char *const p2p_mm_region_names[] = { "eu", "na-east", "na-west", "oce", "" };
 
 void mm_topic(int playlist, int size, char *topic, int topic_size)
 {
@@ -1704,8 +1705,13 @@ const char *p2p_mm_region(const char *setting)
 	long offset = (long)difftime(now, mktime(gmtime(&now))) / 60;
 	size_t index;
 
-	if (setting[0])
-		return strcasecmp(setting, "any") ? setting : "";
+	if (!strcasecmp(setting, "any"))
+		return "";
+	for (index = 0; index < P2P_MM_ANY; index++)
+	{
+		if (!strcasecmp(setting, p2p_mm_region_names[index]))
+			return p2p_mm_region_names[index];
+	}
 	for (index = 0; index < sizeof(regions) / sizeof(regions[0]); index++)
 	{
 		if (offset >= regions[index].from && offset <= regions[index].to)
