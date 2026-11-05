@@ -472,6 +472,7 @@ def test_p2p_matchmaking(tmp_path):
 
 
 MATCHMAKING_FAULTS = [
+    (("count += seen ? 0 : peer->record.party;", "count += peer->record.party;"), "e9_searching_once"),
     (("if (!p2p_ed25519_verify(", "if (0 && !p2p_ed25519_verify("), "records"),
     (("bytes[2] != MM_FORMAT)", "0)"), "records"),
     (("if (!record->held)\n\t\t{\n\t\t\tmemcpy(bytes + at, record->token",
@@ -551,9 +552,14 @@ MATCHMAKING_FAULTS = [
     (("peer->record.can_host && !peer->failed &&\n\t\t\tmemcmp", "memcmp"), "strict_lowest"),
     (("!search->pool_count && now - search->marks_from >= MM_HOST", "now - search->marks_from >= MM_HOST"),
      "pool_forming"),
-    (("if (search->host_now && search->can_host > 0)\n\t\t\tcount = host_open(search, 1, out, out_size);\n\t\tif (!looked && search->decision.kind == P2P_MM_DECIDE_NONE && !search->party.following)\n\t\t\tcount = pick_game(search, now, out, out_size);\n\t\tif (search->decision.kind == P2P_MM_DECIDE_NONE)\n\t\t\tcount = join(search, now, out, out_size);\n",
-      "count = join(search, now, out, out_size);\n\t\tif (search->decision.kind == P2P_MM_DECIDE_NONE && search->host_now && search->can_host > 0)\n\t\t\tcount = host_open(search, 1, out, out_size);\n"),
-     "host_now_first"),
+    (("if (search->can_host > 0 && !search->pool_count", "if (search->can_host && !search->pool_count"),
+     "host_after_stun"),
+    (("search->unreached = !reached;", "search->unreached = 0;"), "e15_no_broker"),
+    (("!mm_unreached(search, now))", "1)"), "e15_no_broker"),
+    (("if (reached || !search->unreached)", "if (1)"), "e15_no_broker"),
+    (("now - search->marks_from >= MM_WIDEN", "now - search->marks_from >= MM_HOST"), "e6_widen_at_045"),
+    (("now - search->marks_from >= MM_HOST && hosts_for_party", "now - search->marks_from >= MM_HOST + 1000 && hosts_for_party"),
+     "e7_host_at_200"),
     (("now - search->joining_since >= MM_HOST_WAIT", "0"), "e12_never_hosts"),
     (("now - search->joining_since >= MM_HOST_WAIT", "0"), "two_queues"),
     (("now - search->joining_since >= MM_HOST_WAIT", "0"), "pool_never_hosts"),

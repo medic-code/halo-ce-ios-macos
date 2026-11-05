@@ -993,36 +993,39 @@ static int host_open(struct mm_search *search, int forced, struct mm_out *out, i
 	}
 	if (best < 0 || (best_lower && !forced))
 		return 0;
-	search->host_now = 0;
 	search->pool_count = 0;
 	return decide_host(search, best, search->choice.size, out, out_size);
 }
 
-static void widen(struct mm_search *search)
-{
-	search->widened = 1;
-	set_queues(search);
-}
-
-void mm_widen_now(struct mm_search *search)
+void mm_widen(struct mm_search *search)
 {
 	if (search->state == P2P_MM_QUEUED && !search->widened)
-		widen(search);
+	{
+		search->widened = 1;
+		set_queues(search);
+	}
 }
 
-void mm_host_now(struct mm_search *search)
+void mm_brokers(struct mm_search *search, int reached, unsigned long now)
 {
-	if (search->state == P2P_MM_QUEUED && !search->party.following)
-		search->host_now = 1;
+	if (reached || !search->unreached)
+		search->unreached_since = now;
+	search->unreached = !reached;
+}
+
+int mm_unreached(const struct mm_search *search, unsigned long now)
+{
+	return search->unreached && now - search->unreached_since >= MM_UNREACHED;
 }
 
 static int marks(struct mm_search *search, unsigned long now, struct mm_out *out, int out_size)
 {
 	if (p2p_mm_size_big(search->choice.size))
 		return search->can_host > 0 && hosts_for_party(search) ? host_open(search, 1, out, out_size) : 0;
-	if (search->choice.extended && !search->party.following && !search->widened && now - search->marks_from >= MM_WIDEN)
-		widen(search);
-	if (search->can_host > 0 && !search->pool_count && now - search->marks_from >= MM_HOST && hosts_for_party(search))
+	if (search->choice.extended && !search->party.following && now - search->marks_from >= MM_WIDEN)
+		mm_widen(search);
+	if (search->can_host > 0 && !search->pool_count && now - search->marks_from >= MM_HOST && hosts_for_party(search) &&
+		!mm_unreached(search, now))
 		return host_open(search, 0, out, out_size);
 	return 0;
 }
@@ -1055,7 +1058,6 @@ static int pick_game(struct mm_search *search, unsigned long now, struct mm_out 
 	int waiting = 0, playlist;
 
 	count = lobby_games_unlocked(games, MAXIMUM_GAMES);
-	search->games_checked = count;
 	for (queue = 0; queue < search->queue_count; queue++)
 	{
 		int size = search->queues[queue][1], chosen = size == search->choice.size, better;
@@ -1399,8 +1401,6 @@ int mm_step(struct mm_search *search, unsigned long now, struct mm_out *out, int
 	}
 	if (search->state == P2P_MM_QUEUED)
 	{
-		if (search->host_now && search->can_host > 0)
-			count = host_open(search, 1, out, out_size);
 		if (!looked && search->decision.kind == P2P_MM_DECIDE_NONE && !search->party.following)
 			count = pick_game(search, now, out, out_size);
 		if (search->decision.kind == P2P_MM_DECIDE_NONE)
@@ -1600,6 +1600,7 @@ void p2p_mm_update(unsigned long now, int can_host, const unsigned char *token)
 		sync_topics();
 		return;
 	}
+	mm_brokers(&mm.search, p2p_signal_connected(), now);
 	mm.has_token = token != NULL;
 	if (token)
 		memcpy(mm.token, token, P2P_TOKEN_SIZE);
@@ -1747,22 +1748,6 @@ void p2p_mm_search(const struct p2p_mm_choice *choice)
 	hold_browser();
 	pthread_mutex_unlock(&p2p_lock);
 	browse_for(choice->size);
-}
-
-void p2p_mm_widen_now(void)
-{
-	pthread_mutex_lock(&p2p_lock);
-	if (mm.search.state != P2P_MM_OFF)
-		mm_widen_now(&mm.search);
-	pthread_mutex_unlock(&p2p_lock);
-}
-
-void p2p_mm_host_now(void)
-{
-	pthread_mutex_lock(&p2p_lock);
-	if (mm.search.state != P2P_MM_OFF)
-		mm_host_now(&mm.search);
-	pthread_mutex_unlock(&p2p_lock);
 }
 
 void p2p_mm_cancel(void)
@@ -1950,9 +1935,7 @@ void p2p_mm_get_status(struct p2p_mm_status *status)
 	if (search->state != P2P_MM_OFF)
 	{
 		status->seconds = (int)((unsigned long)time(NULL) - search->started);
-		status->mark_seconds = (int)((p2p_now() - search->marks_from) / 1000);
 		status->widened = search->widened;
-		status->games_checked = search->games_checked;
 		status->can_host = search->can_host;
 		status->party = party_players(search);
 		for (index = 0; index < search->queue_count; index++)
@@ -1970,8 +1953,8 @@ void p2p_mm_get_status(struct p2p_mm_status *status)
 		/* a member counts no queue: a big search publishes none */
 		if (!status->count)
 			status->size = search->choice.size;
-		if (search->widened)
-			status->all_sizes_count = searchers_counted(-1, 0);
+		status->searching = searchers_counted(-1, 0);
+		status->unreached = mm_unreached(search, p2p_now());
 		if (search->state == P2P_MM_FOUND || search->state == P2P_MM_HOSTING)
 		{
 			status->hosts = search->decided == P2P_MM_DECIDE_HOST;

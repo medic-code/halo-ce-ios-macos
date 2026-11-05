@@ -1011,7 +1011,7 @@ static void member_search(struct mm_party *party, struct mm_search *search, unsi
 		return;
 	}
 	if (said->widened)
-		mm_widen_now(search);
+		mm_widen(search);
 	if (said->has_game && said->game != party->followed_game &&
 		(search->state == P2P_MM_QUEUED ||
 			(search->state == P2P_MM_HOSTING && !invited_to_own_game(search, said->invite))))

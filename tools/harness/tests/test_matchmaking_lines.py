@@ -9,13 +9,48 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
-CASES = ["looking", "queued", "widened", "hosting", "found", "big_looking", "big_hosting", "big_found", "lobby",
-         "notices", "member_view", "member_queue", "member_found", "party_sizes", "party_panel", "party_notices"]
+CASES = ["looking", "queued", "unreached", "widened", "hosting", "hosted_panel", "found", "big_looking", "big_hosting", "big_found",
+         "lobby", "notices", "member_view", "member_queue", "member_found", "party_sizes", "party_panel", "party_notices"]
 
 NEGATIVE_CONTROLS = {
-    "strict-offered-2:00": (("status->can_host > 0 ? L\"%d more", "1 ? L\"%d more"), "queued"),
-    "full-before-pool": (("if (status->count <= 0)\n\t\t\t\tbreak;\n", ""), "queued"),
-    "never-widened": (("if (status->widened)", "if (0)"), "widened"),
+    "strict-no-router-line": (("!status->can_host ? L\"Your", "0 ? L\"Your"), "queued"),
+    "unknown-router-as-strict": (("!status->can_host ? L\"Your", "status->can_host <= 0 ? L\"Your"), "queued"),
+    "count-before-anyone": (("if (status->searching > 0 && !status->unreached)", "if (!status->unreached)"), "queued"),
+    "small-looking-as-big": (("if (big)\n\t\t{\n\t\t\tusnprintf(title, size - 1, L\"LOOKING FOR A GAME\");",
+                              "if (1)\n\t\t{\n\t\t\tusnprintf(title, size - 1, L\"LOOKING FOR A GAME\");"), "looking"),
+    "unreached-no-line": (("status->unreached ? L\"No matchmaking", "0 ? L\"No matchmaking"), "unreached"),
+    "small-looking-for-words": (("L\"%ls\", status->unreached", "L\"Looking for %ls players.%ls\", game_size, status->unreached"),
+                                "queued"),
+    "unreached-counts-searchers": (("if (status->searching > 0 && !status->unreached)", "if (status->searching > 0)"),
+                                   "unreached"),
+    "unreached-shows-zero": (("if (status->searching > 0 && !status->unreached)", "if (status->searching > 0 || status->unreached)"),
+                             "unreached"),
+    "router-no-next-step": (("L\"Your router cannot host.\\r\\nYou can still join games.\"", "L\"Your router cannot host.\""),
+                            "queued"),
+    "unreached-no-next-step": (("L\"No matchmaking server reached.\\r\\nStill trying. CANCEL to stop.\"",
+                                "L\"No matchmaking server reached.\""), "unreached"),
+    "hosted-help-too-wide": (("L\"You are hosting.\\r\\nSearchers join you.\\r\\nOr START NOW.\")",
+                              "L\"Hosting %ls %ls.\\r\\nSearchers join as they arrive;\\r\\nSTART NOW plays with who is here.\", "
+                              "playlist, game_size)"), "hosting"),
+    "blank-before-invite": (("L\"\\r\\nInvite link copied:", "L\"\\r\\n\\r\\nInvite link copied:"), "hosted_panel"),
+    "waiting-above-help": (("L\"%ls\\r\\n%ls\\r\\n%ls%ls\", gametype, kind, help",
+                            "L\"%ls\\r\\n%ls\\r\\n\\r\\nWaiting for players\\r\\n%ls%ls\", gametype, kind, help"),
+                           "hosted_panel"),
+    "invite-dropped": (("invite ? L\"\\r\\nInvite", "0 ? L\"\\r\\nInvite"), "hosted_panel"),
+    "small-host-big-words": (("if (big)\n\t\t\t\tusnprintf(help, size - 1, L\"Or START NOW.\");",
+                              "if (1)\n\t\t\t\tusnprintf(help, size - 1, L\"Or START NOW.\");"), "hosting"),
+    "big-host-no-full-stop": (("L\"Or START NOW.\"", "L\"Or START NOW\""), "big_hosting"),
+    "waiting-no-full-stop": (("L\"Waiting for players.\");\n\tline[size - 1]", "L\"Waiting for players\");\n\tline[size - 1]"),
+                             "lobby"),
+    "waiting-line-broken": (("leader, ustrlen(leader) > 10 ? L\"\\r\\n\" : L\" \");", "leader, L\"\\r\\n\");"), "member_view"),
+    "waiting-long-name-one-line": (("leader, ustrlen(leader) > 10 ? L\"\\r\\n\" : L\" \");", "leader, L\" \");"), "member_view"),
+    "member-follows-them": (("ustrlen(leader) > 8 ? L\"them\" : leader);", "L\"them\");"), "member_queue"),
+    "follow-long-name-clips": (("ustrlen(leader) > 8 ? L\"them\" : leader);", "leader);"), "member_queue"),
+    "searching-shows-defaults": (("party->search_state == P2P_MM_OFF ? MATCHMAKING_BAR(defaults)",
+                                  "1 ? MATCHMAKING_BAR(defaults)"), "party_panel"),
+    "widened-any-size-words": (("L\"%ls\", status->unreached",
+                                "status->widened ? L\"Looking for players of any size.%ls\" : L\"%ls\", status->unreached"),
+                               "widened"),
     "number-without-countdown": (("seconds >= 0", "seconds >= -1"), "lobby"),
     "last-second-lost": (("seconds >= 0", "seconds > 0"), "lobby"),
     "big-looking-as-small": (("int big = p2p_mm_size_big(status->size);", "int big = 0;"), "big_looking"),
@@ -50,7 +85,7 @@ def generated(fault=None):
     source = read("port/linux/game/menu_functions.c")
     header = read("port/linux/src/p2p.h")
     search = read("port/linux/src/p2p_matchmaking.c")
-    enums = "\n".join(["#define usnprintf swprintf", "#define PIN(x, lo, hi) ((x) < (lo) ? (lo) : (x) > (hi) ? (hi) : (x))", "#define NONE (-1)",
+    enums = "\n".join(["#define usnprintf swprintf", "#define ustrlen wcslen", "#define PIN(x, lo, hi) ((x) < (lo) ? (lo) : (x) > (hi) ? (hi) : (x))", "#define NONE (-1)",
                        "#define MM_MAXIMUM_PARTY P2P_PARTY_MAXIMUM", "#define P2P_LISTING_REGION_SIZE 16",
                        "#define NUMBEROF(array) (sizeof(array) / sizeof((array)[0]))",
                        enum_with(header, "P2P_MM_SLAYER"), enum_with(header, "P2P_MM_1V1"),
@@ -59,7 +94,7 @@ def generated(fault=None):
                        structure(header, "p2p_mm_choice"), structure(header, "p2p_mm_status"),
                        structure(header, "p2p_party_member"), structure(header, "p2p_party_status"),
                        enum_with(source, "_matchmaking_ask_none"), enum_with(source, "_matchmaking_bar_defaults"),
-                       enum_with(source, "_matchmaking_search_bar_widen"),
+                       enum_with(source, "_matchmaking_search_bar_cancel"),
                        "#define MATCHMAKING_BAR(button) (1u << _matchmaking_bar_##button)",
                        "#define MATCHMAKING_SEARCH_BAR(button) (1u << _matchmaking_search_bar_##button)",
                        structure(source, "matchmaking_party_view")]) + "\n"
@@ -72,7 +107,8 @@ def generated(fault=None):
                           "matchmaking_party_member", "matchmaking_party_size", "matchmaking_size_saved", "matchmaking_size_after",
                           "matchmaking_party_find", "matchmaking_party_bar", "matchmaking_search_bar",
                           "matchmaking_party_name_utf8", "matchmaking_party_mark", "matchmaking_party_words",
-                          "matchmaking_party_notice", "matchmaking_lines", "matchmaking_lobby_line"))])
+                          "matchmaking_party_notice", "matchmaking_lines", "matchmaking_lobby_line",
+                          "matchmaking_hosted_text"))])
     if fault:
         code = mutated(code, *fault)
     return (("enums.inc", enums), ("under_test.inc", code + "\n"))

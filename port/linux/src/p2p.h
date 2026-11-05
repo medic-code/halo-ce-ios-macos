@@ -478,8 +478,6 @@ const char *p2p_mm_region(const char *setting);
 /* network.matchmaking_max_ping as a search takes it: 100, 150, 200 or 300 ms; 0, any */
 int p2p_mm_max_ping(long setting);
 void p2p_mm_search(const struct p2p_mm_choice *choice);
-void p2p_mm_widen_now(void);
-void p2p_mm_host_now(void);
 void p2p_mm_cancel(void);
 /* each is ignored unless it answers its decision: p2p_mm_game a HOST, p2p_mm_joined a JOIN */
 void p2p_mm_game(int players, int red_players, int most_players, int under_way);
@@ -491,13 +489,15 @@ int p2p_mm_take_left_game(void);
 struct p2p_mm_status
 {
 	int state;
-	int seconds, mark_seconds;
+	int seconds;
 	int widened, can_host;
 	/* the players the search is for, its party's */
 	int party;
 	/* counts include this machine */
-	int playlist, size, count, needed, all_sizes_count;
-	int games_checked;
+	int playlist, size, count, needed;
+	/* each searcher heard once, across all the search's queues */
+	int searching;
+	int unreached;
 	/* FOUND and HOSTING only; ping -1: not timed; region: a dedicated server's */
 	int hosts, players, most_players, ping;
 	char region[P2P_LISTING_REGION_SIZE + 1];

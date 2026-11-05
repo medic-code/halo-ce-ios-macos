@@ -113,6 +113,7 @@ enum
 	MM_HOST_WAIT = P2P_MM_HOST_WAIT_SECONDS * 1000,
 	MM_WIDEN = P2P_MM_WIDEN_SECONDS * 1000,
 	MM_HOST = P2P_MM_HOST_SECONDS * 1000,
+	MM_UNREACHED = 10 * 1000,
 	MM_EXPIRY_INTERVALS = 3,
 	MM_RUNNING_INTERVAL = 25000,
 	MM_LOOK_TIME = P2P_MM_LOOK_SECONDS * 1000,
@@ -170,7 +171,9 @@ struct mm_search
 	unsigned long join_after;
 	/* 1, 0 (strict router) or -1 (STUN has not answered yet) */
 	int can_host;
-	int widened, host_now;
+	int widened;
+	int unreached;
+	unsigned long unreached_since;
 	unsigned long sequence;
 	int queue_count;
 	int queues[P2P_MM_MAXIMUM_TOPICS][2];
@@ -189,7 +192,6 @@ struct mm_search
 	char joining_region[P2P_LISTING_REGION_SIZE + 1];
 	struct p2p_mm_decision decision;
 	int decided;
-	int games_checked;
 	unsigned char picked[P2P_IDENTIFIER_SIZE];
 	int picked_set;
 	struct mm_search_party party;
@@ -215,8 +217,10 @@ void mm_hosted(struct mm_search *search, const unsigned char *token, int players
 	int under_way, unsigned long now);
 int mm_team_parties(const struct mm_search *search, unsigned long now, struct p2p_mm_team_party *parties);
 void mm_joined(struct mm_search *search, int ok, unsigned long now);
-void mm_widen_now(struct mm_search *search);
-void mm_host_now(struct mm_search *search);
+void mm_widen(struct mm_search *search);
+void mm_brokers(struct mm_search *search, int reached, unsigned long now);
+/* no broker has answered for MM_UNREACHED: no 2:00 host */
+int mm_unreached(const struct mm_search *search, unsigned long now);
 int mm_cancel(struct mm_search *search, struct mm_out *out, int out_size);
 void mm_game_lost(struct mm_search *search, unsigned long now);
 void mm_host_gave_up(struct mm_search *search, unsigned long now);

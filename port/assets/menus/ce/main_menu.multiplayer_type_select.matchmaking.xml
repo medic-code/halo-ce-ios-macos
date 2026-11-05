@@ -235,16 +235,6 @@
 		<child widget="main_menu/multiplayer_type_select/matchmaking/search_clock"/>
 		<child widget="main_menu/multiplayer_type_select/matchmaking/search_help"/>
 		<child widget="main_menu/multiplayer_type_select/matchmaking/search_count"/>
-		<child widget="main_menu/multiplayer_type_select/matchmaking/search_step" x="35" y="160"/>
-		<child widget="main_menu/multiplayer_type_select/matchmaking/search_step" x="115" y="160"/>
-		<child widget="main_menu/multiplayer_type_select/matchmaking/search_step" x="195" y="160"/>
-		<child widget="main_menu/multiplayer_type_select/matchmaking/search_step" x="275" y="160"/>
-		<child widget="main_menu/multiplayer_type_select/matchmaking/search_link" x="63" y="170"/>
-		<child widget="main_menu/multiplayer_type_select/matchmaking/search_link" x="143" y="170"/>
-		<child widget="main_menu/multiplayer_type_select/matchmaking/search_link" x="223" y="170"/>
-		<child widget="main_menu/multiplayer_type_select/matchmaking/search_step_3_label" x="172" y="188"/>
-		<child widget="main_menu/multiplayer_type_select/matchmaking/search_step_3_widened" x="172" y="188"/>
-		<child widget="main_menu/multiplayer_type_select/matchmaking/search_step_4_label" x="252" y="188"/>
 		<child widget="main_menu/multiplayer_type_select/matchmaking/search_slot_you" x="340" y="112"/>
 		<child widget="main_menu/multiplayer_type_select/matchmaking/search_slot" x="340" y="133"/>
 		<child widget="main_menu/multiplayer_type_select/matchmaking/search_slot" x="340" y="154"/>
@@ -266,19 +256,6 @@
 	</widget>
 	<widget name="main_menu/multiplayer_type_select/matchmaking/search_count" type="text" controller="1" left="340" top="92" width="265" height="18" font="ui\small_ui" color="#FFFFFFFF">
 	</widget>
-	<widget name="main_menu/multiplayer_type_select/matchmaking/search_step" width="24" height="24" bitmap="main_menu/multiplayer_type_select/matchmaking/search_step">
-		<child widget="main_menu/multiplayer_type_select/matchmaking/search_step_number"/>
-	</widget>
-	<widget name="main_menu/multiplayer_type_select/matchmaking/search_step_number" type="text" controller="1" width="24" height="24" font="ui\large_ui" color="#FF2896FF" align="center" text_y="2">
-	</widget>
-	<widget name="main_menu/multiplayer_type_select/matchmaking/search_link" width="46" height="4" bitmap="main_menu/multiplayer_type_select/matchmaking/search_link">
-	</widget>
-	<widget name="main_menu/multiplayer_type_select/matchmaking/search_step_3_label" type="text" controller="1" width="70" height="36" text="0:45\nANY SIZE" font="ui\small_ui" color="#FF5B7A9E" align="center">
-	</widget>
-	<widget name="main_menu/multiplayer_type_select/matchmaking/search_step_3_widened" type="text" controller="1" width="70" height="36" text="WIDENED" font="ui\small_ui" color="#FFE6C66E" align="center">
-	</widget>
-	<widget name="main_menu/multiplayer_type_select/matchmaking/search_step_4_label" type="text" controller="1" width="70" height="36" text="2:00\nHOST" font="ui\small_ui" color="#FF5B7A9E" align="center">
-	</widget>
 	<widget name="main_menu/multiplayer_type_select/matchmaking/search_slot_you" width="265" height="18" bitmap="main_menu/multiplayer_type_select/matchmaking/search_slot">
 		<child widget="main_menu/multiplayer_type_select/matchmaking/current_profile_name" x="24"/>
 	</widget>
@@ -296,20 +273,8 @@
 		<child widget="main_menu/multiplayer_type_select/matchmaking/search_button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/multiplayer_type_select/matchmaking/search_button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
-		<child widget="main_menu/multiplayer_type_select/matchmaking/search_button_widen" x="205" y="1"/>
-		<child widget="main_menu/multiplayer_type_select/matchmaking/search_button_host" x="341" y="1"/>
 		<child widget="main_menu/multiplayer_type_select/matchmaking/search_button_cancel" x="477" y="1"/>
 		<child widget="main_menu/multiplayer_type_select/matchmaking/search_button_leave" x="477" y="1"/>
-	</widget>
-	<widget name="main_menu/multiplayer_type_select/matchmaking/search_button_widen" type="text" width="128" height="24" bitmap="bitmaps/text_button_background" text="WIDEN NOW" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="2">
-		<on event="a" run="port matchmaking widen"/>
-		<on event="start" run="port matchmaking widen"/>
-		<on event="left_mouse" run="mouse emit accept event"/>
-	</widget>
-	<widget name="main_menu/multiplayer_type_select/matchmaking/search_button_host" type="text" width="128" height="24" bitmap="bitmaps/text_button_background" text="HOST NOW" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="2">
-		<on event="a" run="port matchmaking host"/>
-		<on event="start" run="port matchmaking host"/>
-		<on event="left_mouse" run="mouse emit accept event"/>
 	</widget>
 	<widget name="main_menu/multiplayer_type_select/matchmaking/search_button_cancel" type="text" width="128" height="24" bitmap="bitmaps/text_button_background" text="CANCEL" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="2">
 		<on event="a" run="port matchmaking search back"/>
