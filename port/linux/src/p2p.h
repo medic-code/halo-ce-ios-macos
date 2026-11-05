@@ -448,6 +448,7 @@ struct p2p_mm_choice
 	char region[P2P_LISTING_REGION_SIZE + 1];
 	int extended;
 	int max_ping;
+	int region_auto;
 };
 enum
 {
@@ -543,6 +544,8 @@ struct p2p_party_status
 	int count;
 	struct p2p_party_member members[P2P_PARTY_MAXIMUM];
 	struct p2p_mm_choice choice;
+	/* a member's choice is the leader's only once heard: zeroed before */
+	int search_heard;
 	int search_state;
 	int notice;
 	char notice_name[P2P_PARTY_NAME_SIZE + 1];

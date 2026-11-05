@@ -698,6 +698,16 @@ PARTY_FAULTS = [
     (("member->searching = party->search.searching && !(flags & PARTY_FLAG_IN_GAME);", ""), "e77_friend_joins_search"),
     ((" && !(flags & PARTY_FLAG_IN_GAME);", ";"), "e77_friend_joins_search"),
     (("party->search_heard = 1;\n", "party->search_heard = 1;\n\t\tparty->left_number = search->number;\n"), "party flags"),
+    (("(block[7] & PARTY_PING_MASK) > PARTY_ANY || ", ""), "party_search_settings"),
+    (("(block[7] >> PARTY_REGION_SHIFT & 7) > PARTY_ANY)", "0)"), "party_search_settings"),
+    (("if (body_size < base || block[4] >= 1u << NUMBER_OF_P2P_MM_PLAYLISTS || block[5] >= NUMBER_OF_P2P_MM_SIZES ||\n\t\t\t(block[7] & PARTY_PING_MASK) > PARTY_ANY || (block[7] >> PARTY_REGION_SHIFT & 7) > PARTY_ANY)\n\t\t\treturn 0;\n\t\tif (!(block[0] & PARTY_GAME))\n\t\t\treturn body_size == base;",
+      "if (body_size < base - 1)\n\t\t\treturn 0;\n\t\tif (!(block[0] & PARTY_GAME))\n\t\t\treturn body_size >= base - 1;"), "party_search_settings"),
+    (('snprintf(choice->region, sizeof(choice->region), "%s", p2p_mm_region_names[search->region]);',
+      'snprintf(choice->region, sizeof(choice->region), "%s", p2p_mm_region(""));'), "party_search_settings"),
+    (("search->region << PARTY_REGION_SHIFT", "0"), "party_search_settings"),
+    (("(search->extended ? PARTY_EXTENDED : 0)", "0"), "party_search_settings"),
+    (("(search->region_auto ? PARTY_AUTO : 0)", "0"), "party_search_settings"),
+    (("search->max_ping = block[7] & PARTY_PING_MASK;", "search->max_ping = 2;"), "party_search_settings"),
     (("if (search->in_game || search->state == P2P_MM_HOSTING", "if (search->state == P2P_MM_HOSTING"), "member_stays_in_game"),
     (("if (in_game != party->in_game)\n\t\tparty->sent = now - PARTY_INTERVAL;", ""), "party flags"),
     (("party->follow_done = 0;\n\tfor (index = 1; index < party->count; index++)\n\t\tparty->members[index].in_game = 0;\n}",
@@ -737,6 +747,15 @@ PARTY_FAULTS = [
 def test_p2p_party_negative_control(control_outputs, fault, case):
     output = control_outputs[None, fault]
     assert f"FAIL {case}:" in output, output
+
+
+def reads_config(source):
+    return re.search(r"\bconfig_\w+\(", source) is not None
+
+
+def test_p2p_party_leaves_the_members_config_alone():
+    assert not reads_config(Path("port/linux/src/p2p_party.c").read_text())
+    assert reads_config("choice.max_ping = config_integer(\"network.matchmaking_max_ping\");")
 
 
 # port_config.c on its own, with the app's file paths (HALO_DATA_ROOT) and C

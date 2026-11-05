@@ -33,7 +33,7 @@ enum
 	MM_MAXIMUM_PARTY_SIZE = MM_HEADER_SIZE + 1 + P2P_KEY_HASH_SIZE + (MM_MAXIMUM_PARTY - 1) * MM_MEMBER_SIZE +
 		P2P_SIGNATURE_SIZE,
 	MM_SEALED_INVITE_SIZE = P2P_LINK_SIZE + P2P_SEAL_OVERHEAD,
-	MM_PARTY_SEARCH_SIZE = 7,
+	MM_PARTY_SEARCH_SIZE = 8,
 	MM_MAXIMUM_LEADER_SIZE = 1 + P2P_KEY_SIZE + 4 + P2P_PARTY_NAME_SIZE + 1 + (MM_MAXIMUM_PARTY - 1) * P2P_KEY_HASH_SIZE +
 		MM_PARTY_SEARCH_SIZE + 2 + (MM_MAXIMUM_PARTY - 1) * MM_SEALED_INVITE_SIZE + P2P_SIGNATURE_SIZE + P2P_SEAL_OVERHEAD,
 	MM_MAXIMUM_SEARCH_SIZE = MM_MAXIMUM_HOSTING_SIZE > MM_MAXIMUM_PARTY_SIZE ? MM_MAXIMUM_HOSTING_SIZE :
@@ -262,6 +262,8 @@ struct mm_party_search
 	int number, game, left;
 	int searching, widened, playlists, size, host;
 	int has_game, game_playlist, game_size, public_game;
+	/* as they go on the wire: indexes into the party's ping limits and regions */
+	int max_ping, region, extended, region_auto;
 	/* the notice of what stopped the search; TOO_BIG: or goes on in its game without the friend */
 	int stopped;
 	char invite[P2P_LINK_SIZE];

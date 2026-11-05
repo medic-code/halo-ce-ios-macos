@@ -33,6 +33,11 @@ enum
 	PARTY_PUBLIC = 8,
 	PARTY_OUTGROWN = 16,
 	PARTY_APART = 32,
+	PARTY_PING_MASK = 7,
+	PARTY_REGION_SHIFT = 3,
+	PARTY_EXTENDED = 64,
+	PARTY_AUTO = 128,
+	PARTY_ANY = P2P_MM_ANY,
 	PARTY_MEMBER_SIZE = P2P_PARTY_NAME_SIZE + 2 + P2P_SIGNATURE_SIZE,
 	/* a member in a game adds its game: left number, playlist, size, the invite sealed for the leader */
 	PARTY_MEMBER_GAME_SIZE = 3 + MM_SEALED_INVITE_SIZE,
@@ -235,6 +240,36 @@ static int write_member(struct mm_party *party, int flags, unsigned char *bytes)
 	return record_finish(party, plain, size, bytes);
 }
 
+static int region_index(const char *region)
+{
+	int index;
+
+	for (index = 0; index < PARTY_ANY; index++)
+		if (!strcmp(region, p2p_mm_region_names[index]))
+			return index;
+	return PARTY_ANY;
+}
+
+static int ping_index(int max_ping)
+{
+	int index;
+
+	for (index = 0; index < PARTY_ANY; index++)
+		if (max_ping == p2p_mm_ping_limits[index])
+			return index;
+	return PARTY_ANY;
+}
+
+static void search_choice(const struct mm_party_search *search, struct p2p_mm_choice *choice)
+{
+	choice->playlists = (unsigned)search->playlists;
+	choice->size = search->size;
+	choice->max_ping = p2p_mm_ping_limits[search->max_ping];
+	snprintf(choice->region, sizeof(choice->region), "%s", p2p_mm_region_names[search->region]);
+	choice->extended = search->extended;
+	choice->region_auto = search->region_auto;
+}
+
 static int write_search(struct mm_party *party, unsigned char *plain)
 {
 	const struct mm_party_search *search = &party->search;
@@ -251,6 +286,8 @@ static int write_search(struct mm_party *party, unsigned char *plain)
 	plain[size++] = (unsigned char)search->playlists;
 	plain[size++] = (unsigned char)search->size;
 	plain[size++] = (unsigned char)search->host;
+	plain[size++] = (unsigned char)(search->max_ping | search->region << PARTY_REGION_SHIFT |
+		(search->extended ? PARTY_EXTENDED : 0) | (search->region_auto ? PARTY_AUTO : 0));
 	if (!search->has_game)
 		return size;
 	plain[size++] = (unsigned char)search->game_playlist;
@@ -442,7 +479,8 @@ int mm_party_read(struct mm_party *party, const unsigned char *payload, int size
 		count = body[P2P_PARTY_NAME_SIZE];
 		base = P2P_PARTY_NAME_SIZE + 1 + count * P2P_KEY_HASH_SIZE + MM_PARTY_SEARCH_SIZE;
 		block = body + base - MM_PARTY_SEARCH_SIZE;
-		if (body_size < base || block[4] >= 1u << NUMBER_OF_P2P_MM_PLAYLISTS || block[5] >= NUMBER_OF_P2P_MM_SIZES)
+		if (body_size < base || block[4] >= 1u << NUMBER_OF_P2P_MM_PLAYLISTS || block[5] >= NUMBER_OF_P2P_MM_SIZES ||
+			(block[7] & PARTY_PING_MASK) > PARTY_ANY || (block[7] >> PARTY_REGION_SHIFT & 7) > PARTY_ANY)
 			return 0;
 		if (!(block[0] & PARTY_GAME))
 			return body_size == base;
@@ -563,6 +601,10 @@ static void heard_search(struct mm_party *party, const unsigned char *block, int
 	search->playlists = block[4];
 	search->size = block[5];
 	search->host = block[6];
+	search->max_ping = block[7] & PARTY_PING_MASK;
+	search->region = block[7] >> PARTY_REGION_SHIFT & 7;
+	search->extended = !!(block[7] & PARTY_EXTENDED);
+	search->region_auto = !!(block[7] & PARTY_AUTO);
 	search->has_game = 0;
 	if (!party->search_heard)
 	{
@@ -689,8 +731,8 @@ void mm_party_status(const struct mm_party *party, struct p2p_party_status *stat
 	}
 	status->notice = party->notice;
 	memcpy(status->notice_name, party->notice_name, sizeof(status->notice_name));
-	status->choice.playlists = (unsigned)party->search.playlists;
-	status->choice.size = party->search.size;
+	search_choice(&party->search, &status->choice);
+	status->search_heard = party->search_heard;
 }
 
 /* a member with a key that can take the party's host, when the leader's cannot, is put first */
@@ -826,6 +868,10 @@ static void leader_search(struct mm_party *party, struct mm_search *search, unsi
 	said.widened = search->widened;
 	said.playlists = (int)search->choice.playlists;
 	said.size = search->choice.size;
+	said.max_ping = ping_index(search->choice.max_ping);
+	said.region = region_index(search->choice.region);
+	said.extended = search->choice.extended;
+	said.region_auto = search->choice.region_auto;
 	leader_game(party, search, &said, now);
 	leader_follow(party, search, &said, now);
 	search_members(party, search, said.searching, &wanted, &late);
@@ -915,8 +961,7 @@ static void member_search(struct mm_party *party, struct mm_search *search, unsi
 
 		if (!said->searching || said->stopped || said->number == party->left_number)
 			return;
-		choice.playlists = (unsigned)said->playlists;
-		choice.size = said->size;
+		search_choice(said, &choice);
 		mm_follow(search, party->seed, &choice, party->members[0].key, party->count, now, unix_now);
 		party->followed_game = -1;
 		party->left_seen = said->left;

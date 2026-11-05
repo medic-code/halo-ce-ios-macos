@@ -4082,6 +4082,80 @@ static int party_lists(const struct mm_party *party, const char *name)
 	return 0;
 }
 
+static void check_party_search_settings(void)
+{
+	struct mm_party_search *said = &parties[0].search;
+	int *const fields[] = { &said->max_ping, &said->region };
+	const char *const names[] = { "ping", "region" };
+	struct p2p_mm_choice choice = { 1u << P2P_MM_SLAYER, P2P_MM_2V2 };
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE], plain[MM_MAXIMUM_RECORD_SIZE];
+	struct mm_search *leader, *member;
+	struct p2p_party_status status;
+	struct mm_party_record record;
+	struct mm_party copy;
+	int index, bad, size;
+
+	case_name = "party_search_settings";
+	party_form(2);
+	party_run(2, 7);
+	for (index = 0; index < 2; index++)
+	{
+		for (bad = 5; bad < 8; bad++)
+		{
+			*fields[index] = bad;
+			said->number++;
+			party_run(2, 7);
+			CHECK(parties[1].search.number != said->number, "a %s index of %d is refused", names[index], bad);
+			*fields[index] = 4;
+			party_run(2, 7);
+			CHECK(parties[1].search.number == said->number, "the last %s index is read", names[index]);
+		}
+	}
+	said->max_ping = said->region = 0;
+
+	copy = parties[0];
+	copy.sent = party_now - 3000;
+	size = mm_party_step(&copy, party_now, bytes);
+	CHECK(mm_party_read(&parties[1], bytes, size, &record), "a block of 8 bytes is read");
+	size = p2p_open(parties[1].seal, bytes, size, plain);
+	memmove(plain + size - P2P_SIGNATURE_SIZE - 1, plain + size - P2P_SIGNATURE_SIZE, P2P_SIGNATURE_SIZE);
+	size = p2p_seal(parties[1].seal, plain, size - 1, bytes);
+	CHECK(!mm_party_read(&parties[1], bytes, size, &record), "a block of 7 bytes from an old leader is refused");
+
+	party_world(2, 2);
+	setenv("TZ", "UTC+5", 1);
+	tzset();
+	snprintf(choice.region, sizeof(choice.region), "%s", p2p_mm_region(""));
+	choice.region_auto = 1;
+	choice.extended = 1;
+	choice.max_ping = 150;
+	leader = &machines[0].search;
+	party_seed(0, seed);
+	mm_start(leader, seed, &choice, now_ms, now_unix);
+	leader->state = P2P_MM_QUEUED;
+	mm_party_search_begin(&parties[0], leader, now_ms);
+	setenv("TZ", "UTC-8", 1);
+	tzset();
+	CHECK(!strcmp(p2p_mm_region(""), "oce"), "the member's own clock says oce: %s", p2p_mm_region(""));
+	run(8);
+	member = &machines[1].search;
+	CHECK(member->party.following && !strcmp(member->choice.region, "na-east") && member->choice.max_ping == 150 &&
+		member->choice.extended && member->choice.region_auto,
+		"a member searches with the leader's settings, not its own clock: %s %d", member->choice.region,
+		member->choice.max_ping);
+	mm_party_status(&parties[1], &status);
+	CHECK(!strcmp(status.choice.region, "na-east") && status.choice.max_ping == 150 && status.choice.extended &&
+		status.choice.region_auto, "the member's list shows them, AUTO too: %s", status.choice.region);
+	leader->choice.region[0] = 0;
+	leader->choice.max_ping = leader->choice.extended = leader->choice.region_auto = 0;
+	run(4);
+	mm_party_status(&parties[1], &status);
+	CHECK(!status.choice.region[0] && !status.choice.max_ping && !status.choice.extended && !status.choice.region_auto,
+		"ANY, ANY and off cross too: \"%s\" %d", status.choice.region, status.choice.max_ping);
+	unsetenv("TZ");
+	tzset();
+}
+
 static void check_party_link(void)
 {
 	unsigned char seed[P2P_SEED_SIZE];
@@ -4635,6 +4709,7 @@ int main(int argc, char **argv)
 	check_party_pool();
 	check_party_search();
 	check_party_record_search();
+	check_party_search_settings();
 	check_party_pool_invited();
 	check_e28_room();
 	check_team_counts();
