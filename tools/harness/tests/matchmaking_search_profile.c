@@ -9,13 +9,15 @@
 #define NUMBEROF(array) ((short)(sizeof(array) / sizeof((array)[0])))
 
 struct player_profile { wchar_t player_name[12]; };
-struct p2p_mm_choice { unsigned playlists; int size; char region[17]; int extended; int max_ping; };
+struct p2p_mm_choice { unsigned playlists; int size; char region[17]; };
 
 static struct
 {
 	unsigned playlists;
 	short size;
 	short refusal;
+	boolean extended;
+	short ping, region;
 } matchmaking_screen;
 
 static boolean has_profile, name_valid;
@@ -25,21 +27,6 @@ static wchar_t const *error_text;
 static char const *config_string(char const *name)
 {
 	return "";
-}
-
-static int config_boolean(char const *name)
-{
-	return 0;
-}
-
-static long config_integer(char const *name)
-{
-	return 0;
-}
-
-static int p2p_mm_max_ping(long setting)
-{
-	return 0;
 }
 
 static boolean player_ui_local_player_wants_to_play_multiplayer(short controller)
@@ -69,9 +56,8 @@ static void ui_play_audio_feedback_sound(short sound)
 	last_sound = sound;
 }
 
-static char const *p2p_mm_region(char const *setting)
+static void matchmaking_choice_rows(struct p2p_mm_choice *choice, boolean extended, short ping, short region)
 {
-	return setting;
 }
 
 static void p2p_party_notice_clear(void)

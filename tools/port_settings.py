@@ -15,6 +15,7 @@ mouse's controls, by the functions the PC version names for it.
 
 import re
 import sys
+import textwrap
 from pathlib import Path
 from xml.sax.saxutils import quoteattr
 
@@ -2077,9 +2078,19 @@ def _join4(base: str) -> list:
     return lines
 
 
-# in p2p.h's P2P_MM_* order; MATCHMAKING_HELP in menu_functions.c's _matchmaking_help_* order
+# in p2p.h's P2P_MM_* order; MATCHMAKING_HELP in menu_functions.c's _matchmaking_help_* order; the pings and
+# regions in menu_functions.c's matchmaking_ping_limits and matchmaking_region_settings order
 MATCHMAKING_SIZES = ["1V1", "2V2", "3V3", "4V4", "FFA 6", "BIG TEAM", "BIG FFA"]
 MATCHMAKING_PLAYLISTS = ["SLAYER", "CTF", "KING OF THE HILL", "ODDBALL", "RACE"]
+MATCHMAKING_PINGS = ["100 MS", "150 MS", "200 MS", "300 MS", "ANY"]
+MATCHMAKING_REGIONS = ["EU", "NA-EAST", "NA-WEST", "OCE"]
+MATCHMAKING_REGION_ROWS = ["AUTO", *MATCHMAKING_REGIONS, "ANY"]
+
+
+def _help_lines(text: str) -> str:
+    return "\\n".join(textwrap.wrap(text, 36))
+
+
 MATCHMAKING_HELP = [
     *(f"Players a side. {size} is two teams\\nof {count}. Required."
       for size, count in zip(MATCHMAKING_SIZES, ["one", "two", "three", "four"])),
@@ -2087,10 +2098,17 @@ MATCHMAKING_HELP = [
     "Two big teams. Joins a big game\\nnear you, or hosts one at once.",
     "A big free for all. Joins a game\\nnear you, or hosts one at once.",
     "CTF has no free for all. Set another\\nplaylist to YES for this size.",
-    "Slayer games: the most kills wins.", "Capture the Flag games.", "King of the Hill games.", "Oddball games.",
-    "Race games.",
+    *(_help_lines(f"{text} You play whichever YES playlist fills first.") for text in
+      ("Slayer games: the most kills wins.", "Capture the Flag games.", "King of the Hill games.", "Oddball games.",
+       "Race games.")),
     "Search for a game of a playlist at\\nYES. A big search lists your name.",
     "CHOOSE A PLAYLIST: SET ONE\\nTO YES.", "ONE PLAYER A MACHINE FOR\\nMATCHMAKING.",
+    *(f"OFF: only {size} games.\\nON: after 0:45, other small sizes too." for size in MATCHMAKING_SIZES[:5]),
+    *(["Big games always stay their size.\\nEXTENDED SEARCH is for small sizes."] * 2),
+    "Most ping to a player's game.\\nServers are not timed.\\nANY takes any game that answers.",
+    *(f"Region steers big games.\\nAUTO picks {region} from your clock." for region in MATCHMAKING_REGIONS),
+    "Region steers big games.\\nAUTO: no region from your clock.",
+    "Region steers big games.",
     "",
 ]
 TITLES[f"{MT}/matchmaking/header_matchmaking"] = "MATCHMAKING"
@@ -2103,7 +2121,7 @@ def _matchmaking() -> list:
     party_texts = [("notice", 35, 74, 570, 16, gold, None, None), ("title", 340, 92, 200, 18, "#FF2896FF", None, "PARTY"),
                    ("count", 340, 92, 265, 18, "#FFFFFFFF", "right", None),
                    ("line", 340, 284, 265, 36, "#FFFFFFFF", None, None),
-                   ("help", 340, 357, 265, 40, "#FFFFFFFF", None, None)]
+                   ("help", 340, 340, 265, 40, "#FFFFFFFF", None, None)]
     lines = _widget(f"{MT}/multiplayer_type_matchmaking_item",
                     [("type", "text"), ("left", 51), ("width", 232), ("height", 32), ("bitmap", "bitmaps/list_item_bkd"),
                      ("string_list", f"{MT}/multiplayer_options"), ("string_index", 8), ("font", "ui\\large_ui"),
@@ -2122,10 +2140,11 @@ def _matchmaking() -> list:
         lines += _widget(f"{base}/party_{key}", [("type", "text"), ("controller", 1), ("left", left), ("top", top),
                                                  ("width", width), ("height", height), ("text", text),
                                                  ("font", "ui\\small_ui"), ("color", color), ("align", align)], [])
-    lines += _widget(f"{base}/help", [("type", "text"), ("controller", 1), ("left", 340), ("top", 357), ("width", 265),
-                                      ("height", 40), ("string_list", f"{base}/help_strings"), ("font", "ui\\small_ui"),
+    lines += _widget(f"{base}/help", [("type", "text"), ("controller", 1), ("left", 340), ("top", 340), ("width", 265),
+                                      ("height", 66), ("string_list", f"{base}/help_strings"), ("font", "ui\\small_ui"),
                                       ("color", "#FFFFFFFF")], [])
-    rows = [("size", 104)] + [(f"playlist_{index}", 136 + 23 * index) for index in range(len(MATCHMAKING_PLAYLISTS))]
+    rows = ([("size", 104)] + [(f"playlist_{index}", 136 + 23 * index) for index in range(len(MATCHMAKING_PLAYLISTS))] +
+            [("extended", 260), ("ping", 283), ("region", 306)])
     lines += _widget(f"{base}/options_menu",
                      [("type", "column_list"), ("width", 640), ("height", 480),
                       ("flags", "pass_unhandled_to_focused_child up_down_tabs_children"),
@@ -2148,7 +2167,7 @@ def _matchmaking() -> list:
                                                  ("height", SEARCH_SLOT_SIZE[1]), ("font", "ui\\small_ui"),
                                                  ("color", gold), ("align", "right"), ("text_y", 1)], [])
     for index, (key, _) in enumerate(rows):
-        spinner = "size_spinner" if key == "size" else "playlist_spinner"
+        spinner = "playlist_spinner" if key.startswith("playlist_") else f"{key}_spinner"
         lines += _widget(f"{base}/op_{key}", [("width", 296), ("height", 18),
                                               ("flags", "pass_unhandled_to_focused_child"),
                                               ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF")],
@@ -2158,7 +2177,9 @@ def _matchmaking() -> list:
                                                  ("string_list", f"{base}/labels"), ("string_index", index or None),
                                                  ("font", "ui\\small_ui"), ("color", "#FF2896FF"), ("text_x", 13),
                                                  ("text_y", 1)], [])
-    for spinner, choices in [("size_spinner", MATCHMAKING_SIZES), ("playlist_spinner", ["NO", "YES"])]:
+    for spinner, choices in [("size_spinner", MATCHMAKING_SIZES), ("playlist_spinner", ["NO", "YES"]),
+                             ("extended_spinner", ["OFF", "ON"]), ("ping_spinner", MATCHMAKING_PINGS),
+                             ("region_spinner", MATCHMAKING_REGION_ROWS)]:
         lines += _widget(f"{base}/{spinner}",
                          [("type", "spinner"), ("width", 84), ("height", 16),
                           ("flags", "pass_unhandled_to_focused_child left_right_tabs_items"),
@@ -2189,7 +2210,8 @@ def _matchmaking() -> list:
                      [f'<on event="a" run="port matchmaking search" open="{base}/search_screen"/>',
                       f'<on event="start" run="port matchmaking search" open="{base}/search_screen"/>',
                       '<on event="left_mouse" run="mouse emit accept event"/>'])
-    lines += _strings(f"{base}/labels", ["GAME SIZE:", *(f"{name}:" for name in MATCHMAKING_PLAYLISTS)])
+    lines += _strings(f"{base}/labels", ["GAME SIZE:", *(f"{name}:" for name in MATCHMAKING_PLAYLISTS), "EXTENDED SEARCH:",
+                                         "MAX PING:", "REGION:"])
     lines += _strings(f"{base}/help_strings", MATCHMAKING_HELP)
     return lines + _matchmaking_search(base)
 
