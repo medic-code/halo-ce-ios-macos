@@ -73,6 +73,7 @@ static void setup(void)
 	memset(&party, 0, sizeof(party));
 	party.count = 3;
 	strcpy(party.members[0].name, "Chief");
+	party.members[0].you = party.members[0].leader = TRUE;
 	strcpy(party.members[1].name, "Kat");
 	strcpy(party.members[2].name, "Rook");
 	left = 0;

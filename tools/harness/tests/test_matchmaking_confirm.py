@@ -7,8 +7,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
-NAMES = ("sibling_index", "focus_row", "matchmaking_bar_focus", "matchmaking_refocus", "matchmaking_ask",
-         "matchmaking_party_find", "matchmaking_remove_ask", "matchmaking_answer")
+NAMES = ("matchmaking_party_member", "sibling_index", "focus_row", "matchmaking_bar_focus", "matchmaking_refocus",
+         "matchmaking_ask", "matchmaking_party_find", "matchmaking_remove_ask", "matchmaking_answer")
 
 
 def generated(fault=None):
