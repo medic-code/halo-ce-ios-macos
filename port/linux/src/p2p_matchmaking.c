@@ -6,6 +6,7 @@
 
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #ifdef _WIN32
 #define strcasecmp _stricmp
@@ -21,6 +22,8 @@ static const char party_label[] = "hceu-mm-party-1";
 
 const char *const p2p_mm_playlist_names[NUMBER_OF_P2P_MM_PLAYLISTS] = { "slayer", "ctf", "king", "oddball", "race" };
 const char *const p2p_mm_size_names[NUMBER_OF_P2P_MM_SIZES] = { "1v1", "2v2", "3v3", "4v4", "ffa6", "big-team", "big-ffa" };
+const int p2p_mm_ping_limits[] = { 100, 150, 200, 300, 0 };
+const char *const p2p_mm_region_names[] = { "eu", "na-east", "na-west", "oce", "" };
 
 void mm_topic(int playlist, int size, char *topic, int topic_size)
 {
@@ -461,6 +464,7 @@ void mm_wanted(const struct mm_search *search, int queue, struct p2p_lobby_wante
 	wanted->big = p2p_mm_size_big(queue_size);
 	snprintf(wanted->region, sizeof(wanted->region), "%s", search->choice.region);
 	wanted->party = party_players(search);
+	wanted->max_ping = search->choice.max_ping;
 }
 
 int mm_counted(const struct mm_peer *peer)
@@ -989,36 +993,39 @@ static int host_open(struct mm_search *search, int forced, struct mm_out *out, i
 	}
 	if (best < 0 || (best_lower && !forced))
 		return 0;
-	search->host_now = 0;
 	search->pool_count = 0;
 	return decide_host(search, best, search->choice.size, out, out_size);
 }
 
-static void widen(struct mm_search *search)
-{
-	search->widened = 1;
-	set_queues(search);
-}
-
-void mm_widen_now(struct mm_search *search)
+void mm_widen(struct mm_search *search)
 {
 	if (search->state == P2P_MM_QUEUED && !search->widened)
-		widen(search);
+	{
+		search->widened = 1;
+		set_queues(search);
+	}
 }
 
-void mm_host_now(struct mm_search *search)
+void mm_brokers(struct mm_search *search, int reached, unsigned long now)
 {
-	if (search->state == P2P_MM_QUEUED && !search->party.following)
-		search->host_now = 1;
+	if (reached || !search->unreached)
+		search->unreached_since = now;
+	search->unreached = !reached;
+}
+
+int mm_unreached(const struct mm_search *search, unsigned long now)
+{
+	return search->unreached && now - search->unreached_since >= MM_UNREACHED;
 }
 
 static int marks(struct mm_search *search, unsigned long now, struct mm_out *out, int out_size)
 {
 	if (p2p_mm_size_big(search->choice.size))
 		return search->can_host > 0 && hosts_for_party(search) ? host_open(search, 1, out, out_size) : 0;
-	if (!search->party.following && !search->widened && now - search->marks_from >= MM_WIDEN)
-		widen(search);
-	if (search->can_host > 0 && !search->pool_count && now - search->marks_from >= MM_HOST && hosts_for_party(search))
+	if (search->choice.extended && !search->party.following && now - search->marks_from >= MM_WIDEN)
+		mm_widen(search);
+	if (search->can_host > 0 && !search->pool_count && now - search->marks_from >= MM_HOST && hosts_for_party(search) &&
+		!mm_unreached(search, now))
 		return host_open(search, 0, out, out_size);
 	return 0;
 }
@@ -1051,7 +1058,6 @@ static int pick_game(struct mm_search *search, unsigned long now, struct mm_out 
 	int waiting = 0, playlist;
 
 	count = lobby_games_unlocked(games, MAXIMUM_GAMES);
-	search->games_checked = count;
 	for (queue = 0; queue < search->queue_count; queue++)
 	{
 		int size = search->queues[queue][1], chosen = size == search->choice.size, better;
@@ -1125,11 +1131,11 @@ static int pick_game(struct mm_search *search, unsigned long now, struct mm_out 
 }
 
 /* a big queue's record says nothing of the host's ping: its lobby listing does */
-static int big_host_near(const struct mm_peer *peer)
+static int big_host_near(const struct mm_search *search, const struct mm_peer *peer)
 {
 	int ping = lobby_ping_unlocked(peer->record.key_hash);
 
-	return ping >= 0 && ping < P2P_LOBBY_PICK_PING;
+	return ping_allowed(ping, search->choice.max_ping);
 }
 
 static int better_host(const struct mm_record *record, const struct mm_record *than)
@@ -1156,7 +1162,8 @@ static int better_host_settling(const struct mm_search *search, const struct mm_
 			continue;
 		}
 		ping = lobby_ping_unlocked(peer->record.key_hash);
-		if (ping < P2P_LOBBY_PICK_PING && (!mm_counted(peer) || (ping < 0 && peer->refreshes < MM_REFRESHES_PINGED)))
+		if ((ping < 0 || ping_allowed(ping, search->choice.max_ping)) &&
+			(!mm_counted(peer) || (ping < 0 && peer->refreshes < MM_REFRESHES_PINGED)))
 			return 1;
 	}
 	return 0;
@@ -1201,7 +1208,7 @@ static int join(struct mm_search *search, unsigned long now, struct mm_out *out,
 			(peer->record.held && pool_index(&peer->record, search->key_hash) < 0) ||
 			(!peer->record.held && (search->party.following || (long)(now - search->join_after) < 0)) ||
 			(search->state == P2P_MM_HOSTING && (!mm_counted(peer) || !outranks(search, &peer->record))) ||
-			(p2p_mm_size_big(peer->size) && !big_host_near(peer)))
+			(p2p_mm_size_big(peer->size) && !big_host_near(search, peer)))
 		{
 			continue;
 		}
@@ -1394,8 +1401,6 @@ int mm_step(struct mm_search *search, unsigned long now, struct mm_out *out, int
 	}
 	if (search->state == P2P_MM_QUEUED)
 	{
-		if (search->host_now && search->can_host > 0)
-			count = host_open(search, 1, out, out_size);
 		if (!looked && search->decision.kind == P2P_MM_DECIDE_NONE && !search->party.following)
 			count = pick_game(search, now, out, out_size);
 		if (search->decision.kind == P2P_MM_DECIDE_NONE)
@@ -1595,6 +1600,7 @@ void p2p_mm_update(unsigned long now, int can_host, const unsigned char *token)
 		sync_topics();
 		return;
 	}
+	mm_brokers(&mm.search, p2p_signal_connected(), now);
 	mm.has_token = token != NULL;
 	if (token)
 		memcpy(mm.token, token, P2P_TOKEN_SIZE);
@@ -1671,6 +1677,20 @@ static void browse_for(int size)
 	p2p_lobby_browse(1);
 }
 
+int p2p_mm_max_ping(long setting)
+{
+	int index, best = 0;
+
+	if (setting <= 0 || setting > 450)
+		return 0;
+	for (index = 1; index < P2P_MM_ANY; index++)
+	{
+		if (labs(setting - p2p_mm_ping_limits[index]) <= labs(setting - p2p_mm_ping_limits[best]))
+			best = index;
+	}
+	return p2p_mm_ping_limits[best];
+}
+
 const char *p2p_mm_region(const char *setting)
 {
 	/* inclusive, in minutes east of UTC */
@@ -1686,8 +1706,13 @@ const char *p2p_mm_region(const char *setting)
 	long offset = (long)difftime(now, mktime(gmtime(&now))) / 60;
 	size_t index;
 
-	if (setting[0])
-		return strcasecmp(setting, "any") ? setting : "";
+	if (!strcasecmp(setting, "any"))
+		return "";
+	for (index = 0; index < P2P_MM_ANY; index++)
+	{
+		if (!strcasecmp(setting, p2p_mm_region_names[index]))
+			return p2p_mm_region_names[index];
+	}
 	for (index = 0; index < sizeof(regions) / sizeof(regions[0]); index++)
 	{
 		if (offset >= regions[index].from && offset <= regions[index].to)
@@ -1723,22 +1748,6 @@ void p2p_mm_search(const struct p2p_mm_choice *choice)
 	hold_browser();
 	pthread_mutex_unlock(&p2p_lock);
 	browse_for(choice->size);
-}
-
-void p2p_mm_widen_now(void)
-{
-	pthread_mutex_lock(&p2p_lock);
-	if (mm.search.state != P2P_MM_OFF)
-		mm_widen_now(&mm.search);
-	pthread_mutex_unlock(&p2p_lock);
-}
-
-void p2p_mm_host_now(void)
-{
-	pthread_mutex_lock(&p2p_lock);
-	if (mm.search.state != P2P_MM_OFF)
-		mm_host_now(&mm.search);
-	pthread_mutex_unlock(&p2p_lock);
 }
 
 void p2p_mm_cancel(void)
@@ -1926,9 +1935,7 @@ void p2p_mm_get_status(struct p2p_mm_status *status)
 	if (search->state != P2P_MM_OFF)
 	{
 		status->seconds = (int)((unsigned long)time(NULL) - search->started);
-		status->mark_seconds = (int)((p2p_now() - search->marks_from) / 1000);
 		status->widened = search->widened;
-		status->games_checked = search->games_checked;
 		status->can_host = search->can_host;
 		status->party = party_players(search);
 		for (index = 0; index < search->queue_count; index++)
@@ -1946,8 +1953,8 @@ void p2p_mm_get_status(struct p2p_mm_status *status)
 		/* a member counts no queue: a big search publishes none */
 		if (!status->count)
 			status->size = search->choice.size;
-		if (search->widened)
-			status->all_sizes_count = searchers_counted(-1, 0);
+		status->searching = searchers_counted(-1, 0);
+		status->unreached = mm_unreached(search, p2p_now());
 		if (search->state == P2P_MM_FOUND || search->state == P2P_MM_HOSTING)
 		{
 			status->hosts = search->decided == P2P_MM_DECIDE_HOST;

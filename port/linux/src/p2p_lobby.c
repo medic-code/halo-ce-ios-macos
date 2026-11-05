@@ -1223,6 +1223,11 @@ int p2p_lobby_games(struct p2p_listing *games, int maximum_count)
 	return count;
 }
 
+int ping_allowed(int ping, int limit)
+{
+	return ping >= 0 && (!limit || ping <= limit);
+}
+
 static int pick_fits(const struct p2p_listing *game, const struct p2p_lobby_wanted *wanted)
 {
 	if (game->network_version != HALO_PORT_NETWORK_VERSION || game->failed || game->locked || !game->open ||
@@ -1249,9 +1254,7 @@ static int pick_fits(const struct p2p_listing *game, const struct p2p_lobby_want
 	/* a small search passes over a dedicated server: it plays its operator's game, not the one searched for */
 	if (game->dedicated)
 		return wanted->big && !game->kind && (!wanted->region[0] || !strcasecmp(game->region, wanted->region));
-	if (game->ping < 0 || game->ping >= P2P_LOBBY_PICK_PING)
-		return 0;
-	return 1;
+	return ping_allowed(game->ping, wanted->max_ping);
 }
 
 int p2p_lobby_pick(const struct p2p_listing *games, int count, const struct p2p_lobby_wanted *wanted)

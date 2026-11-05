@@ -403,7 +403,7 @@ static char const *const port_function_names[] =
 	"port map vote open", "port map vote choose",
 	"port controller clear", "port controller cancel",
 	"port matchmaking init", "port matchmaking defaults", "port matchmaking search", "port matchmaking back",
-	"port matchmaking widen", "port matchmaking start now", "port matchmaking host", "port matchmaking search back",
+	"port matchmaking start now", "port matchmaking search back",
 	"port matchmaking right", "port matchmaking left", "port matchmaking remove", "port matchmaking invite",
 	"port matchmaking leave", "port matchmaking yes", "port matchmaking no",
 };

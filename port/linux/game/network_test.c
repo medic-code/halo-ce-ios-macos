@@ -300,7 +300,10 @@ static void network_test_read_settings(
 	else if (!strncmp(setting, "match:", 6))
 	{
 		if (network_test_read_match(setting + 6, &network_test.match))
+		{
+			network_test.match.max_ping = p2p_mm_max_ping(config_integer("network.matchmaking_max_ping"));
 			network_test.mode = _network_test_match;
+		}
 		else
 			platform_log("network test: \"%s\" is not \"match:<playlist>[,<playlist>...]:<size>\": no test", setting);
 	}

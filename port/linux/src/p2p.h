@@ -210,10 +210,6 @@ int p2p_joined_listing_masters(unsigned char (*key_ids)[P2P_LISTING_MASTER_KEY_I
 first; then those not failed, the open ones, by name); returns their count */
 int p2p_lobby_games(struct p2p_listing *games, int maximum_count);
 
-enum
-{
-	P2P_LOBBY_PICK_PING = 200,
-};
 /* engines: a bit per engine_type, not per playlist */
 struct p2p_lobby_wanted
 {
@@ -223,6 +219,7 @@ struct p2p_lobby_wanted
 	int big;
 	char region[P2P_LISTING_REGION_SIZE + 1];
 	int party;
+	int max_ping;
 };
 int p2p_lobby_pick(const struct p2p_listing *games, int count, const struct p2p_lobby_wanted *wanted);
 /* the master servers' (port/linux/src/master_list.c, server_master.c): a
@@ -440,12 +437,18 @@ int mm_party_size_allowed(int party, int size);
 /* on the wire (queue topics) and in config.toml */
 extern const char *const p2p_mm_playlist_names[NUMBER_OF_P2P_MM_PLAYLISTS];
 extern const char *const p2p_mm_size_names[NUMBER_OF_P2P_MM_SIZES];
+enum { P2P_MM_ANY = 4 };
+extern const int p2p_mm_ping_limits[P2P_MM_ANY + 1];
+extern const char *const p2p_mm_region_names[P2P_MM_ANY + 1];
 
 struct p2p_mm_choice
 {
 	unsigned playlists;
 	int size;
 	char region[P2P_LISTING_REGION_SIZE + 1];
+	int extended;
+	int max_ping;
+	int region_auto;
 };
 enum
 {
@@ -472,9 +475,9 @@ struct p2p_mm_decision
 /* these take p2p_lock: call from the game's thread, never the p2p thread */
 /* network.matchmaking_region as a search takes it: empty, the region of the machine's UTC offset; "any", none */
 const char *p2p_mm_region(const char *setting);
+/* network.matchmaking_max_ping as a search takes it: 100, 150, 200 or 300 ms; 0, any */
+int p2p_mm_max_ping(long setting);
 void p2p_mm_search(const struct p2p_mm_choice *choice);
-void p2p_mm_widen_now(void);
-void p2p_mm_host_now(void);
 void p2p_mm_cancel(void);
 /* each is ignored unless it answers its decision: p2p_mm_game a HOST, p2p_mm_joined a JOIN */
 void p2p_mm_game(int players, int red_players, int most_players, int under_way);
@@ -486,13 +489,15 @@ int p2p_mm_take_left_game(void);
 struct p2p_mm_status
 {
 	int state;
-	int seconds, mark_seconds;
+	int seconds;
 	int widened, can_host;
 	/* the players the search is for, its party's */
 	int party;
 	/* counts include this machine */
-	int playlist, size, count, needed, all_sizes_count;
-	int games_checked;
+	int playlist, size, count, needed;
+	/* each searcher heard once, across all the search's queues */
+	int searching;
+	int unreached;
 	/* FOUND and HOSTING only; ping -1: not timed; region: a dedicated server's */
 	int hosts, players, most_players, ping;
 	char region[P2P_LISTING_REGION_SIZE + 1];
@@ -539,6 +544,8 @@ struct p2p_party_status
 	int count;
 	struct p2p_party_member members[P2P_PARTY_MAXIMUM];
 	struct p2p_mm_choice choice;
+	/* a member's choice is the leader's only once heard: zeroed before */
+	int search_heard;
 	int search_state;
 	int notice;
 	char notice_name[P2P_PARTY_NAME_SIZE + 1];

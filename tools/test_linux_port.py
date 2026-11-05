@@ -435,7 +435,7 @@ def matchmaking_check(tmp_path, fault=None, *arguments, party_fault=None):
     party_copy = tmp_path / "p2p_party.c"
     party_copy.write_text(party)
     (tmp_path / "lobby_pick.inc").write_text("\n".join(function(lobby, name) for name in
-                                                      ("pick_fits", "p2p_lobby_pick", "p2p_lobby_pick_unpinged")))
+                                                      ("ping_allowed", "pick_fits", "p2p_lobby_pick", "p2p_lobby_pick_unpinged")))
     program = tmp_path / "p2p_matchmaking_check"
     built = subprocess.run(["clang", *platform_flags(), "-Iport/linux/src", f"-I{tmp_path}", "-O1", "-no-pie",
                             "-Wl,--wrap=p2p_ed25519_verify", "-Wl,--unresolved-symbols=ignore-all", "-o", str(program), "tools/p2p_matchmaking_check.c", str(copy), str(party_copy), *MATCHMAKING_SOURCES],
@@ -472,6 +472,7 @@ def test_p2p_matchmaking(tmp_path):
 
 
 MATCHMAKING_FAULTS = [
+    (("count += seen ? 0 : peer->record.party;", "count += peer->record.party;"), "e9_searching_once"),
     (("if (!p2p_ed25519_verify(", "if (0 && !p2p_ed25519_verify("), "records"),
     (("bytes[2] != MM_FORMAT)", "0)"), "records"),
     (("if (!record->held)\n\t\t{\n\t\t\tmemcpy(bytes + at, record->token",
@@ -517,6 +518,7 @@ MATCHMAKING_FAULTS = [
     (("return memcmp(units[a].key_hash, units[b].key_hash, P2P_KEY_HASH_SIZE) < 0;", "return 1;"),
      "e37_late_listener"),
     (("now - search->marks_from >= MM_WIDEN", "0"), "e5_alone"),
+    (("search->choice.extended && !search->party.following", "!search->party.following"), "e1_off"),
     (("if (!mm_party_size_allowed(party_players(search), search->choice.size))\n\t\treturn 0;\n", ""), "e77_party_outgrows"),
     (("if (p2p_party_is_member() && !mm.search.party.following)\n\t\tmm.search.in_game = 0;\n", ""), "party wiring"),
     (("if (search->can_host > 0 && !search->pool_count", "if (!search->pool_count"),
@@ -550,9 +552,14 @@ MATCHMAKING_FAULTS = [
     (("peer->record.can_host && !peer->failed &&\n\t\t\tmemcmp", "memcmp"), "strict_lowest"),
     (("!search->pool_count && now - search->marks_from >= MM_HOST", "now - search->marks_from >= MM_HOST"),
      "pool_forming"),
-    (("if (search->host_now && search->can_host > 0)\n\t\t\tcount = host_open(search, 1, out, out_size);\n\t\tif (!looked && search->decision.kind == P2P_MM_DECIDE_NONE && !search->party.following)\n\t\t\tcount = pick_game(search, now, out, out_size);\n\t\tif (search->decision.kind == P2P_MM_DECIDE_NONE)\n\t\t\tcount = join(search, now, out, out_size);\n",
-      "count = join(search, now, out, out_size);\n\t\tif (search->decision.kind == P2P_MM_DECIDE_NONE && search->host_now && search->can_host > 0)\n\t\t\tcount = host_open(search, 1, out, out_size);\n"),
-     "host_now_first"),
+    (("if (search->can_host > 0 && !search->pool_count", "if (search->can_host && !search->pool_count"),
+     "host_after_stun"),
+    (("search->unreached = !reached;", "search->unreached = 0;"), "e15_no_broker"),
+    (("!mm_unreached(search, now))", "1)"), "e15_no_broker"),
+    (("if (reached || !search->unreached)", "if (1)"), "e15_no_broker"),
+    (("now - search->marks_from >= MM_WIDEN", "now - search->marks_from >= MM_HOST"), "e6_widen_at_045"),
+    (("now - search->marks_from >= MM_HOST && hosts_for_party", "now - search->marks_from >= MM_HOST + 1000 && hosts_for_party"),
+     "e7_host_at_200"),
     (("now - search->joining_since >= MM_HOST_WAIT", "0"), "e12_never_hosts"),
     (("now - search->joining_since >= MM_HOST_WAIT", "0"), "two_queues"),
     (("now - search->joining_since >= MM_HOST_WAIT", "0"), "pool_never_hosts"),
@@ -581,16 +588,26 @@ MATCHMAKING_FAULTS = [
     (("p2p_lobby_masters_forget();\n\t\tmm_game_lost", "mm_game_lost"), "big_lost"),
     (("if (restarted)\n\t\tbrowse_for(size);", "if (restarted)\n\t\tp2p_lobby_browse(1);"), "big_lost"),
     (("return wanted->big && !game->kind &&", "return wanted->big &&"), "big_look"),
-    (("p2p_mm_size_big(peer->size) && !big_host_near(peer)", "0"), "e33_lone_merge"),
-    (("p2p_mm_size_big(peer->size) && !big_host_near(peer)", "0"), "e32_big_hosts"),
-    (("return ping >= 0 && ping < P2P_LOBBY_PICK_PING;", "return ping < P2P_LOBBY_PICK_PING;"), "e33_lone_merge"),
-    (("return ping >= 0 && ping < P2P_LOBBY_PICK_PING;", "return ping <= P2P_LOBBY_PICK_PING;"), "e32_big_hosts"),
+    (("p2p_mm_size_big(peer->size) && !big_host_near(search, peer)", "0"), "e33_lone_merge"),
+    (("p2p_mm_size_big(peer->size) && !big_host_near(search, peer)", "0"), "e32_big_hosts"),
+    (("return ping >= 0 && (!limit || ping <= limit);", "return !limit || ping <= limit;"), "e33_lone_merge"),
+    (("return ping >= 0 && (!limit || ping <= limit);", "return ping >= 0 && (!limit || ping < limit);"), "e32_big_hosts"),
+    (("return ping >= 0 && (!limit || ping <= limit);", "return ping >= 0 && ping <= limit;"), "max_ping"),
+    (("wanted->max_ping = search->choice.max_ping;", "wanted->max_ping = 200;"), "max_ping"),
+    (("return ping_allowed(ping, search->choice.max_ping);", "return ping_allowed(ping, 200);"), "e33_lone_merge"),
+    (("if (labs(setting - p2p_mm_ping_limits[index]) <= labs(setting - p2p_mm_ping_limits[best]))",
+      "if (labs(setting - p2p_mm_ping_limits[index]) < labs(setting - p2p_mm_ping_limits[best]))"), "max_ping"),
+    (("if (setting <= 0 || setting > 450)", "if (setting <= 0)"), "max_ping"),
     (("if (kind == P2P_MM_DECIDE_HOST && !p2p_mm_size_big(mm.search.choice.size))", "if (kind == P2P_MM_DECIDE_HOST)"),
      "big_listing"),
     (("if (players > 1 || under_way)\n\t\t\twas = take_browser();", "(void)was;"), "big_listing"),
     (("!p2p_mm_size_big(search->hosting_size) || search->players == 1", "1"), "e33_lone_merge"),
     (("p2p_mm_size_big(best->size) &&\n\t\tbetter_host_settling(search, best)", "0"), "big_hold"),
     (("(ping < 0 && peer->refreshes < MM_REFRESHES_PINGED)", "ping < 0"), "big_hold"),
+    (("if (!strcasecmp(setting, p2p_mm_region_names[index]))", "if (!strcmp(setting, p2p_mm_region_names[index]))"), "region"),
+    (("if (!strcasecmp(setting, p2p_mm_region_names[index]))\n\t\t\treturn p2p_mm_region_names[index];",
+      "if (!strcasecmp(setting, p2p_mm_region_names[index]) || setting[0])\n\t\t\treturn setting;"), "region"),
+    (("(ping < 0 || ping_allowed(ping, search->choice.max_ping))", "ping_allowed(ping, search->choice.max_ping)"), "big_hold"),
     (("!p2p_mm_size_big(search->hosting_size) || search->players == 1", "search->players == 1"), "small_hands_over"),
     (("if (!mm_playlist_has_size(1u << playlist, size) ||", "if ("), "e64_big_ffa_no_ctf"),
     (("size != P2P_MM_FFA_6 && size != P2P_MM_BIG_FFA", "size != P2P_MM_FFA_6"), "e64_big_ffa_no_ctf"),
@@ -687,6 +704,16 @@ PARTY_FAULTS = [
     (("member->searching = party->search.searching && !(flags & PARTY_FLAG_IN_GAME);", ""), "e77_friend_joins_search"),
     ((" && !(flags & PARTY_FLAG_IN_GAME);", ";"), "e77_friend_joins_search"),
     (("party->search_heard = 1;\n", "party->search_heard = 1;\n\t\tparty->left_number = search->number;\n"), "party flags"),
+    (("(block[7] & PARTY_PING_MASK) > PARTY_ANY || ", ""), "party_search_settings"),
+    (("(block[7] >> PARTY_REGION_SHIFT & 7) > PARTY_ANY)", "0)"), "party_search_settings"),
+    (("if (body_size < base || block[4] >= 1u << NUMBER_OF_P2P_MM_PLAYLISTS || block[5] >= NUMBER_OF_P2P_MM_SIZES ||\n\t\t\t(block[7] & PARTY_PING_MASK) > PARTY_ANY || (block[7] >> PARTY_REGION_SHIFT & 7) > PARTY_ANY)\n\t\t\treturn 0;\n\t\tif (!(block[0] & PARTY_GAME))\n\t\t\treturn body_size == base;",
+      "if (body_size < base - 1)\n\t\t\treturn 0;\n\t\tif (!(block[0] & PARTY_GAME))\n\t\t\treturn body_size >= base - 1;"), "party_search_settings"),
+    (('snprintf(choice->region, sizeof(choice->region), "%s", p2p_mm_region_names[search->region]);',
+      'snprintf(choice->region, sizeof(choice->region), "%s", p2p_mm_region(""));'), "party_search_settings"),
+    (("search->region << PARTY_REGION_SHIFT", "0"), "party_search_settings"),
+    (("(search->extended ? PARTY_EXTENDED : 0)", "0"), "party_search_settings"),
+    (("(search->region_auto ? PARTY_AUTO : 0)", "0"), "party_search_settings"),
+    (("search->max_ping = block[7] & PARTY_PING_MASK;", "search->max_ping = 2;"), "party_search_settings"),
     (("if (search->in_game || search->state == P2P_MM_HOSTING", "if (search->state == P2P_MM_HOSTING"), "member_stays_in_game"),
     (("if (in_game != party->in_game)\n\t\tparty->sent = now - PARTY_INTERVAL;", ""), "party flags"),
     (("party->follow_done = 0;\n\tfor (index = 1; index < party->count; index++)\n\t\tparty->members[index].in_game = 0;\n}",
@@ -726,6 +753,15 @@ PARTY_FAULTS = [
 def test_p2p_party_negative_control(control_outputs, fault, case):
     output = control_outputs[None, fault]
     assert f"FAIL {case}:" in output, output
+
+
+def reads_config(source):
+    return re.search(r"\bconfig_\w+\(", source) is not None
+
+
+def test_p2p_party_leaves_the_members_config_alone():
+    assert not reads_config(Path("port/linux/src/p2p_party.c").read_text())
+    assert reads_config("choice.max_ping = config_integer(\"network.matchmaking_max_ping\");")
 
 
 # port_config.c on its own, with the app's file paths (HALO_DATA_ROOT) and C

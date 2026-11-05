@@ -395,26 +395,6 @@
 		<frame png="ce/port/mods/status_small__1.png" width="16" height="16"/>
 		<frame png="ce/port/mods/status_small__2.png" width="16" height="16"/>
 	</bitmap>
-	<bitmap name="main_menu/multiplayer_type_select/matchmaking/search_step">
-		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_step__0.png" width="24" height="24"/>
-		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_step__1.png" width="24" height="24"/>
-		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_step__2.png" width="24" height="24"/>
-	</bitmap>
-	<bitmap name="main_menu/multiplayer_type_select/matchmaking/search_link">
-		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_link__0.png" width="46" height="4"/>
-		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_link__1.png" width="46" height="4"/>
-		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_link__2.png" width="46" height="4"/>
-		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_link__3.png" width="46" height="4"/>
-		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_link__4.png" width="46" height="4"/>
-		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_link__5.png" width="46" height="4"/>
-		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_link__6.png" width="46" height="4"/>
-		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_link__7.png" width="46" height="4"/>
-		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_link__8.png" width="46" height="4"/>
-		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_link__9.png" width="46" height="4"/>
-		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_link__10.png" width="46" height="4"/>
-		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_link__11.png" width="46" height="4"/>
-		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_link__12.png" width="46" height="4"/>
-	</bitmap>
 	<bitmap name="main_menu/multiplayer_type_select/matchmaking/search_slot">
 		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_slot__0.png" width="265" height="18"/>
 		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_slot__1.png" width="265" height="18"/>

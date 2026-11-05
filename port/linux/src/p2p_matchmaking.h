@@ -33,7 +33,7 @@ enum
 	MM_MAXIMUM_PARTY_SIZE = MM_HEADER_SIZE + 1 + P2P_KEY_HASH_SIZE + (MM_MAXIMUM_PARTY - 1) * MM_MEMBER_SIZE +
 		P2P_SIGNATURE_SIZE,
 	MM_SEALED_INVITE_SIZE = P2P_LINK_SIZE + P2P_SEAL_OVERHEAD,
-	MM_PARTY_SEARCH_SIZE = 7,
+	MM_PARTY_SEARCH_SIZE = 8,
 	MM_MAXIMUM_LEADER_SIZE = 1 + P2P_KEY_SIZE + 4 + P2P_PARTY_NAME_SIZE + 1 + (MM_MAXIMUM_PARTY - 1) * P2P_KEY_HASH_SIZE +
 		MM_PARTY_SEARCH_SIZE + 2 + (MM_MAXIMUM_PARTY - 1) * MM_SEALED_INVITE_SIZE + P2P_SIGNATURE_SIZE + P2P_SEAL_OVERHEAD,
 	MM_MAXIMUM_SEARCH_SIZE = MM_MAXIMUM_HOSTING_SIZE > MM_MAXIMUM_PARTY_SIZE ? MM_MAXIMUM_HOSTING_SIZE :
@@ -113,6 +113,7 @@ enum
 	MM_HOST_WAIT = P2P_MM_HOST_WAIT_SECONDS * 1000,
 	MM_WIDEN = P2P_MM_WIDEN_SECONDS * 1000,
 	MM_HOST = P2P_MM_HOST_SECONDS * 1000,
+	MM_UNREACHED = 10 * 1000,
 	MM_EXPIRY_INTERVALS = 3,
 	MM_RUNNING_INTERVAL = 25000,
 	MM_LOOK_TIME = P2P_MM_LOOK_SECONDS * 1000,
@@ -170,7 +171,9 @@ struct mm_search
 	unsigned long join_after;
 	/* 1, 0 (strict router) or -1 (STUN has not answered yet) */
 	int can_host;
-	int widened, host_now;
+	int widened;
+	int unreached;
+	unsigned long unreached_since;
 	unsigned long sequence;
 	int queue_count;
 	int queues[P2P_MM_MAXIMUM_TOPICS][2];
@@ -189,7 +192,6 @@ struct mm_search
 	char joining_region[P2P_LISTING_REGION_SIZE + 1];
 	struct p2p_mm_decision decision;
 	int decided;
-	int games_checked;
 	unsigned char picked[P2P_IDENTIFIER_SIZE];
 	int picked_set;
 	struct mm_search_party party;
@@ -215,8 +217,10 @@ void mm_hosted(struct mm_search *search, const unsigned char *token, int players
 	int under_way, unsigned long now);
 int mm_team_parties(const struct mm_search *search, unsigned long now, struct p2p_mm_team_party *parties);
 void mm_joined(struct mm_search *search, int ok, unsigned long now);
-void mm_widen_now(struct mm_search *search);
-void mm_host_now(struct mm_search *search);
+void mm_widen(struct mm_search *search);
+void mm_brokers(struct mm_search *search, int reached, unsigned long now);
+/* no broker has answered for MM_UNREACHED: no 2:00 host */
+int mm_unreached(const struct mm_search *search, unsigned long now);
 int mm_cancel(struct mm_search *search, struct mm_out *out, int out_size);
 void mm_game_lost(struct mm_search *search, unsigned long now);
 void mm_host_gave_up(struct mm_search *search, unsigned long now);
@@ -262,6 +266,8 @@ struct mm_party_search
 	int number, game, left;
 	int searching, widened, playlists, size, host;
 	int has_game, game_playlist, game_size, public_game;
+	/* as they go on the wire: indexes into the party's ping limits and regions */
+	int max_ping, region, extended, region_auto;
 	/* the notice of what stopped the search; TOO_BIG: or goes on in its game without the friend */
 	int stopped;
 	char invite[P2P_LINK_SIZE];

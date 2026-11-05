@@ -16,6 +16,8 @@ static struct
 	unsigned playlists;
 	short size;
 	short refusal;
+	boolean extended;
+	short ping, region;
 } matchmaking_screen;
 
 static boolean has_profile, name_valid;
@@ -54,9 +56,8 @@ static void ui_play_audio_feedback_sound(short sound)
 	last_sound = sound;
 }
 
-static char const *p2p_mm_region(char const *setting)
+static void matchmaking_choice_rows(struct p2p_mm_choice *choice, boolean extended, short ping, short region)
 {
-	return setting;
 }
 
 static void p2p_party_notice_clear(void)
