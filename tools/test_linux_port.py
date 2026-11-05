@@ -446,6 +446,7 @@ MATCHMAKING_SOURCES = ["port/linux/src/p2p_crypto.c", "port/third_party/monocyph
 
 def matchmaking_check(tmp_path, fault=None, party_fault=None):
     source = Path("port/linux/src/p2p_matchmaking.c").read_text()
+    source += re.search(r"^int ping_allowed\(.*?^}\n", Path("port/linux/src/p2p_lobby.c").read_text(), re.M | re.S)[0]
     if fault:
         assert source.count(fault[0]) == 1, fault[0]
         source = source.replace(*fault)
@@ -555,12 +556,19 @@ MATCHMAKING_FAULTS = [
       "search->can_host > 0 && search->queue_count)"), "e47_big_strict_leader"),
     (("search->held_until = now + (search->pool_count ? MM_HOLD : 0);", "search->held_until = now + MM_HOLD;"),
      "e32_big_hosts"),
-    (("p2p_mm_size_big(peer->size) && !big_host_near(peer)", "0"), "e32_big_hosts"),
-    (("return ping >= 0 && ping < P2P_LOBBY_PICK_PING;", "return ping <= P2P_LOBBY_PICK_PING;"), "e32_big_hosts"),
-    (("return ping >= 0 && ping < P2P_LOBBY_PICK_PING;", "return ping < P2P_LOBBY_PICK_PING;"), "e33_lone_merge"),
+    (("p2p_mm_size_big(peer->size) && !big_host_near(search, peer)", "0"), "e32_big_hosts"),
+    (("return ping >= 0 && (!limit || ping <= limit);", "return !limit || ping <= limit;"), "e33_lone_merge"),
+    (("return ping >= 0 && (!limit || ping <= limit);", "return ping >= 0 && (!limit || ping < limit);"), "e32_big_hosts"),
+    (("return ping >= 0 && (!limit || ping <= limit);", "return ping >= 0 && ping <= limit;"), "e33_lone_merge"),
+    (("wanted->max_ping = search->choice.max_ping;", "wanted->max_ping = 200;"), "max_ping"),
+    (("return ping_allowed(ping, search->choice.max_ping);", "return ping_allowed(ping, 200);"), "e33_lone_merge"),
+    (("if (labs(setting - p2p_mm_ping_limits[index]) <= labs(setting - p2p_mm_ping_limits[best]))",
+      "if (labs(setting - p2p_mm_ping_limits[index]) < labs(setting - p2p_mm_ping_limits[best]))"), "max_ping"),
+    (("if (setting <= 0 || setting > 450)", "if (setting <= 0)"), "max_ping"),
     (("!p2p_mm_size_big(search->hosting_size) || search->players == 1", "1"), "e33_lone_merge"),
     (("p2p_mm_size_big(best->size) &&\n\t\tbetter_host_settling(search, best)", "0"), "big_hold"),
     (("(ping < 0 && peer->refreshes < MM_REFRESHES_PINGED)", "ping < 0"), "big_hold"),
+    (("(ping < 0 || ping_allowed(ping, search->choice.max_ping))", "ping_allowed(ping, search->choice.max_ping)"), "big_hold"),
     (("size != P2P_MM_FFA_6 && size != P2P_MM_BIG_FFA", "size != P2P_MM_FFA_6"), "e64_big_ffa_no_ctf"),
     (("if (teamed && !teams_split(units, pool, taken + 1, players / 2))", "if (0)"), "e26_parties_3v3"),
     (("filled + candidate->players > players", "0"), "e26_parties_3v3"),

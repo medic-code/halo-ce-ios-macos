@@ -217,10 +217,6 @@ tab and Filters): their hosts are probed in that order, those not shown
 last */
 void p2p_lobby_shown(const struct p2p_listing *games, int count);
 
-enum
-{
-	P2P_LOBBY_PICK_PING = 200,
-};
 /* engines: a bit per engine_type, not per playlist */
 struct p2p_lobby_wanted
 {
@@ -230,6 +226,7 @@ struct p2p_lobby_wanted
 	int big;
 	char region[P2P_LISTING_REGION_SIZE + 1];
 	int party;
+	int max_ping;
 };
 int p2p_lobby_pick(const struct p2p_listing *games, int count, const struct p2p_lobby_wanted *wanted);
 /* the master servers' (port/linux/src/master_list.c, server_master.c): a
@@ -447,12 +444,15 @@ int mm_party_size_allowed(int party, int size);
 /* on the wire (queue topics) and in config.toml */
 extern const char *const p2p_mm_playlist_names[NUMBER_OF_P2P_MM_PLAYLISTS];
 extern const char *const p2p_mm_size_names[NUMBER_OF_P2P_MM_SIZES];
+enum { P2P_MM_ANY = 4 };
+extern const int p2p_mm_ping_limits[P2P_MM_ANY + 1];
 
 struct p2p_mm_choice
 {
 	unsigned playlists;
 	int size;
 	char region[P2P_LISTING_REGION_SIZE + 1];
+	int max_ping;
 };
 enum
 {
@@ -479,6 +479,8 @@ struct p2p_mm_decision
 /* these take p2p_lock: call from the game's thread, never the p2p thread */
 /* network.matchmaking_region as a search takes it: empty, the region of the machine's UTC offset; "any", none */
 const char *p2p_mm_region(const char *setting);
+/* network.matchmaking_max_ping as a search takes it: 100, 150, 200 or 300 ms; 0, any */
+int p2p_mm_max_ping(long setting);
 void p2p_mm_search(const struct p2p_mm_choice *choice);
 void p2p_mm_cancel(void);
 /* each is ignored unless it answers its decision: p2p_mm_game a HOST, p2p_mm_joined a JOIN */

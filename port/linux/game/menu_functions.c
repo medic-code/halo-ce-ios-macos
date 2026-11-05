@@ -7131,7 +7131,7 @@ static void matchmaking_screen_update(struct widget_instance *list)
 	matchmaking_screen.focused = focused;
 	if (party.count && !member)
 	{
-		struct p2p_mm_choice choice;
+		struct p2p_mm_choice choice = { 0 };
 
 		choice.playlists = playlists;
 		choice.size = size;
@@ -7175,6 +7175,7 @@ static boolean matchmaking_screen_search(void)
 	choice.playlists = matchmaking_screen.playlists;
 	choice.size = matchmaking_screen.size;
 	snprintf(choice.region, sizeof(choice.region), "%s", p2p_mm_region(config_string("network.matchmaking_region")));
+	choice.max_ping = p2p_mm_max_ping(config_integer("network.matchmaking_max_ping"));
 	p2p_party_notice_clear();
 	p2p_mm_search(&choice);
 	ui_play_audio_feedback_sound(SOUND_FORWARD);

@@ -658,6 +658,8 @@ static void run(double seconds)
 	}
 }
 
+static int search_max_ping = 200;
+
 static void world(int count)
 {
 	memset(machines, 0, sizeof(machines));
@@ -669,6 +671,7 @@ static void world(int count)
 	ignored = failed_host = ignore_only = -1;
 	now_ms = 1000;
 	now_unix = 1800000000UL;
+	search_max_ping = 200;
 	drop_percent = flight_count = captured_count = cancel_on_join = cancel_sent = 0;
 	never_joins = capture_from = fail_join = -1;
 	hosted_while_joining = joins_taken = 0;
@@ -683,6 +686,7 @@ static void start_searching(int index, unsigned playlists, int size, int can_hos
 	memset(&choice, 0, sizeof(choice));
 	choice.playlists = playlists;
 	choice.size = size;
+	choice.max_ping = search_max_ping;
 	seed_of(100 + index, seed);
 	mm_start(&machines[index].search, seed, &choice, now_ms, now_unix);
 	machines[index].search.state = P2P_MM_QUEUED;
@@ -888,6 +892,34 @@ static void big_start(struct mm_search *search)
 	mm_start(search, seed, &choice, 1000, 1800000000UL);
 }
 
+static void check_max_ping(void)
+{
+	static struct mm_search search;
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct p2p_mm_choice choice = { 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM };
+	unsigned char seed[P2P_SEED_SIZE];
+	static const struct { long setting; int limit; } snaps[] = {
+		{ 175, 200 }, { 125, 150 }, { 100, 100 }, { 150, 150 }, { 200, 200 }, { 300, 300 }, { 250, 300 }, { 450, 300 },
+		{ 40, 100 }, { 0, 0 }, { -1, 0 }, { 451, 0 }, { 5000, 0 },
+	};
+	size_t index;
+
+	case_name = "max_ping";
+	for (index = 0; index < sizeof(snaps) / sizeof(snaps[0]); index++)
+		CHECK(p2p_mm_max_ping(snaps[index].setting) == snaps[index].limit, "E6: %ld snaps to %d, not %d",
+			snaps[index].setting, snaps[index].limit, p2p_mm_max_ping(snaps[index].setting));
+	masters_heard = 1;
+	choice.max_ping = 150;
+	listing_count = 0;
+	seed_of(30, seed);
+	mm_start(&search, seed, &choice, 1000, 1800000000UL);
+	add_listing("players", 10, 70);
+	memset(&picked_wanted, 0, sizeof(picked_wanted));
+	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
+	CHECK(picked_wanted.max_ping == 150, "E5: step 1 picks within MAX PING 150: %d", picked_wanted.max_ping);
+	listing_count = 0;
+}
+
 static void check_big_look(void)
 {
 	static struct mm_search search;
@@ -1062,7 +1094,14 @@ static void check_big_hosts(void)
 	run(6.5);
 	start_big(1, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1);
 	run(7.0);
-	CHECK(machines[1].in < 0 && host_count() == 2, "E58: a searcher hosts rather than join a host at 200 ms");
+	CHECK(machines[1].in == 0 && host_count() == 1, "E5: a searcher joins a host at 200 ms, the limit");
+	world(2);
+	machines[0].ping = 201;
+	start_big(0, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1);
+	run(6.5);
+	start_big(1, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 1);
+	run(7.0);
+	CHECK(machines[1].in < 0 && host_count() == 2, "E58: a searcher hosts rather than join a host at 201 ms");
 	CHECK(!published_kinds[MM_KIND_SEARCHING], "E32: no searching record: %d", published_kinds[MM_KIND_SEARCHING]);
 	world(1);
 	start_big(0, 1u << P2P_MM_SLAYER, P2P_MM_BIG_TEAM, 0);
@@ -1116,6 +1155,24 @@ static void check_lone_merge(void)
 	machines[lower].ping = 199;
 	run(15.0);
 	CHECK(machines[higher].in == lower && host_count() == 1, "E58: at 199 ms the merge goes ahead");
+	world(2);
+	search_max_ping = 100;
+	start_big(0, 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA, 1);
+	start_big(1, 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA, 1);
+	higher = memcmp(machines[0].search.key_hash, machines[1].search.key_hash, P2P_KEY_HASH_SIZE) > 0 ? 0 : 1;
+	lower = !higher;
+	machines[lower].ping = 150;
+	run(21.5);
+	CHECK(host_count() == 2, "MAX PING 100: a host at 150 ms is not merged with: %d hosts", host_count());
+	world(2);
+	search_max_ping = 0;
+	start_big(0, 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA, 1);
+	start_big(1, 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA, 1);
+	higher = memcmp(machines[0].search.key_hash, machines[1].search.key_hash, P2P_KEY_HASH_SIZE) > 0 ? 0 : 1;
+	lower = !higher;
+	machines[lower].ping = 400;
+	run(21.5);
+	CHECK(machines[higher].in == lower && host_count() == 1, "MAX PING ANY: a host at 400 ms is merged with");
 }
 
 static void check_big_hold(void)
@@ -1127,6 +1184,7 @@ static void check_big_hold(void)
 	{
 		case_name = "big_hold";
 		world(3);
+		search_max_ping = round ? 200 : 100;
 		for (i = 0; i < 3; i++)
 			start_big(i, 1u << P2P_MM_SLAYER, P2P_MM_BIG_FFA, 1);
 		for (i = 0; i < 3; i++)
@@ -3404,6 +3462,7 @@ int main(void)
 	check_four();
 	check_replay();
 	check_return();
+	check_max_ping();
 	check_big_look();
 	check_big_listing();
 	check_big_lost();
