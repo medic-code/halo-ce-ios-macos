@@ -531,6 +531,23 @@ static int hex_value(char digit)
 	return -1;
 }
 
+int p2p_unhex(const char *text, unsigned char *bytes, int size)
+{
+	int index;
+
+	if ((int)strlen(text) != 2 * size)
+		return 0;
+	for (index = 0; index < size; index++)
+	{
+		int high = hex_value(text[2 * index]), low = hex_value(text[2 * index + 1]);
+
+		if (high < 0 || low < 0)
+			return 0;
+		bytes[index] = (unsigned char)(high << 4 | low);
+	}
+	return 1;
+}
+
 static unsigned long network_long(unsigned long value)
 {
 	return __builtin_bswap32(value);
@@ -3476,6 +3493,19 @@ static DWORD WINAPI upnp_thread(void *unused)
 	return 0;
 }
 
+/* the server browser's listing goes at once (not when it lapses), the
+friends hear the goodbye, then the brokers hear DISCONNECT */
+static void lobby_quit(void)
+{
+	pthread_mutex_lock(&p2p_lock);
+	p2p_lobby_quit();
+	pthread_mutex_unlock(&p2p_lock);
+	p2p_friends_quit();
+	pthread_mutex_lock(&p2p_lock);
+	p2p_signal_disconnect();
+	pthread_mutex_unlock(&p2p_lock);
+}
+
 /* Both workers should finish before exit closes stdio and the platform's
 services, but the exit waits for each a few seconds at most. Waiting with
 p2p_lock held would prevent their final pass. */
@@ -3499,8 +3529,8 @@ static void p2p_shutdown(void)
 		CloseHandle(p2p.upnp_thread);
 		p2p.upnp_thread = NULL;
 	}
+	lobby_quit();
 	pthread_mutex_lock(&p2p_lock);
-	p2p_lobby_quit();
 	/* (still under way: posix_upnp.c takes one caller at a time) */
 	if (p2p.upnp_forwarded && !p2p.upnp_working)
 	{
@@ -3985,6 +4015,9 @@ static DWORD WINAPI p2p_thread(void *unused)
 		if (p2p_party_active())
 			p2p_signal_start();
 		p2p_party_update();
+		if (p2p_friends_wanted())
+			p2p_signal_start();
+		p2p_friends_update();
 		update_joining();
 		update_answering();
 		update_reaching();

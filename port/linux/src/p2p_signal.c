@@ -183,8 +183,11 @@ enum
 	_topic_mm,
 	_topic_party = _topic_mm + P2P_MM_MAXIMUM_TOPICS,
 	_topic_probe,
+	_topic_friend_requests = _topic_probe + P2P_MAXIMUM_PROBES,
+	_topic_friend_inbox,
+	_topic_friend_lookup,
 	/* the topics a broker is subscribed to */
-	NUMBER_OF_TOPICS = _topic_probe + P2P_MAXIMUM_PROBES,
+	NUMBER_OF_TOPICS,
 };
 
 /* MQTT 5's properties */
@@ -386,6 +389,7 @@ static struct
 	char mm_topics[P2P_MM_MAXIMUM_TOPICS][P2P_MM_TOPIC_SIZE];
 	int mm_topic_count;
 	char party_topic[P2P_PARTY_TOPIC_SIZE];
+	char friend_requests[TOPIC_SIZE], friend_inbox[TOPIC_SIZE], friend_lookup[TOPIC_SIZE];
 } signalling;
 
 static int elapsed(unsigned long since, unsigned long time)
@@ -619,6 +623,17 @@ static void broker_publish(struct broker *broker, const char *topic, const unsig
 	broker_send(broker, 0x30, body, size + payload_size);
 }
 
+static int put_expiry(unsigned char *body, int seconds)
+{
+	body[0] = 5;
+	body[1] = _property_message_expiry;
+	body[2] = (unsigned char)(seconds >> 24);
+	body[3] = (unsigned char)(seconds >> 16);
+	body[4] = (unsigned char)(seconds >> 8);
+	body[5] = (unsigned char)seconds;
+	return 6;
+}
+
 /* a publish at least once to the own slot, retained: a listing (expiring
 at the broker), or an empty one, which clears it; again (duplicate) if the
 first was not acknowledged */
@@ -633,24 +648,35 @@ static void broker_publish_slot(struct broker *broker, unsigned short identifier
 	if (broker->protocol == 5)
 	{
 		if (payload_size)
-		{
-			body[size++] = 5;
-			body[size++] = _property_message_expiry;
-			body[size++] = 0;
-			body[size++] = 0;
-			body[size++] = 0;
-			body[size++] = LISTING_EXPIRY;
-		}
+			size += put_expiry(body + size, LISTING_EXPIRY);
 		else
-		{
 			body[size++] = 0;
-		}
 	}
 	if (payload_size)
 		memcpy(body + size, payload, (size_t)payload_size);
 	/* PUBLISH, QoS 1, retained */
 	broker_send(broker, (unsigned char)(0x30 | (duplicate ? 0x08 : 0) | 0x02 | 0x01), body, size + payload_size);
 	broker->sent_time = p2p_now();
+}
+
+static void broker_publish_friend(struct broker *broker, const char *topic, const unsigned char *payload, int size,
+	int kept_seconds)
+{
+	unsigned char body[2 + TOPIC_SIZE + 6 + MAXIMUM_LISTING_SIZE];
+	int length;
+
+	if (!kept_seconds || broker->protocol != 5 || !broker->retain_available)
+	{
+		broker_publish(broker, topic, payload, size);
+		return;
+	}
+	length = put_string(body, topic);
+	if (kept_seconds > 0)
+		length += put_expiry(body + length, kept_seconds);
+	else
+		body[length++] = 0;
+	memcpy(body + length, payload, (size_t)size);
+	broker_send(broker, 0x31, body, length + size);
 }
 
 /* a listing (or a clearing: size 0) to the own slot, at least once: 0 if
@@ -712,6 +738,9 @@ static void broker_sync_topics(struct broker *broker)
 	for (index = 0; index < P2P_MM_MAXIMUM_TOPICS; index++)
 		wanted[_topic_mm + index] = index < signalling.mm_topic_count ? signalling.mm_topics[index] : "";
 	wanted[_topic_party] = signalling.party_topic;
+	wanted[_topic_friend_requests] = broker->wildcard_available ? signalling.friend_requests : "";
+	wanted[_topic_friend_inbox] = signalling.friend_inbox;
+	wanted[_topic_friend_lookup] = broker->wildcard_available ? signalling.friend_lookup : "";
 	for (index = 0; index < P2P_MAXIMUM_PROBES; index++)
 		wanted[_topic_probe + index] = signalling.probes[index].join.active ? signalling.probes[index].topic : "";
 	for (index = 0; index < NUMBER_OF_TOPICS; index++)
@@ -1495,6 +1524,11 @@ static void publish_received(struct broker *broker, const char *topic, const uns
 			p2p_party_heard(payload, size);
 		return;
 	}
+	if (!strncmp(topic, P2P_FRIEND_TOPIC_PREFIX, sizeof(P2P_FRIEND_TOPIC_PREFIX) - 1))
+	{
+		p2p_friends_received(topic, payload, size);
+		return;
+	}
 	if (size > MAXIMUM_MESSAGE_SIZE + P2P_SEAL_OVERHEAD)
 		return;
 	if (!strncmp(topic, P2P_LOBBY_SLOT_PREFIX, sizeof(P2P_LOBBY_SLOT_PREFIX) - 1))
@@ -2002,14 +2036,30 @@ void p2p_signal_update(const int *read, int read_count, const int *write, int wr
 
 int p2p_signal_connected(void)
 {
+	int count = 0, index;
+
+	for (index = 0; index < signalling.broker_count; index++)
+		count += signalling.brokers[index].state == _broker_ready;
+	return count;
+}
+
+int p2p_signal_wildcards(void)
+{
+	int count = 0, index;
+
+	for (index = 0; index < signalling.broker_count; index++)
+		count += signalling.brokers[index].state == _broker_ready && signalling.brokers[index].wildcard_available;
+	return count;
+}
+
+unsigned p2p_signal_up(void)
+{
+	unsigned up = 0;
 	int index;
 
 	for (index = 0; index < signalling.broker_count; index++)
-	{
-		if (signalling.brokers[index].state == _broker_ready)
-			return 1;
-	}
-	return 0;
+		up |= (unsigned)(signalling.brokers[index].state == _broker_ready) << index;
+	return up;
 }
 
 void p2p_signal_reconnect(void)
@@ -2052,6 +2102,74 @@ void p2p_signal_mm_publish(const char *topic, const unsigned char *payload, int 
 {
 	if (size <= MAXIMUM_PUBLISH_SIZE)
 		publish_everywhere(topic, payload, size);
+}
+
+void p2p_signal_friend_topics(const char *requests, const char *inbox, const char *lookup)
+{
+	snprintf(signalling.friend_requests, TOPIC_SIZE, "%s", requests);
+	snprintf(signalling.friend_inbox, TOPIC_SIZE, "%s", inbox);
+	snprintf(signalling.friend_lookup, TOPIC_SIZE, "%s", lookup);
+	sync_all_topics();
+}
+
+int p2p_signal_friend_publish(const char *topic, const unsigned char *payload, int size, int kept_seconds,
+	unsigned *took)
+{
+	int taken = 0, index;
+
+	if (size > MAXIMUM_LISTING_SIZE || strlen(topic) >= TOPIC_SIZE)
+		return 0;
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		struct broker *broker = &signalling.brokers[index];
+
+		if (broker->state != _broker_ready)
+			continue;
+		if (*took & 1u << index)
+		{
+			taken++;
+			continue;
+		}
+		/* (a broker that keeps nothing has nothing to clear) */
+		if (kept_seconds < 0 && !(broker->protocol == 5 && broker->retain_available))
+		{
+			taken++;
+			continue;
+		}
+		if (!broker_may_publish(broker, UNPROVEN_RESERVE))
+			continue;
+		broker_publish_friend(broker, topic, payload, size, kept_seconds);
+		if (broker->state == _broker_ready)
+		{
+			*took |= 1u << index;
+			taken++;
+		}
+	}
+	return taken;
+}
+
+void p2p_signal_friend_goodbye(const char *topic, const unsigned char *payload, int size)
+{
+	int index;
+
+	if (size > MAXIMUM_LISTING_SIZE || strlen(topic) >= TOPIC_SIZE)
+		return;
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		if (signalling.brokers[index].state == _broker_ready)
+			broker_publish_friend(&signalling.brokers[index], topic, payload, size, 0);
+	}
+}
+
+void p2p_signal_flush(void)
+{
+	int index;
+
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		if (signalling.brokers[index].state == _broker_ready)
+			broker_flush(&signalling.brokers[index]);
+	}
 }
 
 void p2p_signal_party_topic(const char *topic)
@@ -2239,7 +2357,6 @@ void p2p_signal_lobby_quit(void)
 	for (index = 0; index < signalling.broker_count; index++)
 	{
 		struct broker *broker = &signalling.brokers[index];
-		static const unsigned char disconnect[2] = { 0, 0 };
 
 		if (broker->state != _broker_ready)
 			continue;
@@ -2251,6 +2368,20 @@ void p2p_signal_lobby_quit(void)
 				signalling.lobby_listing_size, 0);
 			broker_publish_slot(broker, next_packet_identifier(broker), NULL, 0, 0);
 		}
+	}
+}
+
+void p2p_signal_disconnect(void)
+{
+	int index;
+
+	for (index = 0; index < signalling.broker_count; index++)
+	{
+		struct broker *broker = &signalling.brokers[index];
+		static const unsigned char disconnect[2] = { 0, 0 };
+
+		if (broker->state != _broker_ready)
+			continue;
 		/* DISCONNECT (MQTT 5: a normal one, its reason and no properties) */
 		broker_send(broker, 0xE0, disconnect, broker->protocol == 5 ? 2 : 0);
 		broker_flush(broker);

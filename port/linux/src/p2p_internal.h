@@ -86,6 +86,7 @@ go of the p2p lock while it may wait for a program */
 void p2p_register_url_scheme(const char *scheme, const char *description);
 /* formats bytes as lower-case hexadecimal (text holds 2 * size + 1) */
 void p2p_hex(const unsigned char *bytes, int size, char *text);
+int p2p_unhex(const char *text, unsigned char *bytes, int size);
 /* the addresses this machine can be reached at; returns their count */
 int p2p_local_candidates(struct p2p_candidate *candidates, int maximum_count);
 /* this run's X25519 public key (P2P_KEY_SIZE bytes), whose hash the
@@ -170,6 +171,8 @@ int p2p_signal_probe(const unsigned char *host_hash, const unsigned char *token)
 void p2p_signal_stop_probe(const unsigned char *identifier);
 /* whether any broker is connected */
 int p2p_signal_connected(void);
+int p2p_signal_wildcards(void);
+unsigned p2p_signal_up(void);
 /* every broker's connection made anew at once: after the p2p thread was
 stopped (the process was suspended, or the machine slept), the old ones
 may carry nothing, and would be noticed only at their silence timeout */
@@ -184,9 +187,9 @@ void p2p_signal_lobby_publish(const unsigned char *listing, int size, int closin
 /* asks the hosts to publish again */
 void p2p_signal_lobby_query(void);
 /* the game is quitting: the tombstone published (p2p_signal_lobby_publish)
-and the slot cleared on every ready broker now, whatever their buckets, and
-the connections closed cleanly */
+and the slot cleared on every ready broker now, whatever their buckets */
 void p2p_signal_lobby_quit(void);
+void p2p_signal_disconnect(void);
 
 /* ---------- p2p_crypto.c */
 
@@ -393,7 +396,25 @@ void p2p_party_update(void);
 /* under p2p_lock; 1 if the text holds a party link, joined or not */
 int p2p_party_link_received(const char *text);
 int p2p_party_can_join(const char *text);
+/* under p2p_lock */
+const char *p2p_party_name(void);
 void p2p_clipboard_offer(const char *text);
+
+/* the friends list (p2p_friends.c), under p2p_lock */
+#define P2P_FRIEND_TOPIC_PREFIX "hceu/3/friend/"
+void p2p_friends_key(unsigned char *key);
+void p2p_friends_mark(struct p2p_party_status *status);
+int p2p_friends_wanted(void);
+void p2p_friends_update(void);
+/* BYE to the friends heard: the game is quitting (call before the brokers are disconnected) */
+void p2p_friends_quit(void);
+void p2p_friends_received(const char *topic, const unsigned char *payload, int size);
+void p2p_signal_friend_topics(const char *requests, const char *inbox, const char *lookup);
+/* kept_seconds: 0, not retained; -1, a retained record cleared (payload empty); else retained that long */
+int p2p_signal_friend_publish(const char *topic, const unsigned char *payload, int size, int kept_seconds,
+	unsigned *took);
+void p2p_signal_friend_goodbye(const char *topic, const unsigned char *payload, int size);
+void p2p_signal_flush(void);
 int p2p_mm_active(void);
 /* call under p2p_lock */
 int p2p_mm_hosts_big_game(void);
