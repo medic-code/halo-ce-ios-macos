@@ -11,6 +11,7 @@
 #include "networking/network_connection.h"
 #include "networking/network_server_manager.h"
 #include "networking/network_server_manager_internal.h"
+#include "game/game.h"
 #include "game/game_engine.h"
 #include "map_share.h"
 #include "matchmaking.h"
@@ -584,6 +585,8 @@ void matchmaking_update(float seconds)
 	if (p2p_mm_take_left_game())
 		matchmaking_leave_game();
 	p2p_mm_get_status(&status);
+	p2p_friends_set_state(game_in_progress() && !main_menu_is_active() ? P2P_FRIEND_IN_GAME :
+		status.state != P2P_MM_OFF || matchmaking_screen_shown() ? P2P_FRIEND_MATCHMAKING : P2P_FRIEND_MENUS);
 	/* the search is off while joined: a joined game must not end here */
 	if (status.state == P2P_MM_OFF && (matchmaking.role == _matchmaking_hosting || matchmaking.role == _matchmaking_joining))
 	{

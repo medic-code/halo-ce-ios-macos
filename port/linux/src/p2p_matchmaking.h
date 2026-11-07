@@ -34,7 +34,8 @@ enum
 		P2P_SIGNATURE_SIZE,
 	MM_SEALED_INVITE_SIZE = P2P_LINK_SIZE + P2P_SEAL_OVERHEAD,
 	MM_PARTY_SEARCH_SIZE = 7,
-	MM_MAXIMUM_LEADER_SIZE = 1 + P2P_KEY_SIZE + 4 + P2P_PARTY_NAME_SIZE + 1 + (MM_MAXIMUM_PARTY - 1) * P2P_KEY_HASH_SIZE +
+	MM_MAXIMUM_LEADER_SIZE = 1 + P2P_KEY_SIZE + 4 + P2P_PARTY_NAME_SIZE + P2P_KEY_SIZE + 1 +
+		(MM_MAXIMUM_PARTY - 1) * P2P_KEY_HASH_SIZE +
 		MM_PARTY_SEARCH_SIZE + 2 + (MM_MAXIMUM_PARTY - 1) * MM_SEALED_INVITE_SIZE + P2P_SIGNATURE_SIZE + P2P_SEAL_OVERHEAD,
 	MM_MAXIMUM_SEARCH_SIZE = MM_MAXIMUM_HOSTING_SIZE > MM_MAXIMUM_PARTY_SIZE ? MM_MAXIMUM_HOSTING_SIZE :
 		MM_MAXIMUM_PARTY_SIZE,
@@ -243,7 +244,7 @@ struct mm_party_game
 
 struct mm_party_member
 {
-	unsigned char key[P2P_KEY_SIZE], hash[P2P_KEY_HASH_SIZE];
+	unsigned char key[P2P_KEY_SIZE], hash[P2P_KEY_HASH_SIZE], friend_key[P2P_KEY_SIZE];
 	char name[P2P_PARTY_NAME_SIZE + 1];
 	unsigned long sequence, heard;
 	unsigned char signature[P2P_SIGNATURE_SIZE];
@@ -273,6 +274,7 @@ struct mm_party_search
 struct mm_party
 {
 	unsigned char seed[P2P_SEED_SIZE], key[P2P_KEY_SIZE], hash[P2P_KEY_HASH_SIZE], seal[P2P_SHA256_SIZE];
+	unsigned char friend_key[P2P_KEY_SIZE];
 	char name[P2P_PARTY_NAME_SIZE + 1];
 	int role;
 	/* the leader first */

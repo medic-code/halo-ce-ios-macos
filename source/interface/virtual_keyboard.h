@@ -14,6 +14,9 @@ header included in hcex build.
 
 /* ---------- constants */
 
+/* port: a caption the port draws itself, past the keyboard's own strings */
+#define VIRTUAL_KEYBOARD_CAPTION_FRIEND_TAG 100
+
 /* ---------- macros */
 
 /* ---------- structures */

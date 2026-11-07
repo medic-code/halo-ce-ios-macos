@@ -9,13 +9,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
-CASES = ["looking", "queued", "widened", "hosting", "found", "big_looking", "big_hosting", "big_found", "lobby",
-         "notices", "member_view", "member_queue", "party_sizes", "party_panel", "party_notices"]
+CASES = ["looking", "queued", "unreached", "hosting", "hosted_panel", "found", "big_looking", "big_hosting", "big_found",
+         "lobby", "notices", "member_view", "member_queue", "member_found", "party_sizes", "party_panel", "party_notices", "friends_line", "friend_rows",
+         "friend_layout", "friend_words", "add_friend"]
 
 NEGATIVE_CONTROLS = {
-    "strict-offered-2:00": (("status->can_host > 0 ? L\"%d more", "1 ? L\"%d more"), "queued"),
-    "full-before-pool": (("if (status->count <= 0)\n\t\t\t\tbreak;\n", ""), "queued"),
-    "never-widened": (("if (status->widened)", "if (0)"), "widened"),
+    "invite-bar-ignored": (("if (invited)\n\t\treturn MATCHMAKING_SEARCH_BAR(yes)", "if (0)\n\t\treturn MATCHMAKING_SEARCH_BAR(yes)"), "member_queue"),
     "number-without-countdown": (("seconds >= 0", "seconds >= -1"), "lobby"),
     "last-second-lost": (("seconds >= 0", "seconds > 0"), "lobby"),
     "big-looking-as-small": (("int big = p2p_mm_size_big(status->size);", "int big = 0;"), "big_looking"),
@@ -39,6 +38,55 @@ NEGATIVE_CONTROLS = {
     "big-party-not-skipped": (("while (first < P2P_MM_BIG_TEAM", "while (first < P2P_MM_FFA_6"), "party_panel"),
     "moved-member-lost": (("if (index < party->count && !strcmp(party->members[index].name, name))\n\t\treturn index;\n", ""),
                           "party_panel"),
+    "no-standing-x": (("return matchmaking_party_member(party) || view->asking ? L\"\" : L\"X\";",
+                        "return matchmaking_party_member(party) || view->asking ? L\"\" : L\"\";"), "friend_rows"),
+    "x-while-asking": (("return matchmaking_party_member(party) || view->asking ?", "return matchmaking_party_member(party) ?"),
+                       "friend_rows"),
+    "friends-off-always-shown": (("else if (enabled && !friends->on)", "else if (!friends->on)"), "friends_line"),
+    "unreadable-key-says-you-are": (("if (friends->on && friends->me[0])", "if (friends->me[0])"), "friends_line"),
+    "unsaved-unsaid": (("if (friends->on && friends->unsaved)", "if (0)"), "friends_line"),
+    "unmade-key-says-unreadable": (("friends->key_unmade ?", "0 ?"), "friends_line"),
+    "focused-addable-says-remove": (("addable ? L\"A ADD FRIEND\" : L\"X REMOVE\"", "L\"X REMOVE\""), "friend_rows"),
+    "own-tag-unsaid": (("case P2P_FRIEND_ADD_SELF:", "case 98:"), "add_friend"),
+    "add-friend-for-a-friend": (("!party->members[index].friend &&", ""), "friend_rows"),
+    "add-friend-without-a-key": (("memcmp(party->members[index].friend_key, no_key, sizeof(no_key))", "1"), "friend_rows"),
+    "add-friend-while-searching": (("!matchmaking_rows_locked(party) &&\n\t\tmatchmaking_party_addable", "matchmaking_party_addable"),
+                                   "friend_rows"),
+    "requests-over-three": (("MIN(P2P_FRIEND_REQUESTS_SHOWN, P2P_PARTY_MAXIMUM - MAX(party->count, 1))", "P2P_PARTY_MAXIMUM - MAX(party->count, 1)"), "friend_rows"),
+    "requests-over-the-rows": (("MIN(P2P_FRIEND_REQUESTS_SHOWN, P2P_PARTY_MAXIMUM - MAX(party->count, 1))", "P2P_FRIEND_REQUESTS_SHOWN"), "friend_rows"),
+    "request-row-no-focus-cue": (("focused ? L\"A ANSWER\" : L\"REQUEST\"", "L\"REQUEST\""), "friend_rows"),
+    "request-help-without-answer": ((" A: answer YES or NO.", ""), "friend_rows"),
+    "add-friend-with-friends-off": (("return friends_on && index >= 0", "return index >= 0"), "friend_rows"),
+    "member-requests-hidden": (("if (party->search_state != P2P_MM_OFF)\n\t\treturn 0;", "if (matchmaking_rows_locked(party))\n\t\treturn 0;"), "friend_rows"),
+    "no-server-unsaid": (("case P2P_FRIEND_ADD_NO_SERVER:", "case 99:"), "friend_rows"),
+    "friends-over-a-search": (("!matchmaking_rows_locked(party) && members < P2P_PARTY_MAXIMUM", "members < P2P_PARTY_MAXIMUM"), "friend_layout"),
+    "friends-in-a-full-party": (("!matchmaking_rows_locked(party) && members < P2P_PARTY_MAXIMUM", "!matchmaking_rows_locked(party)"), "friend_layout"),
+    "friends-off-listed": (("boolean adding = friends->on && !matchmaking_rows_locked(party)", "boolean adding = !matchmaking_rows_locked(party)"), "friend_layout"),
+    "add-friend-row-missing": (("if (adding)\n\t\trows[total++].kind = _matchmaking_row_add;", "if (0)\n\t\trows[total++].kind = _matchmaking_row_add;"), "add_friend"),
+    "bare-tag-unnamed": (("size_t length, out = 0;", "size_t length, out = 1;"), "add_friend"),
+    "tag-off-keyboard": (("*at > 0x7E", "*at > 0xFFFF"), "add_friend"),
+    "tag-untrimmed": (("tag[length - 1] == L' '", "0"), "add_friend"),
+    "tag-after-the-name": (("tag = at + 1;", "tag = at;"), "add_friend"),
+    "lookup-unmarked": (("friends->looking ? L\"LOOKING\"", "0 ? L\"LOOKING\""), "add_friend"),
+    "heading-without-rows": (("if (requests || online || adding)", "if (1)"), "friend_layout"),
+    "friend-id-lost": (("strcpy(rows[total].id, friends->online[index].id);", ""), "friend_layout"),
+    "heading-on-the-bottom-slot": (("(scroll < last && rows[scroll + P2P_PARTY_MAXIMUM - 1].kind == _matchmaking_row_heading)", "0"), "friend_layout"),
+    "heading-on-the-top-slot": (("(scroll > 0 && rows[scroll].kind == _matchmaking_row_heading) ||", ""), "friend_layout"),
+    "scroll-past-the-end": (("PIN(scroll + step, 0, last)", "MAX(scroll + step, 0)"), "friend_layout"),
+    "scroll-flickers-at-seven": (("for (turn = 0; turn < 2; turn++, direction = (short)-direction)", "for (turn = 0; turn < 1; turn++, direction = (short)-direction)"), "friend_layout"),
+    "scroll-never-steps": (("scroll = (short)PIN(scroll + step, 0, last);", "scroll = (short)PIN(scroll, 0, last);"), "friend_layout"),
+    "heading-passed-the-wrong-way": (("short direction = step < 0 ? -1 : 1, turn;", "short direction = 1, turn;"), "friend_layout"),
+    "menus-friend-invitable": (("words = L\"IN MENUS\";", "words = L\"INVITE\";"), "friend_words"),
+    "game-friend-invitable": (("words = L\"IN A GAME\";", "words = L\"INVITE\";"), "friend_words"),
+    "update-friend-invitable": (("words = L\"UPDATE\";", "words = L\"INVITE\";"), "friend_words"),
+    "invited-mark-lost": (("invited ? L\"INVITED\" : ", ""), "friend_words"),
+    "friend-focus-cue-lost": (("focused ? L\"A INVITE\" : ", ""), "friend_words"),
+    "friend-name-with-tag": (("matchmaking_tagless(friend_row->name_tag, name);", "mods_wide_text(friend_row->name_tag, name, P2P_PARTY_NAME_SIZE + 1);"), "friend_words"),
+    "busy-friend-help-offers-invite": (("usnprintf(help, size - 1, friend_row->state == P2P_FRIEND_MATCHMAKING ?", "usnprintf(help, size - 1, 1 ?"), "friend_words"),
+    "invite-prompt-one-line": (("%ls\\r\\ninvites you to a party", "%ls invites you to a party"), "friend_words"),
+    "invite-prompt-full-stop": (("invites you to a party\"", "invites you to a party.\""), "friend_words"),
+    "leave-first-unsaid": (("case MATCHMAKING_LEAVE_FIRST:", "case 99:"), "friend_words"),
+    "removal-asks-nothing": (("from your friends?", "from your friends."), "friend_words"),
 }
 
 
@@ -46,7 +94,7 @@ def generated(fault=None):
     source = read("port/linux/game/menu_functions.c")
     header = read("port/linux/src/p2p.h")
     search = read("port/linux/src/p2p_matchmaking.c")
-    enums = "\n".join(["#define usnprintf swprintf", "#define PIN(x, lo, hi) ((x) < (lo) ? (lo) : (x) > (hi) ? (hi) : (x))", "#define NONE (-1)",
+    enums = "\n".join(["#define usnprintf swprintf", "#define ustrlen wcslen", "#define PIN(x, lo, hi) ((x) < (lo) ? (lo) : (x) > (hi) ? (hi) : (x))", "#define NONE (-1)", "#define MIN(a, b) ((a) < (b) ? (a) : (b))", "#define MAX(a, b) ((a) > (b) ? (a) : (b))",
                        "#define MM_MAXIMUM_PARTY P2P_PARTY_MAXIMUM", "#define P2P_LISTING_REGION_SIZE 16",
                        "#define NUMBEROF(array) (sizeof(array) / sizeof((array)[0]))",
                        enum_with(header, "P2P_MM_SLAYER"), enum_with(header, "P2P_MM_1V1"),
@@ -54,6 +102,11 @@ def generated(fault=None):
                        enum_with(header, "P2P_PARTY_MAXIMUM"), enum_with(header, "P2P_PARTY_NOTICE_NONE"),
                        structure(header, "p2p_mm_choice"), structure(header, "p2p_mm_status"),
                        structure(header, "p2p_party_member"), structure(header, "p2p_party_status"),
+                       enum_with(header, "P2P_FRIEND_TAG_SIZE"), enum_with(header, "P2P_FRIEND_ADD_SENT"), structure(header, "p2p_friend_row"),
+                       structure(header, "p2p_friends_status"),
+                       enum_with(header, "P2P_FRIEND_OFFLINE"), enum_with(source, "_matchmaking_row_none"),
+                       "#define MATCHMAKING_ROW_LIMIT (P2P_PARTY_MAXIMUM + 1 + P2P_FRIEND_REQUESTS_SHOWN + P2P_FRIENDS_MAXIMUM + 1)",
+                       "#define MATCHMAKING_LEAVE_FIRST 100", "#define MATCHMAKING_NO_TAG 101", structure(source, "matchmaking_row"),
                        enum_with(source, "_matchmaking_ask_none"), enum_with(source, "_matchmaking_bar_defaults"),
                        enum_with(source, "_matchmaking_search_bar_widen"),
                        "#define MATCHMAKING_BAR(button) (1u << _matchmaking_bar_##button)",
@@ -67,8 +120,12 @@ def generated(fault=None):
                       *(function(source, name) for name in (
                           "matchmaking_party_member", "matchmaking_party_size", "matchmaking_size_saved", "matchmaking_size_after",
                           "matchmaking_party_find", "matchmaking_party_bar", "matchmaking_search_bar",
-                          "matchmaking_party_name_utf8", "matchmaking_party_mark", "matchmaking_party_words",
-                          "matchmaking_party_notice", "matchmaking_lines", "matchmaking_lobby_line"))])
+                          "matchmaking_party_name_utf8", "matchmaking_rows_locked", "matchmaking_party_addable",
+                          "matchmaking_requests_shown", "matchmaking_rows_layout", "matchmaking_scroll_bad",
+                          "matchmaking_scroll", "matchmaking_tagless", "matchmaking_friend_row", "matchmaking_friend_help",
+                          "matchmaking_invite_help", "matchmaking_friend_remove_help", "matchmaking_request_row", "matchmaking_request_help",
+                          "matchmaking_add_row", "matchmaking_add_help", "matchmaking_tag_typed", "matchmaking_add_words", "matchmaking_party_mark", "matchmaking_party_words",
+                          "matchmaking_party_notice", "matchmaking_friends_line", "matchmaking_lines", "matchmaking_lobby_line"))])
     if fault:
         code = mutated(code, *fault)
     return (("enums.inc", enums), ("under_test.inc", code + "\n"))

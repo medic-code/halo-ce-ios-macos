@@ -1033,9 +1033,8 @@ int p2p_lobby_listed(void)
 
 void p2p_lobby_quit(void)
 {
-	if (!lobby.listed)
-		return;
-	stop_listing();
+	if (lobby.listed)
+		stop_listing();
 	/* (the game is ending: written now, not on the coming passes) */
 	p2p_signal_lobby_quit();
 }

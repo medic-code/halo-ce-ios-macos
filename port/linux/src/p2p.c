@@ -376,7 +376,7 @@ static struct
 	int hosting_lan_only;
 	int has_token;
 	unsigned char token[P2P_TOKEN_SIZE];
-	/* whether the server browser's exit hook is set (lobby_quit) */
+	/* whether the exit hook is set (lobby_quit) */
 	int lobby_quit_registered;
 	/* whether the server browser listed this token (p2p_lobby.c): going
 	private makes a new one */
@@ -526,6 +526,23 @@ static int hex_value(char digit)
 	if (digit >= 'A' && digit <= 'F')
 		return digit - 'A' + 10;
 	return -1;
+}
+
+int p2p_unhex(const char *text, unsigned char *bytes, int size)
+{
+	int index;
+
+	if ((int)strlen(text) != 2 * size)
+		return 0;
+	for (index = 0; index < size; index++)
+	{
+		int high = hex_value(text[2 * index]), low = hex_value(text[2 * index + 1]);
+
+		if (high < 0 || low < 0)
+			return 0;
+		bytes[index] = (unsigned char)(high << 4 | low);
+	}
+	return 1;
 }
 
 static unsigned long network_long(unsigned long value)
@@ -3480,6 +3497,10 @@ static void lobby_quit(void)
 	pthread_mutex_lock(&p2p_lock);
 	p2p_lobby_quit();
 	pthread_mutex_unlock(&p2p_lock);
+	p2p_friends_quit();
+	pthread_mutex_lock(&p2p_lock);
+	p2p_signal_disconnect();
+	pthread_mutex_unlock(&p2p_lock);
 }
 
 /* the game exits: the router forwards the port no longer (after a request
@@ -3958,14 +3979,12 @@ static void *p2p_thread(void *unused)
 			hosted_player_counts(&count, &maximum);
 			p2p_lobby_update(p2p.hosting && p2p.has_token ? p2p.token : NULL, count, maximum);
 			if (p2p_lobby_listed())
-			{
 				p2p.token_listed = 1;
-				if (!p2p.lobby_quit_registered)
-				{
-					p2p.lobby_quit_registered = 1;
-					atexit(lobby_quit);
-				}
-			}
+		}
+		if ((p2p_lobby_listed() || p2p_friends_wanted()) && !p2p.lobby_quit_registered)
+		{
+			p2p.lobby_quit_registered = 1;
+			atexit(lobby_quit);
 		}
 		if (p2p_mm_active())
 		{
@@ -3976,6 +3995,9 @@ static void *p2p_thread(void *unused)
 		if (p2p_party_active())
 			p2p_signal_start();
 		p2p_party_update();
+		if (p2p_friends_wanted())
+			p2p_signal_start();
+		p2p_friends_update();
 		update_joining();
 		update_answering();
 		update_reaching();

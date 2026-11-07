@@ -7,7 +7,7 @@
 
 void matchmaking_update(float seconds);
 void matchmaking_party_name_update(void);
-/* menu_functions.c's */
+boolean matchmaking_screen_shown(void);
 void matchmaking_party_name_utf8(wchar_t const *wide, char *text, short size);
 boolean matchmaking_game_locked(void);
 boolean matchmaking_teams_locked(void);
