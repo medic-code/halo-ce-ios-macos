@@ -2118,8 +2118,8 @@ def _matchmaking() -> list:
                      ['<on event="b" run="port matchmaking back"/>', '<on event="back" run="port matchmaking back"/>',
                       f'<child widget="{base}/header_matchmaking"/>',
                       *(f'<child widget="{base}/party_{key}"/>' for key, *_ in party_texts),
-                      f'<child widget="{base}/party_scroll_up"/>', f'<child widget="{base}/party_scroll_down"/>',
-                      f'<child widget="{base}/options_menu"/>'])
+                      f'<child widget="{base}/options_menu"/>',
+                      f'<child widget="{base}/party_scroll_up"/>', f'<child widget="{base}/party_scroll_down"/>'])
     lines += _header(f"{base}/header_matchmaking", f"{base}/header_matchmaking")
     for key, left, top, width, height, color, align, text in party_texts:
         lines += _widget(f"{base}/party_{key}", [("type", "text"), ("controller", 1), ("left", left), ("top", top),
