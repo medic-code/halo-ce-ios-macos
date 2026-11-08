@@ -6023,7 +6023,8 @@ enum
 	_search_slot_you,
 	_search_slot_matched,
 	_search_slot_looking,
-	_search_slot_you_focused = _search_slot_looking + SEARCH_SLOT_SPINNER_FRAMES
+	_search_slot_you_focused = _search_slot_looking + SEARCH_SLOT_SPINNER_FRAMES,
+	_search_slot_none
 };
 enum
 {
@@ -6983,7 +6984,7 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 		}
 		else if (row->kind == _matchmaking_row_add)
 		{
-			widget->animation.current_frame_index = _search_slot_you;
+			widget->animation.current_frame_index = _search_slot_none;
 			matchmaking_add_row(&friends, text, mark, MATCHMAKING_TEXT_LENGTH);
 		}
 		else if (row->kind == _matchmaking_row_member)

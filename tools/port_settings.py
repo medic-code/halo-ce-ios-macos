@@ -2303,7 +2303,7 @@ SEARCH_SLOT_SPINNER_FRAMES = 8
 
 
 def search_slot_frames() -> list:
-    """frames: you, matched, looking with its spinner, then you on the focus bar (menu_functions.c's _search_slot_*)"""
+    """frames: you, matched, looking with its spinner, then you on the focus bar, then none (menu_functions.c's _search_slot_*)"""
     width, height = SEARCH_SLOT_SIZE
 
     def slot(mark):
@@ -2323,7 +2323,7 @@ def search_slot_frames() -> list:
            'stroke="#2299ff" stroke-width="1"/>\n')
     return ([slot(you), slot('  <rect x="6" y="4" width="10" height="10" fill="#2896ff"/>\n')] +
             [slot(spinner(turn)) for turn in range(SEARCH_SLOT_SPINNER_FRAMES)] +
-            [slot(bar + you)])
+            [slot(bar + you), slot('')])
 
 
 def _search_slots(base: str) -> tuple:
