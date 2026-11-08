@@ -201,8 +201,7 @@ SCREENS = {
     "network_setup": {
         "screen": "network_settings_screen",
         "header": ("header_profile_network_settings", f"{PE}/network_setup/header_profile_network_settings"),
-        # a 28px step and the help below the desktop's tenth place, as Video
-        # Setup's
+        # 28px rows and the help moved down to fit a tenth row, as Video Setup's
         "spacing": 28, "help_top": 358, "help_height": 54,
         # (the router, the clipboard and the updates, which the web build
         # has not: the other rows from the top there)
@@ -218,7 +217,6 @@ SCREENS = {
              "Join the game of an invite link copied before\nswitching to the game.", "desktop android"),
             ("CHECK FOR UPDATES:", "update.auto", ON_OFF,
              "Look for a new version when the game starts.", "desktop android"),
-            # (port/linux/game/network_ping_limit.c)
             ("HOST PING LIMIT:", "network.host_ping_limit",
              [("OFF", "0")] + [(f"{ms} MS", str(ms)) for ms in HOST_PING_LIMITS],
              "Hosting: kick internet players whose ping to you\nstays above this in your lobby.", None),

@@ -1,6 +1,4 @@
-"""The host's ping limit (network.host_ping_limit, network_ping_limit.c): a machine's median round trip over the limit,
-taken once a second from the internet play tunnel, in the lobby and in a machine's first seconds in a game, and never
-for a machine the tunnel does not reach or one downloading the maps."""
+"""The host's ping limit (network.host_ping_limit, network_ping_limit.c), without assets."""
 
 import sys
 from pathlib import Path
@@ -17,7 +15,6 @@ CASES = ["median", "spike", "threshold", "off", "kicked-at-third-second", "stays
 FUNCTIONS = ("ping_limit_median", "ping_limit_over", "ping_limit_tunnel_ping", "network_ping_limit_machine_joined",
              "network_ping_limit_check")
 
-# a fault in the code, the function it is in, and the case that must catch it
 NEGATIVE_CONTROLS = {
     "upper-median": (("return sorted[(count - 1) / 2];", "return sorted[count / 2];"), "ping_limit_median", "median"),
     "two-samples-judged": (("count < PING_LIMIT_MINIMUM_SAMPLES)", "count < 2)"), "ping_limit_median", "median"),
@@ -69,14 +66,11 @@ def test_negative_control(control):
 
 
 def test_off_by_default():
-    # a departure from the stock game: no limit unless the host sets one (port_config.c)
     config = read("port/linux/src/port_config.c")
     assert '{ "network.host_ping_limit", _config_integer, "0", "HALO_NET_HOST_PING_LIMIT"' in config
 
 
 def test_host_kicks_remote_machines_rejoinable():
-    # the host's server judges only joined machines not its own, in the lobby until the start is sent, and kicks as
-    # the host's kick does (the machine may join again); a new machine at a slot starts with no round trips
     server = read("source/networking/network_server_manager.c")
     loop = function(server, "network_game_server_handle_client_machines")
     guard = loop[:loop.index("network_ping_limit_check(")]

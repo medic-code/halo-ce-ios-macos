@@ -1,13 +1,9 @@
 /*
 PING_LIMIT.C (test)
 
-The host's ping limit (network.host_ping_limit,
-port/linux/game/network_ping_limit.c): the median of a machine's latest
-round trips judged against the limit, one taken a second from the internet
-play tunnel, in the lobby and a machine's first seconds in a game, and none
-for a machine the tunnel does not reach or one downloading the maps.
-test_ping_limit.py takes the constants, the structure and the code
-(under_test.inc).
+The real rules of port/linux/game/network_ping_limit.c.
+test_ping_limit.py takes the constants, the structure (config.inc) and the
+code (under_test.inc).
 */
 
 #include "harness.h"
@@ -17,8 +13,6 @@ test_ping_limit.py takes the constants, the structure and the code
 
 #include "config.inc"
 
-/* the fake world: the clock, the setting, the tunnel's one peer (its address
-in network byte order, its round trip), the maps downloading */
 static unsigned long now_milliseconds = 100000;
 static long limit_setting;
 static unsigned long peer_network_address;
@@ -51,8 +45,8 @@ static int p2p_peer_ping(
 
 #include "under_test.inc"
 
-/* 100.64.0.7, as the host has a peer's stand-in (host byte order) and as
-the tunnel names it (network byte order) */
+/* an internet play stand-in (100.64.0.7) and a LAN address, in host and
+network byte order */
 #define PEER_ADDRESS 0x64400007UL
 #define PEER_NETWORK_ADDRESS 0x07004064UL
 #define LAN_ADDRESS 0xC0A80105UL
@@ -71,8 +65,6 @@ static long median_of(
 	return ping_limit_median(samples, count);
 }
 
-/* the machine at slot 1 checked once a second from its join, for that many
-seconds: the second it was kicked (counted from 0), NONE if never */
 static long kicked_after(
 	unsigned long address,
 	boolean lobby,
@@ -158,7 +150,6 @@ int main(int argc, char **argv)
 	}
 	else if (!strcmp(case_name, "lan-exempt"))
 	{
-		/* (a tunnel that would answer for the LAN address: it is not asked) */
 		limit_setting = 100;
 		peer_ping = 200;
 		peer_network_address = LAN_NETWORK_ADDRESS;

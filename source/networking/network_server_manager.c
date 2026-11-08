@@ -834,7 +834,7 @@ void network_afk_machine_joined(long machine_index);
 boolean network_votekick_kept_out(unsigned long address, char const *hardware_id);
 /* port/linux/game/network_voice.c's (voice chat: each machine's key) */
 void network_voice_machine_joined(long machine_index);
-/* port/linux/game/network_ping_limit.c's (the host's ping limit) */
+/* port/linux/game/network_ping_limit.c's */
 void network_ping_limit_machine_joined(long machine_index);
 long network_ping_limit_check(long machine_index, unsigned long address, boolean lobby, unsigned long joined);
 void network_ping_limit_kicked(char const *names, long ping);
@@ -2408,7 +2408,6 @@ address, real address or hardware id) */
 				network_afk_machine_joined(machine_index);
 				/* (and its voice chat key) */
 				network_voice_machine_joined(machine_index);
-				/* (and its round trips for the ping limit) */
 				network_ping_limit_machine_joined(machine_index);
 			}
 			else
@@ -5078,9 +5077,7 @@ static boolean network_game_server_handle_client_machines(
 				}
 			}
 
-			/* port: one whose ping is over the host's limit
-			(network_ping_limit.c) in the lobby, or in its first seconds in a
-			game, kicked */
+			/* port: the host's ping limit (network_ping_limit.c) */
 			if (VALID_INDEX(client_machine->machine_index, MAXIMUM_NETWORK_MACHINE_COUNT) &&
 				network_game_server_kick_pending[client_machine->machine_index] == _kick_none &&
 				network_game_server_client_machine_is_joined_to_game(server, client_machine) &&

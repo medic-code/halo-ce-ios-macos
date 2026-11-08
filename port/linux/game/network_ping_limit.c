@@ -2,25 +2,17 @@
 NETWORK_PING_LIMIT.C
 
 The host's ping limit (network.host_ping_limit): a client machine whose
-round trip to the host stays above it is kicked, as the host's kick does
-(network_server_manager.c), and may join again. The round trip is the
-internet play tunnel's (p2p.c), which pings each peer once a second, as the
-server browser's PING column times a host. The host takes one a second and
-judges the median of the latest PING_LIMIT_SAMPLES once it has
-PING_LIMIT_MINIMUM_SAMPLES, so that one slow ping kicks no one.
+internet play tunnel round trip (p2p.c) stays above it is kicked, free to
+join again. The median of several round trips is judged, so that one slow
+ping kicks no one.
 
-- A machine is judged in the lobby, and in its first
-  PING_LIMIT_ADMISSION_MILLISECONDS in a game it joined in progress; never
-  later in a game, where a kick would take a player out of a match it is
-  playing.
-- Never the host's own machine (its split screen's players), nor a machine
-  the tunnel does not reach: a system link (LAN) machine has no round trip
-  timed, so no limit.
+- Judged in the lobby and in a machine's first seconds in a game it joined
+  in progress, never later: a kick would take a player out of a match.
+- A system link (LAN) machine has no round trip timed, so no limit.
 - Not while the machine downloads the game's maps (map_share.c), whose
   pieces fill its tunnel and so its round trip.
-- The machine is told what a kick tells it (_rejection_code_blacklisted_machine),
-  as a reason of its own would change what the machines send; the host's
-  notice says why, as a kick's does.
+- The machine is told what a kick tells it (_rejection_code_blacklisted_machine):
+  a reason of its own would change what the machines send.
 */
 
 #include "cseries.h"
@@ -42,11 +34,9 @@ void console_warning(const char *format, ...);
 enum
 {
 	MAXIMUM_PING_LIMIT_MACHINES = HALO_PORT_MAXIMUM_NETWORK_MACHINES,
-	/* the round trips judged, the fewest judged, and how often one is taken */
 	PING_LIMIT_SAMPLES = 5,
 	PING_LIMIT_MINIMUM_SAMPLES = 3,
 	PING_LIMIT_SAMPLE_MILLISECONDS = 1000,
-	/* a machine that joined a game in progress is judged this long */
 	PING_LIMIT_ADMISSION_MILLISECONDS = 10000,
 	/* internet play's stand-in addresses, 100.64.0.0/10 (host byte order) */
 	PING_LIMIT_INTERNET_MASK = 0xFFC00000,
@@ -55,8 +45,6 @@ enum
 
 /* ---------- structures */
 
-/* a machine slot's latest round trips (milliseconds), how many were taken,
-and when one was last taken */
 struct ping_limit_machine
 {
 	long samples[PING_LIMIT_SAMPLES];
@@ -70,8 +58,6 @@ static struct ping_limit_machine ping_limit_machines[MAXIMUM_PING_LIMIT_MACHINES
 
 /* ---------- the decision (pure: tools/harness/tests/ping_limit.c) */
 
-/* the median of the round trips (the lower of the middle two of an even
-count), NONE for fewer than PING_LIMIT_MINIMUM_SAMPLES */
 static long ping_limit_median(
 	long const *samples,
 	long count)
@@ -95,8 +81,6 @@ static long ping_limit_median(
 	return sorted[(count - 1) / 2];
 }
 
-/* whether a median round trip (NONE: too few) is over the limit
-(milliseconds; 0 or less: none) */
 static boolean ping_limit_over(
 	long limit,
 	long median)
@@ -104,8 +88,7 @@ static boolean ping_limit_over(
 	return limit > 0 && median != NONE && median > limit;
 }
 
-/* the tunnel's round trip to the machine of the address (host byte order),
-NONE for none: not an internet play peer's, or not timed yet */
+/* address: host byte order; the tunnel names peers in network byte order */
 static long ping_limit_tunnel_ping(
 	unsigned long address)
 {
@@ -125,8 +108,6 @@ static long ping_limit_tunnel_ping(
 
 /* ---------- public code */
 
-/* (network_server_manager.c) a machine joined the host at the slot: none of
-the round trips of the machine before are its */
 void network_ping_limit_machine_joined(
 	long machine_index)
 {
@@ -136,10 +117,6 @@ void network_ping_limit_machine_joined(
 	ping_limit_machines[machine_index].sampled_at = 0;
 }
 
-/* (network_server_manager.c, the host, as it looks at a client machine not
-its own) the median round trip, if it is over network.host_ping_limit and
-the machine is to be kicked; else NONE. lobby: the game not started;
-joined: the milliseconds since the machine joined */
 long network_ping_limit_check(
 	long machine_index,
 	unsigned long address,
@@ -176,10 +153,6 @@ long network_ping_limit_check(
 	return median;
 }
 
-/* (network_server_manager.c) the limit kicked the machine of these players
-(empty: it had none yet) at this round trip: said as network_distributed_kick
-says a kick, on every machine's console while the game's clock runs, else on
-the host's */
 void network_ping_limit_kicked(
 	char const *names,
 	long ping)
