@@ -5712,17 +5712,14 @@ static short matchmaking_party_find(const struct p2p_party_status *party, short 
 	return index;
 }
 
-static unsigned matchmaking_party_bar(const struct p2p_party_status *party, short asking)
+static unsigned matchmaking_party_bar(const struct p2p_party_status *party, short asking, boolean has_add_row)
 {
-	short slot;
-
 	if (asking != _matchmaking_ask_none)
 		return MATCHMAKING_BAR(yes) | MATCHMAKING_BAR(no);
 	if (matchmaking_party_member(party))
 		return MATCHMAKING_BAR(leave) | MATCHMAKING_BAR(cancel);
-	for (slot = 0; slot < P2P_PARTY_MAXIMUM; slot++)
-		if (matchmaking_screen.slots[slot].kind == _matchmaking_row_add)
-			return MATCHMAKING_BAR(add_friend) | MATCHMAKING_BAR(invite) | MATCHMAKING_BAR(search) | MATCHMAKING_BAR(cancel);
+	if (has_add_row)
+		return MATCHMAKING_BAR(add_friend) | MATCHMAKING_BAR(invite) | MATCHMAKING_BAR(search) | MATCHMAKING_BAR(cancel);
 	return MATCHMAKING_BAR(defaults) | MATCHMAKING_BAR(invite) | MATCHMAKING_BAR(search) | MATCHMAKING_BAR(cancel);
 }
 
@@ -6558,7 +6555,10 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 		if (row->kind == _matchmaking_row_heading)
 			heading = slot;
 	}
-	buttons = matchmaking_party_bar(party, matchmaking_screen.asking);
+	for (slot = 0; slot < P2P_PARTY_MAXIMUM; slot++)
+		if (matchmaking_screen.slots[slot].kind == _matchmaking_row_add)
+			break;
+	buttons = matchmaking_party_bar(party, matchmaking_screen.asking, slot < P2P_PARTY_MAXIMUM);
 	if (rows && place != NONE)
 		focused_row = &matchmaking_screen.slots[place];
 	view.asking = matchmaking_screen.asking;

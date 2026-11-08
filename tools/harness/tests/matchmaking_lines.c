@@ -242,7 +242,7 @@ int main(int argc, char **argv)
 		CHECK(!wcscmp(read_out(help), L"Chief searches for you. You join Chief's team."),
 			"help: %ls", help);
 		CHECK(!wcscmp(read_out(line), L"Waiting for Chief to search."), "line: %ls", line);
-		CHECK(matchmaking_party_bar(&party, _matchmaking_ask_none) == (MATCHMAKING_BAR(leave) | MATCHMAKING_BAR(cancel)),
+		CHECK(matchmaking_party_bar(&party, _matchmaking_ask_none, FALSE) == (MATCHMAKING_BAR(leave) | MATCHMAKING_BAR(cancel)),
 			"the bar: LEAVE PARTY and CANCEL");
 		CHECK(!wcscmp(matchmaking_party_mark(&party, &view, 0), L"LEADER"), "Chief's mark");
 		CHECK(!wcscmp(matchmaking_party_mark(&party, &view, 1), L"YOU"), "Rook's mark");
@@ -250,7 +250,7 @@ int main(int argc, char **argv)
 		view.asking = _matchmaking_ask_leave;
 		matchmaking_party_words(&party, &view, help, line, 128);
 		CHECK(!wcscmp(help, L"Leave Chief's party?"), "E61: %ls", help);
-		CHECK(matchmaking_party_bar(&party, view.asking) == (MATCHMAKING_BAR(yes) | MATCHMAKING_BAR(no)), "E61: YES and NO");
+		CHECK(matchmaking_party_bar(&party, view.asking, FALSE) == (MATCHMAKING_BAR(yes) | MATCHMAKING_BAR(no)), "E61: YES and NO");
 	}
 	CASE("member_queue")
 	{
@@ -321,7 +321,7 @@ int main(int argc, char **argv)
 		matchmaking_party_words(&party, &view, help, line, 128);
 		CHECK(!wcscmp(read_out(help), L"A party of 3 plays 3V3 or larger: 1V1 and 2V2 are skipped."), "the size's help: %ls", help);
 		CHECK(!line[0], "no line before INVITE: %ls", line);
-		CHECK(matchmaking_party_bar(&party, _matchmaking_ask_none) == (MATCHMAKING_BAR(defaults) | MATCHMAKING_BAR(invite) |
+		CHECK(matchmaking_party_bar(&party, _matchmaking_ask_none, FALSE) == (MATCHMAKING_BAR(defaults) | MATCHMAKING_BAR(invite) |
 			MATCHMAKING_BAR(search) | MATCHMAKING_BAR(cancel)), "the leader's bar");
 		party = party_of(0, 2);
 		matchmaking_party_words(&party, &view, help, line, 128);
@@ -340,7 +340,7 @@ int main(int argc, char **argv)
 		matchmaking_party_words(&party, &view, help, line, 128);
 		CHECK(!wcscmp(read_out(help), L"Remove Kat from the party?"), "asking: %ls", help);
 		CHECK(!wcscmp(matchmaking_party_mark(&party, &view, 2), L"REMOVE?"), "asking: the tag");
-		CHECK(matchmaking_party_bar(&party, view.asking) == (MATCHMAKING_BAR(yes) | MATCHMAKING_BAR(no)), "asking: YES and NO");
+		CHECK(matchmaking_party_bar(&party, view.asking, FALSE) == (MATCHMAKING_BAR(yes) | MATCHMAKING_BAR(no)), "asking: YES and NO");
 		{
 			struct p2p_party_status alone = party_of(1, 1);
 			struct matchmaking_party_view view = { _matchmaking_ask_none, NONE, FALSE, FALSE };
@@ -560,6 +560,8 @@ int main(int argc, char **argv)
 		party.search_state = P2P_MM_QUEUED;
 		CHECK(matchmaking_rows_layout(&party, &friends, rows) == 2, "searching: no ADD FRIEND");
 
+		CHECK(matchmaking_party_bar(&party, _matchmaking_ask_none, TRUE) == (MATCHMAKING_BAR(add_friend) | MATCHMAKING_BAR(invite) |
+			MATCHMAKING_BAR(search) | MATCHMAKING_BAR(cancel)), "E2: bar with ADD FRIEND row");
 		matchmaking_add_row(&friends, name, mark, 32);
 		CHECK(!wcscmp(name, L"ADD FRIEND") && !mark[0], "the row: %ls %ls", name, mark);
 		friends.sent = 1;
