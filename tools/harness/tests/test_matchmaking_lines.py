@@ -46,7 +46,7 @@ NEGATIVE_CONTROLS = {
     "unreadable-key-says-you-are": (("if (friends->on && friends->me[0])", "if (friends->me[0])"), "friends_line"),
     "unsaved-unsaid": (("if (friends->on && friends->unsaved)", "if (0)"), "friends_line"),
     "unmade-key-says-unreadable": (("friends->key_unmade ?", "0 ?"), "friends_line"),
-    "focused-addable-says-remove": (("addable ? L\"A ADD FRIEND\" : L\"X REMOVE\"", "L\"X REMOVE\""), "friend_rows"),
+    "focused-addable-says-remove": (("addable ? L\"A ADD FRIEND\" :\n\t\t\tmatchmaking_party_member(party) ? L\"\" : L\"X REMOVE\"", "matchmaking_party_member(party) ? L\"\" : L\"X REMOVE\""), "friend_rows"),
     "own-tag-unsaid": (("case P2P_FRIEND_ADD_SELF:", "case 98:"), "add_friend"),
     "add-friend-for-a-friend": (("!party->members[index].friend &&", ""), "friend_rows"),
     "add-friend-without-a-key": (("memcmp(party->members[index].friend_key, no_key, sizeof(no_key))", "1"), "friend_rows"),
