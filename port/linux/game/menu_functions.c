@@ -6399,15 +6399,20 @@ static boolean matchmaking_row_right(struct widget_instance *row, struct event_r
 	static char const *const spinners[] =
 		{ "size_spinner", "playlist_spinner", "ping_spinner", "region_spinner" };
 	struct widget_instance *spinner = NULL;
+	struct p2p_party_status party;
+	boolean locked;
 	short index;
 
 	for (index = 0; !spinner && index < (short)NUMBEROF(spinners); index++)
 		spinner = named(row, spinners[index], 0);
 	ui_play_audio_feedback_sound(SOUND_CURSOR);
+	p2p_party_get_status(&party);
+	locked = matchmaking_rows_locked(&party);
 	for (index = 1; index < P2P_PARTY_MAXIMUM && !ui_widget_port_pointer_focused(); index++)
 	{
 		if (matchmaking_screen.slots[index].kind != _matchmaking_row_none &&
-			matchmaking_screen.slots[index].kind != _matchmaking_row_heading)
+			matchmaking_screen.slots[index].kind != _matchmaking_row_heading &&
+			!(locked && matchmaking_screen.slots[index].kind == _matchmaking_row_member))
 		{
 			focus_row(row->parent, MATCHMAKING_ROWS + index);
 			return TRUE;
@@ -6611,18 +6616,12 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 	}
 	{
 		struct widget_instance *title = named(screen, "party_friends_title", 0);
-		struct widget_instance *count = named(screen, "party_friends_count", 0);
 
 		visible_set(title, heading != NONE);
-		visible_set(count, heading != NONE);
 		visible_set(named(screen, "party_scroll_up", 0), matchmaking_screen.scroll > 0);
 		visible_set(named(screen, "party_scroll_down", 0), matchmaking_screen.scroll + P2P_PARTY_MAXIMUM < total);
 		if (heading != NONE)
-		{
-			title->vertical_offset = count->vertical_offset = (short)(20 + 21 * heading);
-			usnprintf(text, MATCHMAKING_TEXT_LENGTH - 1, friends.online_count ? L"%d" : L"", friends.online_count);
-			text_set_length(count, text, MATCHMAKING_TEXT_LENGTH);
-		}
+			title->vertical_offset = (short)(20 + 21 * heading);
 	}
 	matchmaking_party_words(party, &view, help, line, MATCHMAKING_TEXT_LENGTH);
 	if (matchmaking_screen.asking == _matchmaking_ask_friend_invite && pending)
@@ -7316,7 +7315,7 @@ menu_tags.c's pause_patch): the game ends as its time limit would, its
 players staying for the next (the carnage report, then the host's PICK GAME) */
 static boolean pause_end_game(void)
 {
-	if (!global_network_game_server_get() || !game_engine_running())
+	if (!global_network_game_server_get() || !game_engine_running() || matchmaking_game_locked())
 		return campaign_fail();
 	game_engine_end_game();
 	return TRUE;
