@@ -5783,7 +5783,7 @@ static short matchmaking_rows_layout(const struct p2p_party_status *party, const
 	boolean adding = matchmaking_adding(party, friends);
 
 	if (adding)
-		online = (short)friends->online_count;
+		online = (short)friends->row_count;
 	memset(rows, 0, sizeof(*rows) * MATCHMAKING_ROW_LIMIT);
 	for (index = 0; index < members; index++, total++)
 	{
@@ -5802,7 +5802,7 @@ static short matchmaking_rows_layout(const struct p2p_party_status *party, const
 	{
 		rows[total].kind = _matchmaking_row_friend;
 		rows[total].index = index;
-		strcpy(rows[total].id, friends->online[index].id);
+		strcpy(rows[total].id, friends->rows[index].id);
 	}
 	return total;
 }
@@ -6503,7 +6503,7 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 		matchmaking_screen.added_row = index;
 	}
 	asked_request = matchmaking_friend_find(friends.requests, friends.request_count, matchmaking_screen.asked_id);
-	asked_friend = matchmaking_friend_find(friends.online, friends.online_count, matchmaking_screen.asked_id);
+	asked_friend = matchmaking_friend_find(friends.rows, friends.row_count, matchmaking_screen.asked_id);
 	pending = p2p_friend_invite_pending(invite, sizeof(invite));
 	if ((matchmaking_screen.asking == _matchmaking_ask_friend_request && !asked_request) ||
 		(matchmaking_screen.asking == _matchmaking_ask_friend_remove && !asked_friend) ||
@@ -6553,7 +6553,7 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 	if (focused_row && focused_row->kind == _matchmaking_row_request)
 		focused_request = &friends.requests[focused_row->index];
 	if (focused_row && focused_row->kind == _matchmaking_row_friend)
-		focused_friend = &friends.online[focused_row->index];
+		focused_friend = &friends.rows[focused_row->index];
 	if (index != matchmaking_screen.added_row && !matchmaking_screen.asking && matchmaking_screen.added != P2P_FRIEND_ADD_LOOKING)
 		matchmaking_screen.added = P2P_FRIEND_ADD_SENT;
 	view.size_focused = size_focused;
@@ -6584,7 +6584,7 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 		else if (row->kind == _matchmaking_row_friend)
 		{
 			widget->animation.current_frame_index = _search_slot_you;
-			matchmaking_friend_row(&friends.online[row->index], focused_friend == &friends.online[row->index],
+			matchmaking_friend_row(&friends.rows[row->index], focused_friend == &friends.rows[row->index],
 				!strcmp(row->id, matchmaking_screen.invited_id) && system_milliseconds() - matchmaking_screen.invited_at < MATCHMAKING_INVITED_MILLISECONDS,
 				text, mark, MATCHMAKING_TEXT_LENGTH);
 		}

@@ -466,9 +466,9 @@ int main(int argc, char **argv)
 
 		memset(&friends, 0, sizeof(friends));
 		friends.on = 1;
-		friends.online_count = 5;
-		strcpy(friends.online[0].id, "0000000000000001");
-		strcpy(friends.online[3].id, "0000000000000004");
+		friends.row_count = 5;
+		strcpy(friends.rows[0].id, "0000000000000001");
+		strcpy(friends.rows[3].id, "0000000000000004");
 		total = matchmaking_rows_layout(&party, &friends, rows);
 		CHECK(total == 12, "E10: 6 members, the heading and 5 friends: %d", total);
 		CHECK(rows[5].kind == _matchmaking_row_member && rows[5].index == 5, "the last member");
@@ -483,7 +483,7 @@ int main(int argc, char **argv)
 		CHECK(matchmaking_scroll(rows, total, 0, -1) == 0, "no row above the first");
 		CHECK(matchmaking_scroll(rows, total, 2, -1) == 1, "a step up scrolls one row");
 
-		friends.online_count = 0;
+		friends.row_count = 0;
 		total = matchmaking_rows_layout(&party, &friends, rows);
 		CHECK(total == 6, "no friends, no requests: no heading: %d", total);
 		friends.request_count = 2;
@@ -492,7 +492,7 @@ int main(int argc, char **argv)
 		CHECK(total == 5 && rows[2].kind == _matchmaking_row_heading && rows[3].kind == _matchmaking_row_request,
 			"requests under the heading: %d", total);
 		friends.request_count = 0;
-		friends.online_count = 4;
+		friends.row_count = 4;
 		party.search_state = P2P_MM_QUEUED;
 		CHECK(matchmaking_rows_layout(&party, &friends, rows) == 2, "searching: no friend rows");
 		party.search_state = P2P_MM_OFF;
@@ -510,7 +510,7 @@ int main(int argc, char **argv)
 		friends.request_count = 0;
 
 		party = party_of(0, 7);
-		friends.online_count = 5;
+		friends.row_count = 5;
 		total = matchmaking_rows_layout(&party, &friends, rows);
 		CHECK(total == 13 && rows[7].kind == _matchmaking_row_heading, "7 members: the heading is row 7");
 		CHECK(matchmaking_scroll(rows, total, 0, 0) == 1, "the heading leaves the bottom slot: %d",
@@ -519,7 +519,7 @@ int main(int argc, char **argv)
 		CHECK(scroll == 1, "a step up from member 1 has no good place to go: %d", scroll);
 		CHECK(matchmaking_scroll(rows, total, scroll, 0) == 1, "and the next frame holds: %d", matchmaking_scroll(rows, total, scroll, 0));
 		party = party_of(0, 0);
-		friends.online_count = 12;
+		friends.row_count = 12;
 		total = matchmaking_rows_layout(&party, &friends, rows);
 		CHECK(total == 14 && rows[1].kind == _matchmaking_row_heading, "alone: the heading is row 1");
 		scroll = matchmaking_scroll(rows, total, 0, 1);
@@ -538,11 +538,11 @@ int main(int argc, char **argv)
 		memset(&friends, 0, sizeof(friends));
 		friends.on = 1;
 		friends.request_count = 1;
-		friends.online_count = 2;
+		friends.row_count = 2;
 		total = matchmaking_rows_layout(&party, &friends, rows);
 		CHECK(total == 6 && rows[5].kind == _matchmaking_row_friend, "E2: the friends end the list, no ADD FRIEND row: %d", total);
 		party = party_of(0, 0);
-		friends.request_count = friends.online_count = 0;
+		friends.request_count = friends.row_count = 0;
 		total = matchmaking_rows_layout(&party, &friends, rows);
 		CHECK(total == 1, "alone, no friends: no heading: %d", total);
 		party = party_of(1, 3);

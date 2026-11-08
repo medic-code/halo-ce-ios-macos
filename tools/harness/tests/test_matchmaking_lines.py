@@ -70,7 +70,7 @@ NEGATIVE_CONTROLS = {
     "lookup-unsaid": (("case P2P_FRIEND_ADD_LOOKING:", "case 98:"), "add_friend"),
     "request-sent-unsaid": (("case MATCHMAKING_REQUEST_SENT:", "case 97:"), "add_friend"),
     "heading-without-rows": (("if (requests || online)", "if (1)"), "friend_layout"),
-    "friend-id-lost": (("strcpy(rows[total].id, friends->online[index].id);", ""), "friend_layout"),
+    "friend-id-lost": (("strcpy(rows[total].id, friends->rows[index].id);", ""), "friend_layout"),
     "heading-on-the-bottom-slot": (("(scroll < last && rows[scroll + P2P_PARTY_MAXIMUM - 1].kind == _matchmaking_row_heading)", "0"), "friend_layout"),
     "heading-on-the-top-slot": (("(scroll > 0 && rows[scroll].kind == _matchmaking_row_heading) ||", ""), "friend_layout"),
     "scroll-past-the-end": (("PIN(scroll + step, 0, last)", "MAX(scroll + step, 0)"), "friend_layout"),

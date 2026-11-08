@@ -573,8 +573,9 @@ struct p2p_friends_status
 	int reached;
 	int request_count;
 	struct p2p_friend_row requests[P2P_FRIEND_REQUESTS_SHOWN];
-	int online_count;
-	struct p2p_friend_row online[P2P_FRIENDS_MAXIMUM];
+	/* the online friends first, then the offline ones, each by name */
+	int online_count, row_count;
+	struct p2p_friend_row rows[P2P_FRIENDS_MAXIMUM];
 	int sent;
 	int looking, lookup_result;
 };

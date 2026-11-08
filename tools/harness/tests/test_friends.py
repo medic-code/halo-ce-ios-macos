@@ -158,9 +158,8 @@ NEGATIVE_CONTROLS = {
     "removed-friend-saved-back": (("if (friend_removed(saved[index].key))\n\t\t\tcontinue;", ""),
                                   "remove"),
     "only-the-last-removal-held": (("memcpy(friends.removed[friends.removed_count - 1]", "memcpy(friends.removed[0]"), "remove_twice"),
-    "party-members-listed-twice": (("if (!friend->heard || member < party.count)", "if (!friend->heard)"), "online_rows"),
-    "rows-unsorted": (("for (place = status->online_count; place > 0 && friend_name_before(friend->name_tag,\n\t\t\tstatus->online[place - 1].name_tag); place--)",
-                       "for (place = status->online_count; place > 0 && 0; place--)"), "online_rows"),
+    "party-members-listed-twice": (("!friend->heard != !heard || member < party.count)", "!friend->heard != !heard)"), "online_rows"),
+    "rows-unsorted": (("place > first && friend_name_before(", "place > first && 0 && friend_name_before("), "online_rows"),
     "action-by-position": (("if (!strcmp(friends.list[index].id, id))\n\t\t\treturn index;", "if (index == 1)\n\t\t\treturn index;"), "by_id"),
 }
 
