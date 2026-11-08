@@ -6680,7 +6680,10 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 		}
 	}
 	text_set_length(named(screen, "party_line", 0), line, MATCHMAKING_TEXT_LENGTH);
-	usnprintf(text, MATCHMAKING_TEXT_LENGTH - 1, L"%d", shown);
+	if (shown > 1)
+		usnprintf(text, MATCHMAKING_TEXT_LENGTH - 1, L"%d", shown);
+	else
+		text[0] = 0;
 	text_set_length(named(screen, "party_count", 0), text, MATCHMAKING_TEXT_LENGTH);
 	matchmaking_party_notice(party, 0, text, MATCHMAKING_TEXT_LENGTH);
 	text_set_length(named(screen, "party_notice", 0), text, MATCHMAKING_TEXT_LENGTH);
