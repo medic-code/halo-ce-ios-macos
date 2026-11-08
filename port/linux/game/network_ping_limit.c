@@ -48,8 +48,6 @@ enum
 	PING_LIMIT_SAMPLE_MILLISECONDS = 1000,
 	/* a machine that joined a game in progress is judged this long */
 	PING_LIMIT_ADMISSION_MILLISECONDS = 10000,
-	/* the longest round trip kept */
-	MAXIMUM_PING_LIMIT_MILLISECONDS = 9999,
 	/* internet play's stand-in addresses, 100.64.0.0/10 (host byte order) */
 	PING_LIMIT_INTERNET_MASK = 0xFFC00000,
 	PING_LIMIT_INTERNET_ADDRESS = 0x64400000,
@@ -57,13 +55,12 @@ enum
 
 /* ---------- structures */
 
-/* a machine slot's latest round trips (milliseconds), the next one's
-place, and when one was last taken */
+/* a machine slot's latest round trips (milliseconds), how many were taken,
+and when one was last taken */
 struct ping_limit_machine
 {
-	short samples[PING_LIMIT_SAMPLES];
-	short count;
-	short next;
+	long samples[PING_LIMIT_SAMPLES];
+	unsigned long taken;
 	unsigned long sampled_at;
 };
 
@@ -76,17 +73,17 @@ static struct ping_limit_machine ping_limit_machines[MAXIMUM_PING_LIMIT_MACHINES
 /* the median of the round trips (the lower of the middle two of an even
 count), NONE for fewer than PING_LIMIT_MINIMUM_SAMPLES */
 static long ping_limit_median(
-	short const *samples,
-	short count)
+	long const *samples,
+	long count)
 {
-	short sorted[PING_LIMIT_SAMPLES];
-	short index;
+	long sorted[PING_LIMIT_SAMPLES];
+	long index;
 
-	if (count < PING_LIMIT_MINIMUM_SAMPLES || count > PING_LIMIT_SAMPLES)
+	if (count < PING_LIMIT_MINIMUM_SAMPLES)
 		return NONE;
 	for (index = 0; index < count; index++)
 	{
-		short place = index;
+		long place = index;
 
 		while (place > 0 && sorted[place - 1] > samples[index])
 		{
@@ -98,15 +95,12 @@ static long ping_limit_median(
 	return sorted[(count - 1) / 2];
 }
 
-/* whether the round trips put a machine over the limit (milliseconds; 0 or
-less: none) */
+/* whether a median round trip (NONE: too few) is over the limit
+(milliseconds; 0 or less: none) */
 static boolean ping_limit_over(
 	long limit,
-	short const *samples,
-	short count)
+	long median)
 {
-	long median = ping_limit_median(samples, count);
-
 	return limit > 0 && median != NONE && median > limit;
 }
 
@@ -138,8 +132,7 @@ void network_ping_limit_machine_joined(
 {
 	if (machine_index < 0 || machine_index >= MAXIMUM_PING_LIMIT_MACHINES)
 		return;
-	ping_limit_machines[machine_index].count = 0;
-	ping_limit_machines[machine_index].next = 0;
+	ping_limit_machines[machine_index].taken = 0;
 	ping_limit_machines[machine_index].sampled_at = 0;
 }
 
@@ -153,38 +146,33 @@ long network_ping_limit_check(
 	boolean lobby,
 	unsigned long joined)
 {
+	struct ping_limit_machine *machine;
 	unsigned long now = system_milliseconds();
 	long limit;
 	long ping;
 	long median;
 
-	if (machine_index < 0 || machine_index >= MAXIMUM_PING_LIMIT_MACHINES ||
-		now - ping_limit_machines[machine_index].sampled_at < PING_LIMIT_SAMPLE_MILLISECONDS)
-	{
+	if (machine_index < 0 || machine_index >= MAXIMUM_PING_LIMIT_MACHINES)
 		return NONE;
-	}
-	ping_limit_machines[machine_index].sampled_at = now;
+	machine = &ping_limit_machines[machine_index];
+	if (now - machine->sampled_at < PING_LIMIT_SAMPLE_MILLISECONDS)
+		return NONE;
+	machine->sampled_at = now;
 	limit = config_integer("network.host_ping_limit");
 	if (limit <= 0 || (!lobby && joined > PING_LIMIT_ADMISSION_MILLISECONDS) ||
 		map_share_machine_downloading(machine_index))
 	{
-		ping_limit_machines[machine_index].count = 0;
-		ping_limit_machines[machine_index].next = 0;
+		machine->taken = 0;
 		return NONE;
 	}
 	ping = ping_limit_tunnel_ping(address);
 	if (ping == NONE)
 		return NONE;
-	ping_limit_machines[machine_index].samples[ping_limit_machines[machine_index].next] =
-		(short)MIN(ping, (long)MAXIMUM_PING_LIMIT_MILLISECONDS);
-	ping_limit_machines[machine_index].next = (ping_limit_machines[machine_index].next + 1) % PING_LIMIT_SAMPLES;
-	if (ping_limit_machines[machine_index].count < PING_LIMIT_SAMPLES)
-		ping_limit_machines[machine_index].count++;
-	if (!ping_limit_over(limit, ping_limit_machines[machine_index].samples, ping_limit_machines[machine_index].count))
+	machine->samples[machine->taken++ % PING_LIMIT_SAMPLES] = ping;
+	median = ping_limit_median(machine->samples, (long)MIN(machine->taken, (unsigned long)PING_LIMIT_SAMPLES));
+	if (!ping_limit_over(limit, median))
 		return NONE;
-	median = ping_limit_median(ping_limit_machines[machine_index].samples, ping_limit_machines[machine_index].count);
-	ping_limit_machines[machine_index].count = 0;
-	ping_limit_machines[machine_index].next = 0;
+	machine->taken = 0;
 	return median;
 }
 
@@ -200,7 +188,7 @@ void network_ping_limit_kicked(
 	char notice[160];
 
 	snprintf(notice, sizeof(notice), "%s removed: ping %ld ms, over the host's limit of %ld ms",
-		names && names[0] ? names : "A player's machine", ping, config_integer("network.host_ping_limit"));
+		names[0] ? names : "A player's machine", ping, config_integer("network.host_ping_limit"));
 	if (game_in_progress())
 		distributed_send_notice(notice);
 	else

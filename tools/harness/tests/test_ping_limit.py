@@ -20,11 +20,11 @@ FUNCTIONS = ("ping_limit_median", "ping_limit_over", "ping_limit_tunnel_ping", "
 # a fault in the code, the function it is in, and the case that must catch it
 NEGATIVE_CONTROLS = {
     "upper-median": (("return sorted[(count - 1) / 2];", "return sorted[count / 2];"), "ping_limit_median", "median"),
-    "two-samples-judged": (("count < PING_LIMIT_MINIMUM_SAMPLES ||", "count < 2 ||"), "ping_limit_median", "median"),
+    "two-samples-judged": (("count < PING_LIMIT_MINIMUM_SAMPLES)", "count < 2)"), "ping_limit_median", "median"),
     "at-limit-kicks": (("median > limit", "median >= limit"), "ping_limit_over", "threshold"),
     "off-kicks": (("limit > 0 && ", ""), "ping_limit_over", "off"),
-    "every-call-sampled": (("||\n\t\tnow - ping_limit_machines[machine_index].sampled_at < PING_LIMIT_SAMPLE_MILLISECONDS)",
-                            ")"), "network_ping_limit_check", "once-a-second"),
+    "every-call-sampled": (("\tif (now - machine->sampled_at < PING_LIMIT_SAMPLE_MILLISECONDS)\n\t\treturn NONE;\n", ""),
+                           "network_ping_limit_check", "once-a-second"),
     "host-byte-order": (("network = (address >> 24) | ((address >> 8) & 0xFF00) | ((address << 8) & 0xFF0000) | "
                          "(address << 24);", "network = address;"), "ping_limit_tunnel_ping", "byte-order"),
     "any-address": (("if ((address & PING_LIMIT_INTERNET_MASK) != PING_LIMIT_INTERNET_ADDRESS)\n\t\treturn NONE;\n", ""),
@@ -33,7 +33,7 @@ NEGATIVE_CONTROLS = {
                         "network_ping_limit_check", "late-in-game"),
     "judged-downloading": ((" ||\n\t\tmap_share_machine_downloading(machine_index))", ")"),
                            "network_ping_limit_check", "downloading"),
-    "join-keeps-samples": (("ping_limit_machines[machine_index].count = 0;", ""),
+    "join-keeps-samples": (("ping_limit_machines[machine_index].taken = 0;", ""),
                            "network_ping_limit_machine_joined", "joined-resets"),
 }
 

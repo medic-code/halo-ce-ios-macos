@@ -59,14 +59,14 @@ the tunnel names it (network byte order) */
 #define LAN_NETWORK_ADDRESS 0x0501A8C0UL
 
 static long median_of(
-	short a,
-	short b,
-	short c,
-	short d,
-	short e,
-	short count)
+	long a,
+	long b,
+	long c,
+	long d,
+	long e,
+	long count)
 {
-	short samples[6] = { a, b, c, d, e, 0 };
+	long samples[5] = { a, b, c, d, e };
 
 	return ping_limit_median(samples, count);
 }
@@ -103,30 +103,21 @@ int main(int argc, char **argv)
 		CHECK(median_of(300, 80, 100, 90, 0, 4) == 90, "four: the lower of the middle two");
 		CHECK(median_of(70, 300, 80, 100, 90, 5) == 90, "five");
 		CHECK(median_of(300, 300, 0, 0, 0, 2) == NONE, "two are too few");
-		CHECK(median_of(1, 2, 3, 4, 5, 6) == NONE, "more than are kept");
 	}
 	else if (!strcmp(case_name, "spike"))
 	{
-		short one_spike[5] = { 80, 80, 2000, 80, 80 };
-		short three_slow[5] = { 80, 2000, 80, 2000, 2000 };
-
-		CHECK(!ping_limit_over(150, one_spike, 5), "one slow round trip kicks no one");
-		CHECK(ping_limit_over(150, three_slow, 5), "most of them slow is over");
+		CHECK(!ping_limit_over(150, median_of(80, 80, 2000, 80, 80, 5)), "one slow round trip kicks no one");
+		CHECK(ping_limit_over(150, median_of(80, 2000, 80, 2000, 2000, 5)), "most of them slow is over");
 	}
 	else if (!strcmp(case_name, "threshold"))
 	{
-		short at[3] = { 150, 150, 150 };
-		short above[3] = { 151, 151, 151 };
-
-		CHECK(!ping_limit_over(150, at, 3), "at the limit is not over it");
-		CHECK(ping_limit_over(150, above, 3), "a millisecond above is");
+		CHECK(!ping_limit_over(150, median_of(150, 150, 150, 0, 0, 3)), "at the limit is not over it");
+		CHECK(ping_limit_over(150, median_of(151, 151, 151, 0, 0, 3)), "a millisecond above is");
 	}
 	else if (!strcmp(case_name, "off"))
 	{
-		short slow[5] = { 900, 900, 900, 900, 900 };
-
-		CHECK(!ping_limit_over(0, slow, 5), "0 is off");
-		CHECK(!ping_limit_over(-5, slow, 5), "below 0 is off");
+		CHECK(!ping_limit_over(0, 900), "0 is off");
+		CHECK(!ping_limit_over(-5, 900), "below 0 is off");
 		limit_setting = 0;
 		peer_ping = 900;
 		CHECK(kicked_after(PEER_ADDRESS, TRUE, 30) == NONE, "off in the lobby");
