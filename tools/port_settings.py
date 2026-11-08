@@ -2276,9 +2276,11 @@ def _matchmaking() -> list:
                       f'<child widget="{base}/button_leave" x="341" y="1"/>',
                       '<child widget="common_button_cancel" x="477" y="1"/>',
                       f'<child widget="{base}/button_yes" x="341" y="1"/>',
-                      f'<child widget="{base}/button_no" x="477" y="1"/>'])
+                      f'<child widget="{base}/button_no" x="477" y="1"/>',
+                      f'<child widget="{base}/button_add_friend" x="35" y="1"/>'])
     for key, text, run in (("invite", "COPY LINK", "port matchmaking invite"), ("leave", "LEAVE PARTY", "port matchmaking leave"),
-                           ("yes", "YES", "port matchmaking yes"), ("no", "NO", "port matchmaking no")):
+                           ("yes", "YES", "port matchmaking yes"), ("no", "NO", "port matchmaking no"),
+                           ("add_friend", "ADD FRIEND", "port matchmaking add friend")):
         lines += _text_button(f"{base}/button_{key}", text,
                               [f'<on event="a" run="{run}"/>', f'<on event="start" run="{run}"/>'])
     lines += _button(f"{base}/button_defaults", 3, ['<on event="a" run="port matchmaking defaults"/>',
