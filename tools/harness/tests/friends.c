@@ -1696,8 +1696,8 @@ int main(int argc, char **argv)
 		become(BOB);
 		CHECK(heard(&hello) == FRIEND_HELLO, "Bob hears the hello");
 		status = status_now();
-		CHECK(status.online_count == 1 && status.online[0].state == P2P_FRIEND_MENUS &&
-			!strncmp(status.online[0].name_tag, "Alice#", 6), "Alice is in menus: %d", status.online_count);
+		CHECK(status.online_count == 1 && status.rows[0].state == P2P_FRIEND_MENUS &&
+			!strncmp(status.rows[0].name_tag, "Alice#", 6), "Alice is in menus: %d", status.online_count);
 
 		test_now++;
 		reload(ALICE);
@@ -1733,7 +1733,7 @@ int main(int argc, char **argv)
 		CHECK(presence_count == 2, "once");
 		here = last_presence();
 		become(ALICE);
-		CHECK(heard(&here) == FRIEND_HERE && status_now().online[0].state == P2P_FRIEND_IN_GAME, "in a game");
+		CHECK(heard(&here) == FRIEND_HERE && status_now().rows[0].state == P2P_FRIEND_IN_GAME, "in a game");
 
 		test_now += 89;
 		p2p_friends_update();
@@ -1744,7 +1744,7 @@ int main(int argc, char **argv)
 		CHECK(heard(&here) == FRIEND_DROP_REPLAY, "the old record stays old");
 		bye = presence_at(FRIEND_HERE, BOB, ALICE, P2P_FRIEND_MATCHMAKING, HALO_PORT_NETWORK_VERSION, now_ms() + 5000);
 		become(ALICE);
-		CHECK(heard(&bye) == FRIEND_HERE && status_now().online[0].state == P2P_FRIEND_MATCHMAKING, "a new record");
+		CHECK(heard(&bye) == FRIEND_HERE && status_now().rows[0].state == P2P_FRIEND_MATCHMAKING, "a new record");
 		become(BOB);
 		bye = record_at(FRIEND_BYE, ALICE, now_ms() + 6000, NULL, (const unsigned char *)"", 0);
 		become(ALICE);
@@ -1798,11 +1798,11 @@ int main(int argc, char **argv)
 		become(ALICE);
 		CHECK(heard(&hello) == FRIEND_HELLO, "another version's hello");
 		status = status_now();
-		CHECK(status.online_count == 1 && status.online[0].state == P2P_FRIEND_UPDATE, "UPDATE: %d",
-			status.online[0].state);
+		CHECK(status.online_count == 1 && status.rows[0].state == P2P_FRIEND_UPDATE, "UPDATE: %d",
+			status.rows[0].state);
 		hello = presence_at(FRIEND_HERE, BOB, ALICE, P2P_FRIEND_IN_GAME, HALO_PORT_NETWORK_VERSION, now_ms() + 2000);
 		become(ALICE);
-		CHECK(heard(&hello) == FRIEND_HERE && status_now().online[0].state == P2P_FRIEND_IN_GAME, "this version's here");
+		CHECK(heard(&hello) == FRIEND_HERE && status_now().rows[0].state == P2P_FRIEND_IN_GAME, "this version's here");
 		hello = presence_at(FRIEND_HERE, BOB, ALICE, 0, HALO_PORT_NETWORK_VERSION, now_ms() + 3000);
 		become(ALICE);
 		CHECK(heard(&hello) == FRIEND_DROP_BODY, "a state of 0");
@@ -1817,7 +1817,7 @@ int main(int argc, char **argv)
 		hello = record_at(FRIEND_HERE, ALICE, now_ms() + 6000, NULL, body, 4);
 		become(ALICE);
 		CHECK(heard(&hello) == FRIEND_DROP_BODY, "a long body");
-		CHECK(status_now().online[0].state == P2P_FRIEND_IN_GAME, "and the state stays");
+		CHECK(status_now().rows[0].state == P2P_FRIEND_IN_GAME, "and the state stays");
 	}
 	CASE("two_copies")
 	{
@@ -1828,8 +1828,8 @@ int main(int argc, char **argv)
 		first = presence_at(FRIEND_HERE, BOB, ALICE, P2P_FRIEND_IN_GAME, HALO_PORT_NETWORK_VERSION, now_ms() + 1000);
 		second = presence_at(FRIEND_HERE, BOB, ALICE, P2P_FRIEND_MENUS, HALO_PORT_NETWORK_VERSION, now_ms() + 2000);
 		become(ALICE);
-		CHECK(heard(&second) == FRIEND_HERE && status_now().online[0].state == P2P_FRIEND_MENUS, "the newer");
-		CHECK(heard(&first) == FRIEND_DROP_REPLAY && status_now().online[0].state == P2P_FRIEND_MENUS,
+		CHECK(heard(&second) == FRIEND_HERE && status_now().rows[0].state == P2P_FRIEND_MENUS, "the newer");
+		CHECK(heard(&first) == FRIEND_DROP_REPLAY && status_now().rows[0].state == P2P_FRIEND_MENUS,
 			"the older one after it changes nothing");
 		CHECK(heard(&second) == FRIEND_DROP_REPLAY, "nor the newer again");
 	}
@@ -2300,7 +2300,7 @@ int main(int argc, char **argv)
 		p2p_friend_remove(id);
 		CHECK(friends.count == 1 && !memcmp(friends.list[0].key, key_of(CARA), P2P_KEY_SIZE), "Bob is out, Cara stays");
 		CHECK(!p2p_friend_invite_pending(name, sizeof(name)), "Bob's invite goes with him");
-		CHECK(!status_now().online_count, "no row for Bob");
+		CHECK(status_now().row_count == 1, "no row for Bob");
 		list_path_of(ALICE, "", path);
 		CHECK(text_of(path, text, sizeof(text)) > 0, "the list is saved");
 		hex_of(people[BOB].public_key, P2P_KEY_SIZE, hex);
@@ -2310,7 +2310,7 @@ int main(int argc, char **argv)
 		here = presence_at(FRIEND_HERE, BOB, ALICE, P2P_FRIEND_MATCHMAKING, HALO_PORT_NETWORK_VERSION, now_ms() + 5000);
 		become(ALICE);
 		CHECK(received(&here, FRIEND_DROP_STRANGER) == 1, "a HERE from Bob is from a stranger now");
-		CHECK(!status_now().online_count && friends.count == 1, "it does not bring the row back");
+		CHECK(status_now().row_count == 1 && friends.count == 1, "it does not bring the row back");
 		reload(ALICE);
 		CHECK(friends.count == 1, "nor does a restart: %d", friends.count);
 		friend_id(key_of(CARA), id);
@@ -2369,14 +2369,28 @@ int main(int argc, char **argv)
 			friends.list[index].state = P2P_FRIEND_MATCHMAKING;
 		}
 		status = status_now();
-		CHECK(status.online_count == 3 && !strncmp(status.online[0].name_tag, "Bob#", 4) &&
-			!strncmp(status.online[1].name_tag, "Cara#", 5) && !strncmp(status.online[2].name_tag, "Dave#", 5),
-			"by name: %s %s %s", status.online[0].name_tag, status.online[1].name_tag, status.online[2].name_tag);
+		CHECK(status.online_count == 3 && !strncmp(status.rows[0].name_tag, "Bob#", 4) &&
+			!strncmp(status.rows[1].name_tag, "Cara#", 5) && !strncmp(status.rows[2].name_tag, "Dave#", 5),
+			"by name: %s %s %s", status.rows[0].name_tag, status.rows[1].name_tag, status.rows[2].name_tag);
 		party_with(CARA);
 		status = status_now();
-		CHECK(status.online_count == 2 && !strncmp(status.online[0].name_tag, "Bob#", 4) &&
-			!strncmp(status.online[1].name_tag, "Dave#", 5), "Cara is in the party, so not under FRIENDS: %d",
+		CHECK(status.online_count == 2 && !strncmp(status.rows[0].name_tag, "Bob#", 4) &&
+			!strncmp(status.rows[1].name_tag, "Dave#", 5), "Cara is in the party, so not under FRIENDS: %d",
 			status.online_count);
+		memset(&party, 0, sizeof(party));
+		for (index = 0; index < 3; index++)
+			friends.list[index].heard = !strncmp(friends.list[index].name_tag, "Dave#", 5);
+		status = status_now();
+		CHECK(status.online_count == 1 && status.row_count == 3 && !strncmp(status.rows[0].name_tag, "Dave#", 5) &&
+			!strncmp(status.rows[1].name_tag, "Bob#", 4) && status.rows[1].state == P2P_FRIEND_OFFLINE &&
+			!strncmp(status.rows[2].name_tag, "Cara#", 5) && status.rows[2].state == P2P_FRIEND_OFFLINE,
+			"online first, then offline by name: %s %s %s", status.rows[0].name_tag, status.rows[1].name_tag,
+			status.rows[2].name_tag);
+		for (index = 0; index < 3; index++)
+			friends.list[index].sent = !strncmp(friends.list[index].name_tag, "Bob#", 4);
+		status = status_now();
+		CHECK(status.row_count == 2 && status.sent == 1, "a request not yet answered is no friend row: %d",
+			status.row_count);
 	}
 	CASE("by_id")
 	{
@@ -2398,8 +2412,8 @@ int main(int argc, char **argv)
 			friends.list[index].state = P2P_FRIEND_MATCHMAKING;
 		}
 		status = status_now();
-		strcpy(id, status.online[0].id);
-		strcpy(cara, status.online[1].id);
+		strcpy(id, status.rows[0].id);
+		strcpy(cara, status.rows[1].id);
 		p2p_friend_remove(cara);
 		presence_count = 0;
 		CHECK(!p2p_friend_invite(cara), "no invite to Cara, who has gone from the list");

@@ -1382,7 +1382,7 @@ void p2p_friends_get_status(struct p2p_friends_status *status)
 {
 	struct p2p_party_status party;
 	const char *name;
-	int index, member, place;
+	int index, member, place, heard;
 
 	memset(status, 0, sizeof(*status));
 	p2p_party_get_status(&party);
@@ -1397,23 +1397,30 @@ void p2p_friends_get_status(struct p2p_friends_status *status)
 	status->reached = friends.connected;
 	status->looking = friends.look_topic[0] != 0;
 	status->lookup_result = friends.lookup_result;
-	for (index = 0; index < friends.count; index++)
+	for (heard = 1; heard >= 0; heard--)
 	{
-		const struct friend *friend = &friends.list[index];
+		int first = status->row_count;
 
-		status->sent += friend->sent;
-		for (member = 0; member < party.count && !p2p_equal(party.members[member].friend_key, friend->key, P2P_KEY_SIZE);
-			member++)
-			;
-		if (!friend->heard || member < party.count)
-			continue;
-		for (place = status->online_count; place > 0 && friend_name_before(friend->name_tag,
-			status->online[place - 1].name_tag); place--)
-			status->online[place] = status->online[place - 1];
-		strcpy(status->online[place].id, friend->id);
-		strcpy(status->online[place].name_tag, friend->name_tag);
-		status->online[place].state = friend->state;
-		status->online_count++;
+		for (index = 0; index < friends.count; index++)
+		{
+			const struct friend *friend = &friends.list[index];
+
+			status->sent += heard && friend->sent;
+			for (member = 0; member < party.count &&
+				!p2p_equal(party.members[member].friend_key, friend->key, P2P_KEY_SIZE); member++)
+				;
+			if (friend->sent || !friend->heard != !heard || member < party.count)
+				continue;
+			for (place = status->row_count; place > first && friend_name_before(friend->name_tag,
+				status->rows[place - 1].name_tag); place--)
+				status->rows[place] = status->rows[place - 1];
+			strcpy(status->rows[place].id, friend->id);
+			strcpy(status->rows[place].name_tag, friend->name_tag);
+			status->rows[place].state = heard ? friend->state : P2P_FRIEND_OFFLINE;
+			status->row_count++;
+		}
+		if (heard)
+			status->online_count = status->row_count;
 	}
 	status->request_count = friends.request_count;
 	for (index = 0; index < friends.request_count; index++)
