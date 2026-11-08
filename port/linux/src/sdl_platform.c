@@ -1961,6 +1961,8 @@ static void platform_invite_clipboard(BOOL look)
 					p2p_mm_cancel();
 				if (p2p_join_invite(text) && can_join)
 				{
+					/* (seen is forgotten at exit: the next start would join it again) */
+					SDL_SetClipboardText("");
 #ifdef HALO_ANDROID
 					SDL_ShowAndroidToast("Joining the invite on the clipboard", 1, -1, 0, 0);
 #endif
