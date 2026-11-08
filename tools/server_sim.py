@@ -330,6 +330,8 @@ def default_settings():
                  "server to start a vote to kick (0 to 60).", "HALO_NET_VOTEKICK_MINUTES", low=0, high=60),
         _setting("network.votekick_ban_minutes", "integer", 30, "Hosting: the minutes a player kicked by a vote "
                  "cannot join again (1 to 1440).", "HALO_NET_VOTEKICK_BAN_MINUTES", low=1, high=1440),
+        _setting("network.host_ping_limit", "integer", 0, "Hosting: kick an internet player whose ping to this "
+                 "machine stays above this many milliseconds. 0: no limit.", "HALO_NET_HOST_PING_LIMIT"),
         _setting("network.map_share", "boolean", True, "Hosting: send a player who joins without the game's Custom "
                  "Edition map the map.", "HALO_NET_MAP_SHARE"),
         _setting("network.map_share_upload", "integer", 1024, "Hosting: the most kilobytes a second the host sends "
