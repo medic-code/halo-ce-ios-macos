@@ -7274,8 +7274,13 @@ static void matchmaking_lines(const struct p2p_mm_status *status, const struct p
 		wchar_t leader[P2P_PARTY_NAME_SIZE + 1];
 
 		mods_wide_text(party->members[0].name, leader, P2P_PARTY_NAME_SIZE + 1);
-		usnprintf(help, size - 1, L"%ls searches for you.\r\nYou follow them into the game.", leader);
+		if (wcslen(leader) <= 10)
+			usnprintf(help, size - 1, L"%ls searches for you.\r\nYou follow %ls into the game.", leader, leader);
+		else
+			usnprintf(help, size - 1, L"%ls searches for you.\r\nYou follow them into the game.", leader);
 	}
+	else if (party->count > 1 && status->state == P2P_MM_QUEUED)
+		help[0] = 0;
 	title[size - 1] = count[size - 1] = help[size - 1] = notice[size - 1] = 0;
 }
 
