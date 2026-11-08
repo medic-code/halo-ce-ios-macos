@@ -5991,7 +5991,8 @@ static wchar_t const *matchmaking_party_mark(const struct p2p_party_status *part
 		matchmaking_party_addable(party, !view->friends_off, index);
 
 	if (index && index == view->focused)
-		return view->asking == _matchmaking_ask_remove ? L"REMOVE?" : addable ? L"A ADD FRIEND" : L"X REMOVE";
+		return view->asking == _matchmaking_ask_remove ? L"REMOVE?" : addable ? L"A ADD FRIEND" :
+			matchmaking_party_member(party) ? L"" : L"X REMOVE";
 	if ((party->count > 1 || matchmaking_party_member(party)) && party->members[index].leader)
 		return L"LEADER";
 	if ((party->count <= 1 && !matchmaking_party_member(party)) || party->members[index].you)
