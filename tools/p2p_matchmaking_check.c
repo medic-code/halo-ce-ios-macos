@@ -83,6 +83,9 @@ void p2p_signal_party_publish_on(const char *topic, const unsigned char *payload
 	resent_size = size;
 }
 void p2p_clipboard_offer(const char *text) { strcpy(clipboard, text); }
+static unsigned char own_friend_key[P2P_KEY_SIZE];
+void p2p_friends_key(unsigned char *key) { memcpy(key, own_friend_key, P2P_KEY_SIZE); }
+void p2p_friends_mark(struct p2p_party_status *status) { (void)status; }
 void p2p_discord_set_party(const char *link, int count, int maximum)
 {
 	(void)maximum;
@@ -4034,6 +4037,50 @@ static void check_party_sealed(void)
 		CHECK(memcmp(bytes + index, "CHIEF", 5), "no name in the clear");
 }
 
+static void check_party_friend_key(void)
+{
+	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE], plain[MM_MAXIMUM_RECORD_SIZE], zero[P2P_KEY_SIZE] = { 0 };
+	struct mm_party_record record;
+	struct p2p_party_status status;
+	int size, old_size;
+
+	case_name = "party friend key";
+	party_form(3);
+	memset(parties[1].friend_key, 0x5a, P2P_KEY_SIZE);
+	parties[1].sent = party_now - 3000;
+	size = mm_party_step(&parties[1], party_now, bytes);
+	party_now += 1000;
+	CHECK(size > 0 && mm_party_read(&parties[0], bytes, size, &record) && mm_party_verify(&record), "a member's record");
+	mm_party_heard(&parties[0], &record, party_now);
+	CHECK(parties[0].members[1].friend_key[0] == 0x5a && !memcmp(parties[0].members[1].friend_key, parties[1].friend_key, P2P_KEY_SIZE),
+		"the leader reads the member's lasting key");
+	mm_party_status(&parties[0], &status);
+	CHECK(!memcmp(status.members[1].friend_key, parties[1].friend_key, P2P_KEY_SIZE), "and shows it");
+	memset(parties[0].friend_key, 0x3c, P2P_KEY_SIZE);
+	parties[0].sent = party_now - 3000;
+	size = mm_party_step(&parties[0], party_now, bytes);
+	party_now += 1000;
+	CHECK(size > 0 && mm_party_read(&parties[1], bytes, size, &record) && mm_party_verify(&record), "the leader's record");
+	mm_party_heard(&parties[1], &record, party_now);
+	mm_party_status(&parties[1], &status);
+	CHECK(!memcmp(status.members[0].friend_key, parties[0].friend_key, P2P_KEY_SIZE), "a member reads and shows the leader's lasting key");
+	CHECK(status.count == 3 && !strcmp(status.members[2].name, "KAT"), "the leader's list still reads after the key");
+	parties[2].sent = party_now - 3000;
+	size = mm_party_step(&parties[2], party_now, bytes);
+	party_now += 1000;
+	CHECK(size > 0 && mm_party_read(&parties[0], bytes, size, &record) && mm_party_verify(&record), "a member with friends off");
+	mm_party_heard(&parties[0], &record, party_now);
+	CHECK(!memcmp(parties[0].members[2].friend_key, zero, P2P_KEY_SIZE), "carries 32 zero bytes and the reader sets no key");
+	parties[2].sent = party_now - 3000;
+	size = mm_party_step(&parties[2], party_now, bytes);
+	old_size = p2p_open(parties[0].seal, bytes, size, plain);
+	memmove(plain + 1 + P2P_KEY_SIZE + 4 + P2P_PARTY_NAME_SIZE, plain + 1 + P2P_KEY_SIZE + 4 + P2P_PARTY_NAME_SIZE + P2P_KEY_SIZE,
+		(size_t)(old_size - (1 + P2P_KEY_SIZE + 4 + P2P_PARTY_NAME_SIZE + P2P_KEY_SIZE)));
+	size = p2p_seal(parties[0].seal, plain, old_size - P2P_KEY_SIZE, bytes);
+	party_now += 1000;
+	CHECK(!mm_party_read(&parties[0], bytes, size, &record), "a record of the old size is dropped");
+}
+
 static void check_party_copies(void)
 {
 	unsigned char bytes[MM_MAXIMUM_RECORD_SIZE];
@@ -4120,10 +4167,13 @@ static void check_party_machine(void)
 
 	case_name = "party machine";
 	CHECK(!p2p_party_active(), "no party yet");
+	memset(own_friend_key, 0x77, P2P_KEY_SIZE);
 	p2p_party_set_name("CHIEF");
 	CHECK(!p2p_party_invite(link, 8), "a link needs its room");
 	CHECK(p2p_party_invite(link, sizeof(link)) && p2p_party_active(), "INVITE makes a party");
 	CHECK(!strcmp(clipboard, link), "INVITE puts the link on the clipboard");
+	p2p_party_get_status(&status);
+	CHECK(!memcmp(status.members[0].friend_key, own_friend_key, P2P_KEY_SIZE), "the leader shows its lasting key");
 	CHECK(!p2p_party_can_join(link), "a leader's own link can't be joined, so it leaves its search running");
 	CHECK(signal_topic[0], "the brokers carry the party's topic");
 	party_update_locked();
@@ -4387,6 +4437,7 @@ int main(int argc, char **argv)
 	check_party_expiry();
 	check_party_sealed();
 	check_party_copies();
+	check_party_friend_key();
 	check_party_full();
 	check_party_flags();
 	check_party_machine();

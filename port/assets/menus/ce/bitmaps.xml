@@ -426,6 +426,7 @@
 		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_slot__7.png" width="265" height="18"/>
 		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_slot__8.png" width="265" height="18"/>
 		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_slot__9.png" width="265" height="18"/>
+		<frame png="ce/port/main_menu/multiplayer_type_select/matchmaking/search_slot__10.png" width="265" height="18"/>
 	</bitmap>
 	<bitmap name="blank">
 		<frame png="ce/port/blank__0.png" width="4" height="4"/>

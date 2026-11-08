@@ -2102,8 +2102,10 @@ def _matchmaking() -> list:
     gold = f"#FF{MATCHMAKING_GOLD[1:].upper()}"
     party_texts = [("notice", 35, 74, 570, 16, gold, None, None), ("title", 340, 92, 200, 18, "#FF2896FF", None, "PARTY"),
                    ("count", 340, 92, 265, 18, "#FFFFFFFF", "right", None),
+                   ("friends_title", 340, 92, 200, 18, "#FF2896FF", None, "FRIENDS"),
+                   ("friends_count", 340, 92, 265, 18, "#FFFFFFFF", "right", None),
                    ("line", 340, 284, 265, 36, "#FFFFFFFF", None, None),
-                   ("help", 340, 357, 265, 40, "#FFFFFFFF", None, None)]
+                   ("help", 340, 340, 265, 60, "#FFFFFFFF", None, None)]
     lines = _widget(f"{MT}/multiplayer_type_matchmaking_item",
                     [("type", "text"), ("left", 51), ("width", 232), ("height", 32), ("bitmap", "bitmaps/list_item_bkd"),
                      ("string_list", f"{MT}/multiplayer_options"), ("string_index", 8), ("font", "ui\\large_ui"),
@@ -2116,14 +2118,19 @@ def _matchmaking() -> list:
                      ['<on event="b" run="port matchmaking back"/>', '<on event="back" run="port matchmaking back"/>',
                       f'<child widget="{base}/header_matchmaking"/>',
                       *(f'<child widget="{base}/party_{key}"/>' for key, *_ in party_texts),
-                      f'<child widget="{base}/options_menu"/>'])
+                      f'<child widget="{base}/options_menu"/>',
+                      f'<child widget="{base}/party_scroll_up"/>', f'<child widget="{base}/party_scroll_down"/>'])
     lines += _header(f"{base}/header_matchmaking", f"{base}/header_matchmaking")
     for key, left, top, width, height, color, align, text in party_texts:
         lines += _widget(f"{base}/party_{key}", [("type", "text"), ("controller", 1), ("left", left), ("top", top),
                                                  ("width", width), ("height", height), ("text", text),
                                                  ("font", "ui\\small_ui"), ("color", color), ("align", align)], [])
-    lines += _widget(f"{base}/help", [("type", "text"), ("controller", 1), ("left", 340), ("top", 357), ("width", 265),
-                                      ("height", 40), ("string_list", f"{base}/help_strings"), ("font", "ui\\small_ui"),
+    for key, top in (("up", 113), ("down", 260)):
+        lines += _widget(f"{base}/party_scroll_{key}", [("controller", 1), ("left", 608), ("top", top), ("width", 16),
+                                                       ("height", 16), ("bitmap", f"bitmaps/arrow_sm_{key}")],
+                         [f'<on event="left_mouse" run="port matchmaking scroll {key}"/>'])
+    lines += _widget(f"{base}/help", [("type", "text"), ("controller", 1), ("left", 340), ("top", 340), ("width", 265),
+                                      ("height", 66), ("string_list", f"{base}/help_strings"), ("font", "ui\\small_ui"),
                                       ("color", "#FFFFFFFF")], [])
     rows = [("size", 104)] + [(f"playlist_{index}", 136 + 23 * index) for index in range(len(MATCHMAKING_PLAYLISTS))]
     lines += _widget(f"{base}/options_menu",
@@ -2136,7 +2143,7 @@ def _matchmaking() -> list:
                       f'<child widget="{base}/button_bar" y="414"/>'])
     lines += _widget(f"{base}/party_slot", [("width", SEARCH_SLOT_SIZE[0]), ("height", SEARCH_SLOT_SIZE[1]),
                                             ("bitmap", f"{base}/search_slot")],
-                     ['<on event="x" run="port matchmaking remove"/>', '<on event="a" run="port matchmaking remove"/>',
+                     ['<on event="x" run="port matchmaking remove"/>', '<on event="a" run="port matchmaking slot"/>',
                       '<on event="left" run="port matchmaking left"/>',
                       '<on event="left_mouse" run="mouse emit accept event"/>',
                       f'<child widget="{base}/party_slot_name" x="24"/>',
@@ -2175,9 +2182,11 @@ def _matchmaking() -> list:
                       f'<child widget="{base}/button_leave" x="341" y="1"/>',
                       '<child widget="common_button_cancel" x="477" y="1"/>',
                       f'<child widget="{base}/button_yes" x="341" y="1"/>',
-                      f'<child widget="{base}/button_no" x="477" y="1"/>'])
+                      f'<child widget="{base}/button_no" x="477" y="1"/>',
+                      f'<child widget="{base}/button_add_friend" x="35" y="1"/>'])
     for key, text, run in (("invite", "INVITE", "port matchmaking invite"), ("leave", "LEAVE PARTY", "port matchmaking leave"),
-                           ("yes", "YES", "port matchmaking yes"), ("no", "NO", "port matchmaking no")):
+                           ("yes", "YES", "port matchmaking yes"), ("no", "NO", "port matchmaking no"),
+                           ("add_friend", "ADD FRIEND", "port matchmaking add friend")):
         lines += _text_button(f"{base}/button_{key}", text,
                               [f'<on event="a" run="{run}"/>', f'<on event="start" run="{run}"/>'])
     lines += _button(f"{base}/button_defaults", 3, ['<on event="a" run="port matchmaking defaults"/>',
@@ -2314,18 +2323,17 @@ def _matchmaking_search(base: str) -> list:
                                                   ("color", "#FFFFFFFF"), ("text_x", 10), ("text_y", 4)], [])
     lines += _widget(f"{base}/search_list", [("type", "column_list"), ("width", 640), ("height", 480),
                                              ("flags", "pass_unhandled_to_focused_child up_down_tabs_children")],
-                     ['<data input="port matchmaking search update"/>',
+                     ['<data input="port matchmaking search update"/>', '<on event="created" run="port matchmaking search init"/>',
                       f'<child widget="{base}/search_button_bar" y="414"/>'])
     lines += _widget(f"{base}/search_button_bar", [("type", "column_list"), ("width", 640), ("height", 28),
                                                    ("flags", "pass_unhandled_to_focused_child left_right_tabs_items")],
-                     [f'<child widget="{base}/search_button_widen" x="205" y="1"/>',
-                      f'<child widget="{base}/search_button_host" x="341" y="1"/>',
-                      f'<child widget="{base}/search_button_cancel" x="477" y="1"/>',
-                      f'<child widget="{base}/search_button_leave" x="477" y="1"/>'])
-    for key, text, run in (("widen", "WIDEN NOW", "port matchmaking widen"),
-                           ("host", "HOST NOW", "port matchmaking host"),
-                           ("cancel", "CANCEL", "port matchmaking search back"),
-                           ("leave", "LEAVE SEARCH", "port matchmaking search back")):
+                     [f'<child widget="{base}/search_button_cancel" x="477" y="1"/>',
+                      f'<child widget="{base}/search_button_leave" x="477" y="1"/>',
+                      f'<child widget="{base}/search_button_yes" x="341" y="1"/>',
+                      f'<child widget="{base}/search_button_no" x="477" y="1"/>'])
+    for key, text, run in (("cancel", "CANCEL", "port matchmaking search back"),
+                           ("leave", "LEAVE SEARCH", "port matchmaking search back"),
+                           ("yes", "YES", "port matchmaking search yes"), ("no", "NO", "port matchmaking search no")):
         lines += _text_button(f"{base}/search_button_{key}", text,
                               [f'<on event="a" run="{run}"/>', f'<on event="start" run="{run}"/>'])
     return lines

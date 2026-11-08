@@ -445,7 +445,8 @@ boolean virtual_keyboard_launch(
 	match_assert(
 		"c:\\halo\\SOURCE\\interface\\virtual_keyboard.c",
 		419,
-		(caption_index>=FIRST_VIRTUAL_KEYBOARD_CAPTION_STRING_INDEX) && (caption_index<NUMBER_OF_VIRTUAL_KEYBOARD_STRINGS));
+		((caption_index>=FIRST_VIRTUAL_KEYBOARD_CAPTION_STRING_INDEX) && (caption_index<NUMBER_OF_VIRTUAL_KEYBOARD_STRINGS)) ||
+		caption_index==VIRTUAL_KEYBOARD_CAPTION_FRIEND_TAG /* port */);
 
 	if (!virtual_keyboard_globals.active && virtual_keyboard_globals.keyboard)
 	{
@@ -681,7 +682,9 @@ static void virtual_keyboard_render_internal(
 	if (virtual_keyboard_globals.keyboard->special_key_labels_string_list_tag.index != NONE)
 	{
 		rectangle2d bounds;
-		wchar_t *caption = unicode_string_list_get_string(
+		/* port: the friend tag caption is not in the keyboard's string list */
+		wchar_t *caption = virtual_keyboard_globals.caption_index==VIRTUAL_KEYBOARD_CAPTION_FRIEND_TAG ?
+			L"Enter your friend's tag" : unicode_string_list_get_string(
 			virtual_keyboard_globals.keyboard->special_key_labels_string_list_tag.index,
 			virtual_keyboard_globals.caption_index);
 

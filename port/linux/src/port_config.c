@@ -596,6 +596,10 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"Join the game of an invite link found on the clipboard when the game\n"
 		"comes to the front." },
+	{ "network.friends", _config_boolean, "true", "HALO_NET_FRIENDS", _environment_value, _platform_all,
+		"The friends list (MATCHMAKING): a lasting key (friend.key in the save\n"
+		"folder) gives you a tag, and friends who know it can add you. false\n"
+		"turns the friends list off." },
 	{ "network.tunnel_port", _config_integer, "0", "HALO_NET_TUNNEL_PORT", _environment_value, _platform_all,
 		"The UDP port internet play uses; 0 picks one. A fixed one can be\n"
 		"forwarded on the router, for networks whose NAT stops connections." },

@@ -575,6 +575,7 @@ the setting for one start of the game. It has priority over the file.
 | `network.broadcast` | `""` | `HALO_NET_BROADCAST` | IPv4 addresses, with commas between them, that get the broadcasts of the game. Empty: 255.255.255.255. |
 | `network.online` | `true` | `HALO_NET_ONLINE` | `true`: internet play. `false`: system link on the local network only. |
 | `network.join_from_clipboard` | `true` | `HALO_NET_JOIN_FROM_CLIPBOARD` | `true`: when the game comes to the front, it joins the game of an invite link on the clipboard. |
+| `network.friends` | `true` | `HALO_NET_FRIENDS` | `true`: the friends list. The game makes a lasting key (`friend.key`) and shows the tag it gives. `false`: no friends list, and no key is made. Refer to "Friends". |
 | `network.tunnel_port` | `0` | `HALO_NET_TUNNEL_PORT` | The UDP port for internet play. `0`: the game selects a port. Refer to "Internet play". |
 | `network.allow_upnp` | `true` | `HALO_NET_ALLOW_UPNP` | `true`: internet play can ask the router to forward its port (UPnP). `false`: the game does not ask. Refer to "Internet play". |
 | `network.public_lobby` | `true` | `HALO_NET_PUBLIC_LOBBY` | `true`: the server browser. Public games are listed, and Join Game > Server Browser shows them. `false`: no games are listed or shown. Refer to "Server browser". |
@@ -1275,6 +1276,61 @@ PLAYERS, 16 or more, which starts when its host presses START NOW and which
 later players join in progress. Its listing says it is a matchmade big game, so
 a joiner's lobby has SWITCH TEAM and no START NOW or ADD PLAYER; a plain public
 game keeps its normal lobby.
+
+### Friends
+
+The friends list gives each player a tag, 8 characters (digits and capital letters, never `0`, `1`, `I` or `O`), and a
+lasting key behind it. MATCHMAKING shows `YOU ARE <name>#<tag>`. The tag stays when the name changes. With
+`network.friends` set to `false`, none of this is made or shown.
+
+Two files hold it, in the save root, so a new install folder keeps them:
+
+| File | Contents |
+| --- | --- |
+| `friend.key` | A comment line, the key's 64 hex digits, and the inbox's 16 hex digits. Made at the first start, mode 0600. Keep it secret. |
+| `friends.txt` | The list of friends. |
+
+The save root, by platform:
+
+| Platform | Save root |
+| --- | --- |
+| Linux | `~/.local/share/halo-linux` |
+| Windows | `%APPDATA%\halo` |
+| Mac | `~/Library/Application Support/OpenCE` |
+| Android | `<external>/save` |
+| Web | `/data/save` |
+
+`paths.saves` (`HALO_SAVE_ROOT`) moves it. With `HOME` (Linux, Mac) or `APPDATA` (Windows) unset, the save root is the data root.
+
+To move to a new machine, copy `friend.key` and `friends.txt` to its save root while the game is closed. The same files
+make the same tag. They are the backup: copy them to keep them. A copied key cannot be revoked: whoever has `friend.key`
+is that player to the friends, so treat it as a password.
+
+Once a broker is reached, the game tells each friend whether you are in the menus, on the MATCHMAKING screen or in a game,
+when it starts, every 60 seconds, when that changes and when it quits. A friend not heard from for 90 seconds shows as
+offline, and a friend on another network version shows as needing an update. Only friends you added hear it.
+
+Each time a broker is reached, the game also publishes a card with your name and public key, kept 30 days where a broker
+keeps records, so that anyone with your tag can find you. A lookup of a tag listens for 3 seconds, takes only cards whose
+key gives that tag, and sends a friend request to the one player found; it adds no one when no card or two players are
+found. A card carries nothing but the name and the key.
+
+Friends who are online and not in your party list under FRIENDS on MATCHMAKING, by name. A on a friend who is on
+MATCHMAKING sends your party link, and starts a party if you have none; the friend sees `<name>#<tag> invites you to a
+party` with YES and NO. A friend in the menus, in a game or on another network version cannot be invited. An invite
+reaches a friend only while MATCHMAKING is open, and is dropped when the friend leaves it. X on a friend asks whether
+to remove them from the list.
+
+To reset: quit the game, move `friend.key` and `friends.txt` aside, and start the game. It makes a new key, so a new tag
+and an empty list. Friends who had the old tag do not follow it.
+
+Each `friends:` line in `debug.txt`:
+
+| Line | Meaning |
+| --- | --- |
+| `friends: new key` | There was no `friend.key`, and the game made one. |
+| `friends: <n> brokers, <m> hello` | More brokers are up (<n> now), and the game says hello to <m> friends. |
+| `friends: friend.key unreadable` | `friend.key` is there but is not a comment line, 64 hex digits and 16 hex digits, or could not be read or made. The game leaves the file as it is, turns the friends list off and shows `FRIENDS OFF: friend.key unreadable.` on MATCHMAKING. Fix or move the file and start the game again. |
 
 ### Map sharing
 

@@ -507,7 +507,7 @@ void p2p_mm_set_choice(const struct p2p_mm_choice *choice);
 void p2p_mm_host_gave_up(void);
 
 /* MATCHMAKING's party (p2p_party.c) */
-enum { P2P_PARTY_MAXIMUM = 8, P2P_PARTY_NAME_SIZE = 32, P2P_PARTY_LINK_SIZE = 110 };
+enum { P2P_PARTY_MAXIMUM = 8, P2P_PARTY_NAME_SIZE = 32, P2P_PARTY_LINK_SIZE = 110, P2P_FRIEND_KEY_SIZE = 32 };
 
 enum { P2P_MM_TEAM_PARTIES = 32 };
 struct p2p_mm_team_party
@@ -533,6 +533,8 @@ struct p2p_party_member
 {
 	char name[P2P_PARTY_NAME_SIZE + 1];
 	int leader, you, searching;
+	unsigned char friend_key[P2P_FRIEND_KEY_SIZE];
+	int friend;
 };
 struct p2p_party_status
 {
@@ -548,10 +550,61 @@ struct p2p_party_status
 void p2p_party_set_name(const char *name);
 /* a leader's link, made if there is no party: on the clipboard and offered through Discord's INVITE; 0 for a member */
 int p2p_party_invite(char *link, int size);
-/* the leader: a member's place in the status, its removal making a new link sent sealed to the rest */
+int p2p_party_invite_quiet(char *link, int size);
+/* the leader: a member's place in the status, its removal making a new link */
 void p2p_party_remove(int member);
 void p2p_party_leave(void);
 void p2p_party_get_status(struct p2p_party_status *status);
 void p2p_party_notice_clear(void);
+
+enum p2p_friend_state { P2P_FRIEND_OFFLINE, P2P_FRIEND_MENUS, P2P_FRIEND_MATCHMAKING, P2P_FRIEND_IN_GAME, P2P_FRIEND_UPDATE };
+enum { P2P_FRIENDS_MAXIMUM = 64, P2P_FRIEND_REQUESTS_SHOWN = 3, P2P_FRIEND_TAG_SIZE = 8, P2P_FRIEND_ID_SIZE = 17,
+	P2P_FRIEND_NAME_TAG_SIZE = P2P_PARTY_NAME_SIZE + 1 + P2P_FRIEND_TAG_SIZE + 1 };
+struct p2p_friend_row
+{
+	char id[P2P_FRIEND_ID_SIZE];
+	char name_tag[P2P_FRIEND_NAME_TAG_SIZE];
+	int state;
+};
+struct p2p_friends_status
+{
+	char me[P2P_FRIEND_NAME_TAG_SIZE];
+	int on, key_unmade, unsaved;
+	int reached;
+	int request_count;
+	struct p2p_friend_row requests[P2P_FRIEND_REQUESTS_SHOWN];
+	/* the online friends first, then the offline ones, each by name */
+	int online_count, row_count;
+	struct p2p_friend_row rows[P2P_FRIENDS_MAXIMUM];
+	int sent;
+	int looking, lookup_result;
+};
+enum
+{
+	P2P_FRIEND_ADD_SENT,
+	P2P_FRIEND_ADD_NO_PLAYER,
+	P2P_FRIEND_ADD_TWO_PLAYERS,
+	P2P_FRIEND_ADD_NO_SERVER,
+	P2P_FRIEND_ADD_FULL,
+	P2P_FRIEND_ADD_LOOKING,
+	P2P_FRIEND_ADD_SELF,
+	P2P_FRIEND_ADD_FRIEND,
+};
+/* these take p2p_lock: call from the game's thread, never the p2p thread */
+void p2p_friends_get_status(struct p2p_friends_status *status);
+int p2p_friend_add_member(int member);
+int p2p_friend_add_tag(const char *tag);
+int p2p_friend_answer(const char *id, int yes);
+int p2p_friend_invite(const char *id);
+void p2p_friend_remove(const char *id);
+int p2p_friend_invite_pending(char *name_tag, int size);
+enum
+{
+	P2P_FRIEND_ANSWER_DONE,
+	P2P_FRIEND_ANSWER_LEAVE_FIRST,
+	P2P_FRIEND_ANSWER_FAILED,
+};
+int p2p_friend_invite_answer(int yes);
+void p2p_friends_set_state(int state);
 
 #endif
