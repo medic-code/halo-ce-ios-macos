@@ -2222,7 +2222,8 @@ def _matchmaking() -> list:
                                                  ("font", "ui\\small_ui"), ("color", color), ("align", align)], [])
     for key, top in (("up", 113), ("down", 260)):
         lines += _widget(f"{base}/party_scroll_{key}", [("controller", 1), ("left", 608), ("top", top), ("width", 16),
-                                                       ("height", 16), ("bitmap", f"bitmaps/arrow_sm_{key}")], [])
+                                                       ("height", 16), ("bitmap", f"bitmaps/arrow_sm_{key}")],
+                         [f'<on event="left_mouse" run="port matchmaking scroll {key}"/>'])
     lines += _widget(f"{base}/help", [("type", "text"), ("controller", 1), ("left", 340), ("top", 340), ("width", 265),
                                       ("height", 66), ("string_list", f"{base}/help_strings"), ("font", "ui\\small_ui"),
                                       ("color", "#FFFFFFFF")], [])
