@@ -5602,12 +5602,14 @@ enum
 	_matchmaking_bar_cancel,
 	_matchmaking_bar_yes,
 	_matchmaking_bar_no,
+	_matchmaking_bar_add_friend,
 	NUMBER_OF_MATCHMAKING_BAR_BUTTONS
 };
 #define MATCHMAKING_BAR(button) (1u << _matchmaking_bar_##button)
 
 static char const *const matchmaking_bar_names[NUMBER_OF_MATCHMAKING_BAR_BUTTONS] = {
-	"button_defaults", "button_invite", "button_search", "button_leave", "common_button_cancel", "button_yes", "button_no"
+	"button_defaults", "button_invite", "button_search", "button_leave", "common_button_cancel", "button_yes", "button_no",
+	"button_add_friend"
 };
 
 /* port_settings.py's search_button_bar, in matchmaking_search_bar_names' order */
@@ -5712,10 +5714,15 @@ static short matchmaking_party_find(const struct p2p_party_status *party, short 
 
 static unsigned matchmaking_party_bar(const struct p2p_party_status *party, short asking)
 {
+	short slot;
+
 	if (asking != _matchmaking_ask_none)
 		return MATCHMAKING_BAR(yes) | MATCHMAKING_BAR(no);
 	if (matchmaking_party_member(party))
 		return MATCHMAKING_BAR(leave) | MATCHMAKING_BAR(cancel);
+	for (slot = 0; slot < P2P_PARTY_MAXIMUM; slot++)
+		if (matchmaking_screen.slots[slot].kind == _matchmaking_row_add)
+			return MATCHMAKING_BAR(add_friend) | MATCHMAKING_BAR(invite) | MATCHMAKING_BAR(search) | MATCHMAKING_BAR(cancel);
 	return MATCHMAKING_BAR(defaults) | MATCHMAKING_BAR(invite) | MATCHMAKING_BAR(search) | MATCHMAKING_BAR(cancel);
 }
 
@@ -6428,10 +6435,26 @@ static boolean matchmaking_slot_left(struct widget_instance *slot)
 	return TRUE;
 }
 
-static boolean matchmaking_invite(void)
+static boolean matchmaking_invite(struct widget_instance *widget)
 {
+	struct widget_instance *list = named(screen_of(widget), "options_menu", 0);
+	short index = list->focused_child ? (short)sibling_index(list->focused_child) : NONE;
 	char link[P2P_PARTY_LINK_SIZE];
 
+	if (index >= MATCHMAKING_ROWS && index < MATCHMAKING_ROWS + P2P_PARTY_MAXIMUM)
+	{
+		struct matchmaking_row *row = &matchmaking_screen.slots[index - MATCHMAKING_ROWS];
+
+		if (row->kind == _matchmaking_row_friend)
+		{
+			if (!p2p_friend_invite(row->id))
+				return campaign_fail();
+			strcpy(matchmaking_screen.invited_id, row->id);
+			matchmaking_screen.invited_at = system_milliseconds();
+			ui_play_audio_feedback_sound(SOUND_FORWARD);
+			return TRUE;
+		}
+	}
 	if (!p2p_party_invite(link, sizeof(link)))
 		return campaign_fail();
 	platform_clipboard_set(link);
@@ -9611,7 +9634,7 @@ boolean pc_menu_event_function_invoke(
 		}
 		else if (!strcmp(name, "port matchmaking invite"))
 		{
-			return matchmaking_invite();
+			return matchmaking_invite(widget);
 		}
 		else if (!strcmp(name, "port matchmaking leave"))
 		{
@@ -9658,6 +9681,20 @@ boolean pc_menu_event_function_invoke(
 		else if (!strcmp(name, "port matchmaking scroll down"))
 		{
 			matchmaking_screen.scroll++;
+			return TRUE;
+		}
+		else if (!strcmp(name, "port matchmaking add friend"))
+		{
+			short slot;
+
+			for (slot = 0; slot < P2P_PARTY_MAXIMUM; slot++)
+			{
+				if (matchmaking_screen.slots[slot].kind != _matchmaking_row_add)
+					continue;
+				matchmaking_screen.added_row = (short)(MATCHMAKING_ROWS + slot);
+				matchmaking_screen.typing = virtual_keyboard_launch(matchmaking_screen.typed, sizeof(matchmaking_screen.typed), VIRTUAL_KEYBOARD_CAPTION_FRIEND_TAG);
+				return matchmaking_screen.typing ? TRUE : campaign_fail();
+			}
 			return TRUE;
 		}
 		else if (!strcmp(name, "port matchmaking search yes") || !strcmp(name, "port matchmaking search no"))
