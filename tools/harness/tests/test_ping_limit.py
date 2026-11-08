@@ -10,8 +10,8 @@ from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run
 
 SOURCE = "port/linux/game/network_ping_limit.c"
 CASES = ["median", "spike", "threshold", "off", "kicked-at-third-second", "stays-under", "once-a-second",
-         "byte-order", "lan-exempt", "not-timed", "joined-in-game", "late-in-game", "downloading", "joined-resets",
-         "smoothed-start", "recovery-download", "recovery-disabled"]
+         "byte-order", "lan-exempt", "not-timed", "joined-in-game", "late-in-game", "lobby-into-game", "downloading",
+         "joined-resets", "smoothed-start", "recovery-download", "recovery-disabled"]
 FUNCTIONS = ("ping_limit_median", "ping_limit_over", "ping_limit_tunnel_ping", "network_ping_limit_machine_joined",
              "network_ping_limit_check")
 
@@ -26,8 +26,9 @@ NEGATIVE_CONTROLS = {
                          "(address << 24);", "network = address;"), "ping_limit_tunnel_ping", "byte-order"),
     "any-address": (("if ((address & PING_LIMIT_INTERNET_MASK) != PING_LIMIT_INTERNET_ADDRESS)\n\t\treturn NONE;\n", ""),
                     "ping_limit_tunnel_ping", "lan-exempt"),
-    "judged-all-game": (("(!lobby && joined > PING_LIMIT_ADMISSION_MILLISECONDS) ||", ""),
+    "judged-all-game": (("(!lobby && (machine->seen_in_lobby || joined > PING_LIMIT_ADMISSION_MILLISECONDS)) ||", ""),
                         "network_ping_limit_check", "late-in-game"),
+    "lobby-joiner-judged": (("machine->seen_in_lobby || ", ""), "network_ping_limit_check", "lobby-into-game"),
     "judged-downloading": ((" ||\n\t\tmap_share_machine_downloading(machine_index))", ")"),
                            "network_ping_limit_check", "downloading"),
     "join-keeps-samples": (("ping_limit_machines[machine_index].taken = 0;", ""),

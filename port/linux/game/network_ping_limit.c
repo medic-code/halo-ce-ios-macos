@@ -50,6 +50,7 @@ struct ping_limit_machine
 	long samples[PING_LIMIT_SAMPLES];
 	unsigned long taken;
 	unsigned long sampled_at;
+	boolean seen_in_lobby;
 };
 
 /* ---------- globals */
@@ -115,6 +116,7 @@ void network_ping_limit_machine_joined(
 		return;
 	ping_limit_machines[machine_index].taken = 0;
 	ping_limit_machines[machine_index].sampled_at = 0;
+	ping_limit_machines[machine_index].seen_in_lobby = FALSE;
 }
 
 long network_ping_limit_check(
@@ -132,11 +134,13 @@ long network_ping_limit_check(
 	if (machine_index < 0 || machine_index >= MAXIMUM_PING_LIMIT_MACHINES)
 		return NONE;
 	machine = &ping_limit_machines[machine_index];
+	if (lobby)
+		machine->seen_in_lobby = TRUE;
 	if (now - machine->sampled_at < PING_LIMIT_SAMPLE_MILLISECONDS)
 		return NONE;
 	machine->sampled_at = now;
 	limit = config_integer("network.host_ping_limit");
-	if (limit <= 0 || (!lobby && joined > PING_LIMIT_ADMISSION_MILLISECONDS) ||
+	if (limit <= 0 || (!lobby && (machine->seen_in_lobby || joined > PING_LIMIT_ADMISSION_MILLISECONDS)) ||
 		map_share_machine_downloading(machine_index))
 	{
 		machine->taken = 0;

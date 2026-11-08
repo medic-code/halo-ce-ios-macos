@@ -181,6 +181,22 @@ int main(int argc, char **argv)
 			now_milliseconds += 1000;
 		}
 	}
+	else if (!strcmp(case_name, "lobby-into-game"))
+	{
+		long second;
+
+		limit_setting = 100;
+		peer_ping = 200;
+		network_ping_limit_machine_joined(1);
+		CHECK(network_ping_limit_check(1, PEER_ADDRESS, TRUE, 0) == NONE, "in the lobby");
+		now_milliseconds += 1000;
+		for (second = 1; second < 30; second++)
+		{
+			CHECK(network_ping_limit_check(1, PEER_ADDRESS, FALSE, (unsigned long)second * 1000) == NONE,
+				"in the game it started in the lobby of, second %ld", second);
+			now_milliseconds += 1000;
+		}
+	}
 	else if (!strcmp(case_name, "downloading"))
 	{
 		long call;
