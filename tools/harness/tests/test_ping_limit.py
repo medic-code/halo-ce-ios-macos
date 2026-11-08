@@ -35,6 +35,8 @@ NEGATIVE_CONTROLS = {
                            "network_ping_limit_check", "downloading"),
     "join-keeps-samples": (("ping_limit_machines[machine_index].taken = 0;", ""),
                            "network_ping_limit_machine_joined", "joined-resets"),
+    "pause-keeps-samples": (("\t\tmachine->taken = 0;\n\t\treturn NONE;", "\t\treturn NONE;"),
+                            "network_ping_limit_check", "recovery-download"),
 }
 
 
