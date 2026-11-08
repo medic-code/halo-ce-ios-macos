@@ -5560,7 +5560,7 @@ enum
 #define MATCHMAKING_TEXT_LENGTH 160
 #define MATCHMAKING_ROWS (1 + NUMBER_OF_P2P_MM_PLAYLISTS)
 
-enum { _search_slot_you, _search_slot_matched, _search_slot_looking };
+enum { _search_slot_you, _search_slot_matched, _search_slot_looking, _search_slot_none = 10 };
 enum
 {
 	_matchmaking_ask_none,
@@ -6581,7 +6581,7 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 		}
 		else if (row->kind == _matchmaking_row_add)
 		{
-			widget->animation.current_frame_index = _search_slot_you;
+			widget->animation.current_frame_index = _search_slot_none;
 			matchmaking_add_row(&friends, text, mark, MATCHMAKING_TEXT_LENGTH);
 		}
 		else if (row->kind == _matchmaking_row_member)
