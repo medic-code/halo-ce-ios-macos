@@ -5560,7 +5560,7 @@ enum
 #define MATCHMAKING_TEXT_LENGTH 160
 #define MATCHMAKING_ROWS (1 + NUMBER_OF_P2P_MM_PLAYLISTS)
 
-enum { _search_slot_you, _search_slot_matched, _search_slot_looking, _search_slot_none = 10 };
+enum { _search_slot_you, _search_slot_matched, _search_slot_looking };
 enum
 {
 	_matchmaking_ask_none,
@@ -5577,12 +5577,12 @@ enum
 	_matchmaking_row_member,
 	_matchmaking_row_heading,
 	_matchmaking_row_request,
-	_matchmaking_row_friend,
-	_matchmaking_row_add
+	_matchmaking_row_friend
 };
-#define MATCHMAKING_ROW_LIMIT (P2P_PARTY_MAXIMUM + 1 + P2P_FRIEND_REQUESTS_SHOWN + P2P_FRIENDS_MAXIMUM + 1)
+#define MATCHMAKING_ROW_LIMIT (P2P_PARTY_MAXIMUM + 1 + P2P_FRIEND_REQUESTS_SHOWN + P2P_FRIENDS_MAXIMUM)
 #define MATCHMAKING_LEAVE_FIRST 100
 #define MATCHMAKING_NO_TAG 101
+#define MATCHMAKING_REQUEST_SENT 102
 #define MATCHMAKING_SHOWN_MILLISECONDS 500
 #define MATCHMAKING_INVITED_MILLISECONDS 10000
 
@@ -5712,13 +5712,13 @@ static short matchmaking_party_find(const struct p2p_party_status *party, short 
 	return index;
 }
 
-static unsigned matchmaking_party_bar(const struct p2p_party_status *party, short asking, boolean has_add_row)
+static unsigned matchmaking_party_bar(const struct p2p_party_status *party, short asking, boolean adding)
 {
 	if (asking != _matchmaking_ask_none)
 		return MATCHMAKING_BAR(yes) | MATCHMAKING_BAR(no);
 	if (matchmaking_party_member(party))
 		return MATCHMAKING_BAR(leave) | MATCHMAKING_BAR(cancel);
-	if (has_add_row)
+	if (adding)
 		return MATCHMAKING_BAR(add_friend) | MATCHMAKING_BAR(invite) | MATCHMAKING_BAR(search) | MATCHMAKING_BAR(cancel);
 	return MATCHMAKING_BAR(defaults) | MATCHMAKING_BAR(invite) | MATCHMAKING_BAR(search) | MATCHMAKING_BAR(cancel);
 }
@@ -5770,12 +5770,17 @@ static short matchmaking_requests_shown(const struct p2p_party_status *party, co
 	return (short)MIN(friends->request_count, MIN(P2P_FRIEND_REQUESTS_SHOWN, P2P_PARTY_MAXIMUM - MAX(party->count, 1)));
 }
 
+static boolean matchmaking_adding(const struct p2p_party_status *party, const struct p2p_friends_status *friends)
+{
+	return friends->on && !matchmaking_rows_locked(party) && party->count < P2P_PARTY_MAXIMUM;
+}
+
 static short matchmaking_rows_layout(const struct p2p_party_status *party, const struct p2p_friends_status *friends,
 	struct matchmaking_row *rows)
 {
 	short members = (short)MAX(party->count, 1), requests = matchmaking_requests_shown(party, friends), online = 0;
 	short total = 0, index;
-	boolean adding = friends->on && !matchmaking_rows_locked(party) && members < P2P_PARTY_MAXIMUM;
+	boolean adding = matchmaking_adding(party, friends);
 
 	if (adding)
 		online = (short)friends->online_count;
@@ -5785,7 +5790,7 @@ static short matchmaking_rows_layout(const struct p2p_party_status *party, const
 		rows[total].kind = _matchmaking_row_member;
 		rows[total].index = index;
 	}
-	if (requests || online || adding)
+	if (requests || online)
 		rows[total++].kind = _matchmaking_row_heading;
 	for (index = 0; index < requests; index++, total++)
 	{
@@ -5799,8 +5804,6 @@ static short matchmaking_rows_layout(const struct p2p_party_status *party, const
 		rows[total].index = index;
 		strcpy(rows[total].id, friends->online[index].id);
 	}
-	if (adding)
-		rows[total++].kind = _matchmaking_row_add;
 	return total;
 }
 
@@ -5908,21 +5911,6 @@ static void matchmaking_request_help(const struct p2p_friend_row *request, boole
 	help[size - 1] = 0;
 }
 
-static void matchmaking_add_row(const struct p2p_friends_status *friends, wchar_t *name, wchar_t *mark, short size)
-{
-	usnprintf(name, P2P_PARTY_NAME_SIZE, L"ADD FRIEND");
-	name[P2P_PARTY_NAME_SIZE] = 0;
-	usnprintf(mark, size - 1, L"%ls", friends->looking ? L"LOOKING" :
-		friends->sent && friends->lookup_result == P2P_FRIEND_ADD_SENT ? L"REQUEST SENT" : L"");
-	mark[size - 1] = 0;
-}
-
-static void matchmaking_add_help(wchar_t *help, short size)
-{
-	usnprintf(help, size - 1, L"Type the 8 characters after the #\r\nin your friend's name.\r\nA opens the keyboard.");
-	help[size - 1] = 0;
-}
-
 static boolean matchmaking_tag_typed(const wchar_t *typed, char *text, size_t size)
 {
 	const wchar_t *tag = typed, *at;
@@ -5970,6 +5958,12 @@ static void matchmaking_add_words(int result, wchar_t *help, short size)
 		break;
 	case MATCHMAKING_LEAVE_FIRST:
 		usnprintf(help, size - 1, L"LEAVE YOUR PARTY FIRST.");
+		break;
+	case P2P_FRIEND_ADD_LOOKING:
+		usnprintf(help, size - 1, L"LOOKING FOR THAT TAG.");
+		break;
+	case MATCHMAKING_REQUEST_SENT:
+		usnprintf(help, size - 1, L"REQUEST SENT.");
 		break;
 	case P2P_FRIEND_ADD_SELF:
 		usnprintf(help, size - 1, L"THAT IS YOUR OWN TAG.");
@@ -6304,12 +6298,6 @@ static boolean matchmaking_slot_accept(struct widget_instance *slot)
 
 	if (row->kind == _matchmaking_row_request)
 		return matchmaking_request_ask(slot, row->id);
-	if (row->kind == _matchmaking_row_add)
-	{
-		matchmaking_screen.added_row = (short)sibling_index(slot);
-		matchmaking_screen.typing = virtual_keyboard_launch(matchmaking_screen.typed, sizeof(matchmaking_screen.typed), VIRTUAL_KEYBOARD_CAPTION_FRIEND_TAG);
-		return matchmaking_screen.typing ? TRUE : campaign_fail();
-	}
 	if (row->kind == _matchmaking_row_friend)
 	{
 		if (!p2p_friend_invite(row->id))
@@ -6503,14 +6491,15 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 			int result = matchmaking_tag_typed(matchmaking_screen.typed, tag, sizeof(tag)) ? p2p_friend_add_tag(tag) :
 				P2P_FRIEND_ADD_NO_PLAYER;
 
-			matchmaking_screen.added = (short)(result == P2P_FRIEND_ADD_NO_PLAYER ? MATCHMAKING_NO_TAG : result);
+			matchmaking_screen.added = (short)(result == P2P_FRIEND_ADD_NO_PLAYER ? MATCHMAKING_NO_TAG :
+				result == P2P_FRIEND_ADD_SENT ? MATCHMAKING_REQUEST_SENT : result);
 		}
 	}
 	p2p_friends_get_status(&friends);
 	if (matchmaking_screen.added == P2P_FRIEND_ADD_LOOKING && !friends.looking)
 	{
 		matchmaking_screen.added = (short)(friends.lookup_result == P2P_FRIEND_ADD_NO_PLAYER ? MATCHMAKING_NO_TAG :
-			friends.lookup_result);
+			friends.lookup_result == P2P_FRIEND_ADD_SENT ? MATCHMAKING_REQUEST_SENT : friends.lookup_result);
 		matchmaking_screen.added_row = index;
 	}
 	asked_request = matchmaking_friend_find(friends.requests, friends.request_count, matchmaking_screen.asked_id);
@@ -6555,10 +6544,7 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 		if (row->kind == _matchmaking_row_heading)
 			heading = slot;
 	}
-	for (slot = 0; slot < P2P_PARTY_MAXIMUM; slot++)
-		if (matchmaking_screen.slots[slot].kind == _matchmaking_row_add)
-			break;
-	buttons = matchmaking_party_bar(party, matchmaking_screen.asking, slot < P2P_PARTY_MAXIMUM);
+	buttons = matchmaking_party_bar(party, matchmaking_screen.asking, matchmaking_adding(party, &friends));
 	if (rows && place != NONE)
 		focused_row = &matchmaking_screen.slots[place];
 	view.asking = matchmaking_screen.asking;
@@ -6601,11 +6587,6 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 			matchmaking_friend_row(&friends.online[row->index], focused_friend == &friends.online[row->index],
 				!strcmp(row->id, matchmaking_screen.invited_id) && system_milliseconds() - matchmaking_screen.invited_at < MATCHMAKING_INVITED_MILLISECONDS,
 				text, mark, MATCHMAKING_TEXT_LENGTH);
-		}
-		else if (row->kind == _matchmaking_row_add)
-		{
-			widget->animation.current_frame_index = _search_slot_none;
-			matchmaking_add_row(&friends, text, mark, MATCHMAKING_TEXT_LENGTH);
 		}
 		else if (row->kind == _matchmaking_row_member)
 		{
@@ -6659,8 +6640,6 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 		matchmaking_request_help(focused_request, FALSE, help, MATCHMAKING_TEXT_LENGTH);
 	else if (focused_friend)
 		matchmaking_friend_help(focused_friend, help, MATCHMAKING_TEXT_LENGTH);
-	else if (focused_row && focused_row->kind == _matchmaking_row_add)
-		matchmaking_add_help(help, MATCHMAKING_TEXT_LENGTH);
 	if (matchmaking_screen.refusal != MATCHMAKING_SEARCH)
 		help[0] = 0;
 	visible_set(description, !help[0]);
@@ -9689,17 +9668,9 @@ boolean pc_menu_event_function_invoke(
 		}
 		else if (!strcmp(name, "port matchmaking add friend"))
 		{
-			short slot;
-
-			for (slot = 0; slot < P2P_PARTY_MAXIMUM; slot++)
-			{
-				if (matchmaking_screen.slots[slot].kind != _matchmaking_row_add)
-					continue;
-				matchmaking_screen.added_row = (short)(MATCHMAKING_ROWS + slot);
-				matchmaking_screen.typing = virtual_keyboard_launch(matchmaking_screen.typed, sizeof(matchmaking_screen.typed), VIRTUAL_KEYBOARD_CAPTION_FRIEND_TAG);
-				return matchmaking_screen.typing ? TRUE : campaign_fail();
-			}
-			return TRUE;
+			matchmaking_screen.added_row = (short)sibling_index(widget->parent);
+			matchmaking_screen.typing = virtual_keyboard_launch(matchmaking_screen.typed, sizeof(matchmaking_screen.typed), VIRTUAL_KEYBOARD_CAPTION_FRIEND_TAG);
+			return matchmaking_screen.typing ? TRUE : campaign_fail();
 		}
 		else if (!strcmp(name, "port matchmaking search yes") || !strcmp(name, "port matchmaking search no"))
 		{

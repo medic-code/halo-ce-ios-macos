@@ -466,11 +466,11 @@ int main(int argc, char **argv)
 
 		memset(&friends, 0, sizeof(friends));
 		friends.on = 1;
-		friends.online_count = 4;
+		friends.online_count = 5;
 		strcpy(friends.online[0].id, "0000000000000001");
 		strcpy(friends.online[3].id, "0000000000000004");
 		total = matchmaking_rows_layout(&party, &friends, rows);
-		CHECK(total == 12, "E10: 6 members, the heading, 4 friends and ADD FRIEND: %d", total);
+		CHECK(total == 12, "E10: 6 members, the heading and 5 friends: %d", total);
 		CHECK(rows[5].kind == _matchmaking_row_member && rows[5].index == 5, "the last member");
 		CHECK(rows[6].kind == _matchmaking_row_heading, "the heading under the members");
 		CHECK(rows[7].kind == _matchmaking_row_friend && rows[7].index == 0 && !strcmp(rows[7].id, "0000000000000001"),
@@ -485,11 +485,11 @@ int main(int argc, char **argv)
 
 		friends.online_count = 0;
 		total = matchmaking_rows_layout(&party, &friends, rows);
-		CHECK(total == 8 && rows[7].kind == _matchmaking_row_add, "no friends, no requests: the heading and ADD FRIEND: %d", total);
+		CHECK(total == 6, "no friends, no requests: no heading: %d", total);
 		friends.request_count = 2;
 		party = party_of(0, 2);
 		total = matchmaking_rows_layout(&party, &friends, rows);
-		CHECK(total == 6 && rows[2].kind == _matchmaking_row_heading && rows[3].kind == _matchmaking_row_request,
+		CHECK(total == 5 && rows[2].kind == _matchmaking_row_heading && rows[3].kind == _matchmaking_row_request,
 			"requests under the heading: %d", total);
 		friends.request_count = 0;
 		friends.online_count = 4;
@@ -510,7 +510,7 @@ int main(int argc, char **argv)
 		friends.request_count = 0;
 
 		party = party_of(0, 7);
-		friends.online_count = 4;
+		friends.online_count = 5;
 		total = matchmaking_rows_layout(&party, &friends, rows);
 		CHECK(total == 13 && rows[7].kind == _matchmaking_row_heading, "7 members: the heading is row 7");
 		CHECK(matchmaking_scroll(rows, total, 0, 0) == 1, "the heading leaves the bottom slot: %d",
@@ -521,7 +521,7 @@ int main(int argc, char **argv)
 		party = party_of(0, 0);
 		friends.online_count = 12;
 		total = matchmaking_rows_layout(&party, &friends, rows);
-		CHECK(total == 15 && rows[1].kind == _matchmaking_row_heading, "alone: the heading is row 1");
+		CHECK(total == 14 && rows[1].kind == _matchmaking_row_heading, "alone: the heading is row 1");
 		scroll = matchmaking_scroll(rows, total, 0, 1);
 		CHECK(scroll == 2, "a step down passes the heading, not on the top slot: %d", scroll);
 		scroll = matchmaking_scroll(rows, total, 2, -1);
@@ -532,7 +532,6 @@ int main(int argc, char **argv)
 		static struct matchmaking_row rows[MATCHMAKING_ROW_LIMIT];
 		struct p2p_party_status party = party_of(0, 2);
 		struct p2p_friends_status friends;
-		wchar_t name[P2P_PARTY_NAME_SIZE + 1], mark[32];
 		char text[32];
 		short total;
 
@@ -541,13 +540,11 @@ int main(int argc, char **argv)
 		friends.request_count = 1;
 		friends.online_count = 2;
 		total = matchmaking_rows_layout(&party, &friends, rows);
-		CHECK(total == 7 && rows[6].kind == _matchmaking_row_add, "E2: the last row is ADD FRIEND: %d", total);
-		CHECK(rows[5].kind == _matchmaking_row_friend, "after the friends");
+		CHECK(total == 6 && rows[5].kind == _matchmaking_row_friend, "E2: the friends end the list, no ADD FRIEND row: %d", total);
 		party = party_of(0, 0);
 		friends.request_count = friends.online_count = 0;
 		total = matchmaking_rows_layout(&party, &friends, rows);
-		CHECK(total == 3 && rows[1].kind == _matchmaking_row_heading && rows[2].kind == _matchmaking_row_add,
-			"alone, no friends: ADD FRIEND under the heading: %d", total);
+		CHECK(total == 1, "alone, no friends: no heading: %d", total);
 		party = party_of(1, 3);
 		friends.request_count = 1;
 		total = matchmaking_rows_layout(&party, &friends, rows);
@@ -558,18 +555,22 @@ int main(int argc, char **argv)
 		CHECK(matchmaking_rows_layout(&party, &friends, rows) == 2, "friends off: no ADD FRIEND");
 		friends.on = 1;
 		party.search_state = P2P_MM_QUEUED;
-		CHECK(matchmaking_rows_layout(&party, &friends, rows) == 2, "searching: no ADD FRIEND");
+		CHECK(matchmaking_rows_layout(&party, &friends, rows) == 2, "searching: no friend rows");
+		CHECK(!matchmaking_adding(&party, &friends), "searching: no ADD FRIEND button");
+		party.search_state = P2P_MM_OFF;
+		CHECK(matchmaking_adding(&party, &friends), "E2: the bar offers ADD FRIEND");
+		friends.on = 0;
+		CHECK(!matchmaking_adding(&party, &friends), "friends off: no ADD FRIEND button");
+		friends.on = 1;
+		party = party_of(0, 8);
+		CHECK(!matchmaking_adding(&party, &friends), "a full party: no ADD FRIEND button");
 
 		CHECK(matchmaking_party_bar(&party, _matchmaking_ask_none, TRUE) == (MATCHMAKING_BAR(add_friend) | MATCHMAKING_BAR(invite) |
 			MATCHMAKING_BAR(search) | MATCHMAKING_BAR(cancel)), "E2: bar with ADD FRIEND row");
-		matchmaking_add_row(&friends, name, mark, 32);
-		CHECK(!wcscmp(name, L"ADD FRIEND") && !mark[0], "the row: %ls %ls", name, mark);
-		friends.sent = 1;
-		matchmaking_add_row(&friends, name, mark, 32);
-		CHECK(!wcscmp(mark, L"REQUEST SENT"), "E2: %ls", mark);
-		friends.looking = 1;
-		matchmaking_add_row(&friends, name, mark, 32);
-		CHECK(!wcscmp(mark, L"LOOKING"), "a lookup runs: %ls", mark);
+		matchmaking_add_words(P2P_FRIEND_ADD_LOOKING, help, 128);
+		CHECK(!wcscmp(help, L"LOOKING FOR THAT TAG."), "a lookup runs: %ls", help);
+		matchmaking_add_words(MATCHMAKING_REQUEST_SENT, help, 128);
+		CHECK(!wcscmp(help, L"REQUEST SENT."), "E2: %ls", help);
 
 		matchmaking_add_words(MATCHMAKING_NO_TAG, help, 128);
 		CHECK(!wcscmp(help, L"NO PLAYER WITH THAT TAG."), "E22: %ls", help);
@@ -579,8 +580,6 @@ int main(int argc, char **argv)
 		CHECK(!wcscmp(help, L"THAT IS YOUR OWN TAG."), "the player's own tag: %ls", help);
 		matchmaking_add_words(P2P_FRIEND_ADD_FRIEND, help, 128);
 		CHECK(!wcscmp(help, L"ALREADY A FRIEND."), "a friend's tag: %ls", help);
-		matchmaking_add_help(help, 128);
-		CHECK(!wcscmp(read_out(help), L"Type the 8 characters after the # in your friend's name. A opens the keyboard."), "help: %ls", help);
 
 		CHECK(matchmaking_tag_typed(L"P3VD8AQ2", text, sizeof(text)) && !strcmp(text, "P3VD8AQ2"), "E2: a bare tag: %s", text);
 		CHECK(matchmaking_tag_typed(L"Luke#p3vd8aq2", text, sizeof(text)) && !strcmp(text, "P3VD8AQ2"), "name#tag: %s", text);
