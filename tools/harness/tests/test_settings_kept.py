@@ -51,4 +51,4 @@ def test_the_rows_that_open_pages_keep_the_screens_changes():
                 if opens:
                     pages += 1
                     assert 'run="port settings keep"' in opens.group(1), (name, row.split('\n')[0])
-    assert pages == 2 * 16
+    assert pages == 2 * 17
