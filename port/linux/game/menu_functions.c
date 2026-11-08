@@ -455,11 +455,13 @@ static boolean setting_load(struct widget_instance *widget)
 {
 	struct pc_menu_setting *setting = pc_menu_setting_get(widget->definition_tag_index);
 	char current[300];
+	short kept_loaded_index;
 
 	if (spinner_item(widget))
 		return TRUE;
 	if (!setting || !setting_text(setting->setting, current, sizeof(current), FALSE))
 		return FALSE;
+	kept_loaded_index = setting->loaded_index;
 	setting->loaded_index = setting_value_index(setting, current);
 	if (setting->loaded_index < (short)widget->parameters.list.number_of_items)
 		widget->parameters.list.selected_index = setting->loaded_index;
@@ -469,9 +471,10 @@ static boolean setting_load(struct widget_instance *widget)
 		setting->loaded_index = setting_value_index(setting, "none");
 	/* (the value changed before one of the screen's pages opened, which
 	deleted the screen: shown when the screen is gone back to, once, not when
-	it is opened afresh after the menus closed on the page) */
+	it is opened afresh after the menus closed on the page, nor when the page
+	saved the same setting, as HDR Calibration's are Extra Effects') */
 	if (setting->kept_index != NONE && setting->kept_index < (short)widget->parameters.list.number_of_items &&
-		ui_widget_port_going_back())
+		setting->loaded_index == kept_loaded_index && ui_widget_port_going_back())
 		widget->parameters.list.selected_index = setting->kept_index;
 	setting->kept_index = NONE;
 	return TRUE;

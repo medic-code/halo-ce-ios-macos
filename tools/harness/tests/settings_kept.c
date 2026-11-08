@@ -1,6 +1,7 @@
 #include "harness.h"
 /* Audio Setup's two rows and Sound Processing's one, each a spinner of a
-setting in config.toml; a screen's widgets are made again each time it opens
+setting in config.toml, and a page's row of Audio Setup's MASTER (as HDR
+Calibration's rows are Extra Effects'); a screen's widgets are made again each time it opens
 (ui_widget.c deletes the screen a page opens in place of) */
 #define MAXIMUM_STRINGS 64
 struct widget_instance {
@@ -13,12 +14,12 @@ static int _stricmp(char const *a,char const *b){return strcasecmp(a,b);}
 static boolean going_back;
 #define ui_widget_port_going_back() going_back
 #include "under_test_setting.inc"
-static char const *names[]={"audio.volume","audio.music_volume","audio.reverb"};
+static char const *names[]={"audio.volume","audio.music_volume","audio.reverb","audio.volume"};
 static char config[3][16]={"1.0","0.5","true"};
 static int writes;
-static struct pc_menu_setting settings[3];
+static struct pc_menu_setting settings[4];
 static struct pc_menu_setting *pc_menu_setting_get(long definition_index)
-{return definition_index>=0&&definition_index<3?&settings[definition_index]:NULL;}
+{return definition_index>=0&&definition_index<4?&settings[definition_index]:NULL;}
 static int setting_index(char const *name){for(int i=0;i<3;i++)if(!strcmp(names[i],name))return i;return -1;}
 static boolean setting_text(char const *name,char *text,unsigned int size,boolean default_value)
 {int i=setting_index(name);(void)default_value;if(i<0)return FALSE;snprintf(text,size,"%s",config[i]);return TRUE;}
@@ -50,10 +51,10 @@ static short shown(int i){return spinner[i].parameters.list.selected_index;}
 static void setup(void)
 {
  static char const *volumes[]={"0","0.5","1.0"},*switches[]={"true","false"};
- for(int i=0;i<3;i++){
+ for(int i=0;i<4;i++){
   settings[i]=(struct pc_menu_setting){.definition_index=i,.setting=names[i],.loaded_index=NONE,.kept_index=NONE};
-  settings[i].value_count=i<2?3:2;
-  for(int j=0;j<settings[i].value_count;j++)settings[i].values[j]=i<2?volumes[j]:switches[j];
+  settings[i].value_count=i!=2?3:2;
+  for(int j=0;j<settings[i].value_count;j++)settings[i].values[j]=i!=2?volumes[j]:switches[j];
  }
 }
 /* Audio Setup's MASTER changed to 0, then SOUND PROCESSING opened and REVERB changed */
@@ -106,6 +107,12 @@ int main(int argc,char **argv)
   audio_open();CHECK(shown(0)==2,"unsaved MASTER shown on a fresh Audio Setup: %s",settings[0].values[shown(0)]);
   audio_back();CHECK(shown(0)==2,"unsaved MASTER came back: %s",settings[0].values[shown(0)]);
   writes=0;ok();CHECK(writes==0,"OK wrote %d",writes);
+ } else CASE("page_saved") {
+  audio_open();spinner[0].parameters.list.selected_index=0;
+  settings_each(&screen,setting_keep);screen_open(3,1);
+  spinner[0].parameters.list.selected_index=1;ok();
+  audio_back();CHECK(shown(0)==1,"the page's saved MASTER replaced by the kept one: %s",settings[0].values[shown(0)]);
+  ok();CHECK(!strcmp(config[0],"0.5"),"OK wrote the kept MASTER over the page's: %s",config[0]);
  } else return 2;
  return 0;
 }

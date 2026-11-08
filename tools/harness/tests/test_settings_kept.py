@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import port_settings  # noqa: E402
 from harness import CHECK_FAILED, build, function, mutated, read, run, structure  # noqa: E402
 
-CASES = ['kept', 'ok', 'cancel', 'page_cancel', 'unchanged', 'closed']
+CASES = ['kept', 'ok', 'cancel', 'page_cancel', 'unchanged', 'closed', 'page_saved']
 
 
 def generated(fault=None):
@@ -36,6 +36,7 @@ def test_case(case):
     (('index != setting->loaded_index ? index : NONE', 'index != setting->loaded_index ? setting->loaded_index : NONE'),
      'kept'),
     (('ui_widget_port_going_back())', '(ui_widget_port_going_back() || TRUE))'), 'closed'),
+    (('setting->loaded_index == kept_loaded_index', '(kept_loaded_index || TRUE)'), 'page_saved'),
 ])
 def test_negative_control(fault, case):
     status, output = run(build('settings_kept', generated(fault)), case)
