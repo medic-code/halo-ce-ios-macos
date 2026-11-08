@@ -909,7 +909,6 @@ static void peer_send(struct peer *peer, const unsigned char *inner, int size)
 	if (!peer->connected)
 		return;
 	peer_send_to(peer, &peer->endpoint, inner, size);
-	peer->sent_time = p2p_now();
 }
 
 static void peer_ping(struct peer *peer, const struct p2p_candidate *to)
@@ -1261,6 +1260,7 @@ static void update_peers(void)
 		{
 			if (elapsed(peer->heard_time, PEER_TIMEOUT))
 				drop_peer(peer, "lost the connection");
+			/* (every second, traffic or not: the host's ping limit reads round_trip) */
 			else if (elapsed(peer->sent_time, PING_INTERVAL))
 			{
 				peer_ping(peer, &peer->endpoint);

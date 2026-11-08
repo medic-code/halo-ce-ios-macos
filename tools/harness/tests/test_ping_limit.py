@@ -82,3 +82,7 @@ def test_host_kicks_remote_machines_rejoinable():
         "_kick_rejoinable;" in loop
     assert "network_ping_limit_machine_joined(machine_index);" in function(
         server, "network_game_server_accept_client_machine_into_game")
+
+
+def test_tunnel_pings_while_sending():
+    assert "sent_time" not in function(read("port/linux/src/p2p.c"), "peer_send")
