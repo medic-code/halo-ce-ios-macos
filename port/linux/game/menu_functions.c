@@ -6301,7 +6301,6 @@ static boolean matchmaking_slot_accept(struct widget_instance *slot)
 		return matchmaking_request_ask(slot, row->id);
 	if (row->kind == _matchmaking_row_add)
 	{
-		matchmaking_screen.typed[0] = 0;
 		matchmaking_screen.added_row = (short)sibling_index(slot);
 		matchmaking_screen.typing = virtual_keyboard_launch(matchmaking_screen.typed, sizeof(matchmaking_screen.typed), VIRTUAL_KEYBOARD_CAPTION_FRIEND_TAG);
 		return matchmaking_screen.typing ? TRUE : campaign_fail();
@@ -9649,6 +9648,17 @@ boolean pc_menu_event_function_invoke(
 		else if (!strcmp(name, "port matchmaking search back"))
 		{
 			return matchmaking_search_back(widget, widget_deleted);
+		}
+		else if (!strcmp(name, "port matchmaking scroll up"))
+		{
+			if (matchmaking_screen.scroll > 0)
+				matchmaking_screen.scroll--;
+			return TRUE;
+		}
+		else if (!strcmp(name, "port matchmaking scroll down"))
+		{
+			matchmaking_screen.scroll++;
+			return TRUE;
 		}
 		else if (!strcmp(name, "port matchmaking search yes") || !strcmp(name, "port matchmaking search no"))
 		{

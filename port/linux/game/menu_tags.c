@@ -407,6 +407,7 @@ static char const *const port_function_names[] =
 	"port matchmaking right", "port matchmaking left", "port matchmaking remove", "port matchmaking invite",
 	"port matchmaking leave", "port matchmaking yes", "port matchmaking no", "port matchmaking slot",
 	"port matchmaking search yes", "port matchmaking search no", "port matchmaking search init",
+	"port matchmaking scroll up", "port matchmaking scroll down",
 };
 
 /* the PC version's game data functions that the Xbox's have not, from
