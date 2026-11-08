@@ -5860,6 +5860,9 @@ static void matchmaking_friend_row(const struct p2p_friend_row *friend_row, bool
 	case P2P_FRIEND_UPDATE:
 		words = L"UPDATE";
 		break;
+	case P2P_FRIEND_OFFLINE:
+		words = L"OFFLINE";
+		break;
 	}
 	usnprintf(mark, size - 1, L"%ls", words);
 	mark[size - 1] = 0;

@@ -611,6 +611,9 @@ int main(int argc, char **argv)
 		friend_row.state = P2P_FRIEND_UPDATE;
 		matchmaking_friend_row(&friend_row, TRUE, FALSE, name, mark, 32);
 		CHECK(!wcscmp(mark, L"UPDATE"), "another version: %ls", mark);
+		friend_row.state = P2P_FRIEND_OFFLINE;
+		matchmaking_friend_row(&friend_row, TRUE, FALSE, name, mark, 32);
+		CHECK(!wcscmp(mark, L"OFFLINE"), "offline: %ls", mark);
 
 		friend_row.state = P2P_FRIEND_MATCHMAKING;
 		matchmaking_friend_help(&friend_row, help, 128);

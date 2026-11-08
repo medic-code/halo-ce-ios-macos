@@ -80,6 +80,7 @@ NEGATIVE_CONTROLS = {
     "menus-friend-invitable": (("words = L\"IN MENUS\";", "words = L\"INVITE\";"), "friend_words"),
     "game-friend-invitable": (("words = L\"IN A GAME\";", "words = L\"INVITE\";"), "friend_words"),
     "update-friend-invitable": (("words = L\"UPDATE\";", "words = L\"INVITE\";"), "friend_words"),
+    "offline-friend-invitable": (("words = L\"OFFLINE\";", "words = L\"INVITE\";"), "friend_words"),
     "invited-mark-lost": (("invited ? L\"INVITED\" : ", ""), "friend_words"),
     "friend-focus-cue-lost": (("focused ? L\"A INVITE\" : ", ""), "friend_words"),
     "friend-name-with-tag": (("matchmaking_tagless(friend_row->name_tag, name);", "mods_wide_text(friend_row->name_tag, name, P2P_PARTY_NAME_SIZE + 1);"), "friend_words"),
