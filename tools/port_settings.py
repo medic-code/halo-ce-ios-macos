@@ -47,6 +47,7 @@ PAPER_WHITES = [("AUTO", "0")] + [(str(nits), str(nits)) for nits in sorted({*ra
 PEAK_BRIGHTNESSES = [("AUTO", "0")] + [(str(nits), str(nits)) for nits in
                                        [*range(250, 600, 25), *range(600, 1200, 50), *range(1200, 2001, 100),
                                         2500, 3000, 4000, 5000, 6000, 8000, 10000]]
+HOST_PING_LIMITS = (100, 150, 200, 250, 300)
 
 # each screen: its folder below PE, its screen's widget (the name the profile
 # menu opens), its header (widget, bitmap), the row spacing, and its rows:
@@ -200,7 +201,8 @@ SCREENS = {
     "network_setup": {
         "screen": "network_settings_screen",
         "header": ("header_profile_network_settings", f"{PE}/network_setup/header_profile_network_settings"),
-        "spacing": 30,
+        # 28px rows and the help moved down to fit a tenth row, as Video Setup's
+        "spacing": 28, "help_top": 358, "help_height": 54,
         # (the router, the clipboard and the updates, which the web build
         # has not: the other rows from the top there)
         "platform_places": True,
@@ -215,6 +217,9 @@ SCREENS = {
              "Join the game of an invite link copied before\nswitching to the game.", "desktop android"),
             ("CHECK FOR UPDATES:", "update.auto", ON_OFF,
              "Look for a new version when the game starts.", "desktop android"),
+            ("HOST PING LIMIT:", "network.host_ping_limit",
+             [("OFF", "0")] + [(f"{ms} MS", str(ms)) for ms in HOST_PING_LIMITS],
+             "Hosting: kick internet players whose ping to you\nstays above this in your lobby.", None),
             ("PLAYER NAMES:", "display.player_names",
              [("ALL", "all"), ("ALLIES", "allies"), ("ENEMIES", "enemies"), ("NONE", "none")],
              "In multiplayer, whose names are drawn above their\nheads.", None),
@@ -400,7 +405,7 @@ _audio["categories"] = [
 SEED_UPLOADS = (64, 128, 256, 512, 1024, 2048, 4096, 8192, 10240)
 _network = SCREENS["network_setup"]
 # (and the multiplayer HUD's rows, and streamer mode, screens of their own:
-# Network Setup has room for nine places)
+# Network Setup has room for ten places)
 _hud_settings = ("display.player_names", "display.player_name_scale", "display.scoreboard_team_layout",
                  "display.scoreboard_background")
 _hud_rows = [row for row in _network["rows"] if row[1] in _hud_settings]

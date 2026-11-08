@@ -834,6 +834,10 @@ void network_afk_machine_joined(long machine_index);
 boolean network_votekick_kept_out(unsigned long address, char const *hardware_id);
 /* port/linux/game/network_voice.c's (voice chat: each machine's key) */
 void network_voice_machine_joined(long machine_index);
+/* port/linux/game/network_ping_limit.c's */
+void network_ping_limit_machine_joined(long machine_index);
+long network_ping_limit_check(long machine_index, unsigned long address, boolean lobby, unsigned long joined);
+void network_ping_limit_kicked(char const *names, long ping);
 /* port/linux/src/p2p.c's */
 enum
 {
@@ -2404,6 +2408,7 @@ address, real address or hardware id) */
 				network_afk_machine_joined(machine_index);
 				/* (and its voice chat key) */
 				network_voice_machine_joined(machine_index);
+				network_ping_limit_machine_joined(machine_index);
 			}
 			else
 			{
@@ -5069,6 +5074,28 @@ static boolean network_game_server_handle_client_machines(
 						network_event("client machine %x removed from game", machine_index);
 					}
 					break;
+				}
+			}
+
+			/* port: the host's ping limit (network_ping_limit.c) */
+			if (VALID_INDEX(client_machine->machine_index, MAXIMUM_NETWORK_MACHINE_COUNT) &&
+				network_game_server_kick_pending[client_machine->machine_index] == _kick_none &&
+				network_game_server_client_machine_is_joined_to_game(server, client_machine) &&
+				!network_game_server_client_machine_is_local(server, client_machine))
+			{
+				short machine_index = client_machine->machine_index;
+				long ping = network_ping_limit_check(machine_index,
+					network_game_server_client_machine_addresses[machine_index],
+					server->state == _network_game_server_state_pregame && !server->sent_start_game_message,
+					system_milliseconds() - network_game_server_client_machine_join_times[machine_index]);
+
+				if (ping != NONE)
+				{
+					char names[96];
+
+					network_game_server_machine_names(server, machine_index, names, sizeof(names));
+					network_ping_limit_kicked(names, ping);
+					network_game_server_kick_pending[machine_index] = _kick_rejoinable;
 				}
 			}
 
