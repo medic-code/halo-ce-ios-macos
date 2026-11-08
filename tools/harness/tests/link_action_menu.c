@@ -21,7 +21,6 @@ static boolean config_boolean(char const *name){(void)name;return FALSE;}
 static int config_writes;
 static boolean config_write(char const *name,char const *value){(void)name;(void)value;config_writes++;return TRUE;}
 static void platform_log(char const *format,...){(void)format;}
-/* (the screen is opened here, not gone back to) */
 #define ui_widget_port_going_back() FALSE
 /* player_link.c: the master a refusing server needs, and what OK does */
 static int needed_master=-1,begun=-1,begin_count,unlink_count;

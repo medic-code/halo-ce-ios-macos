@@ -269,8 +269,7 @@ struct pc_menu_setting
 	long value_count;
 	char const *values[MAXIMUM_STRINGS];
 	short loaded_index;
-	/* the value shown when its screen gave way to one of its pages
-	("port settings keep"), else NONE */
+	/* the value to show when the screen is gone back to, else NONE */
 	short kept_index;
 };
 

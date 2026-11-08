@@ -3984,9 +3984,7 @@ void ui_widget_port_go_back(
 	widget_instance_go_back_to_previous(widget);
 }
 
-/* port: whether the screen being made is the one before, gone back to, not
-one opened (menu_functions.c's settings screens show the changes they kept
-for it) */
+/* port: whether the screen being made is one gone back to, not one opened */
 boolean ui_widget_port_going_back(
 	void)
 {

@@ -469,10 +469,10 @@ static boolean setting_load(struct widget_instance *widget)
 	the master chosen already, setting_text's) */
 	if (!strcmp(setting->setting, "link.action"))
 		setting->loaded_index = setting_value_index(setting, "none");
-	/* (the value changed before one of the screen's pages opened, which
-	deleted the screen: shown when the screen is gone back to, once, not when
-	it is opened afresh after the menus closed on the page, nor when the page
-	saved the same setting, as HDR Calibration's are Extra Effects') */
+	/* (the value "port settings keep" kept: shown once, when the screen is
+	gone back to, not opened afresh after the menus closed on its page, and
+	not if the page saved the setting, as HDR Calibration saves Extra
+	Effects') */
 	if (setting->kept_index != NONE && setting->kept_index < (short)widget->parameters.list.number_of_items &&
 		setting->loaded_index == kept_loaded_index && ui_widget_port_going_back())
 		widget->parameters.list.selected_index = setting->kept_index;
@@ -1546,10 +1546,7 @@ static boolean setting_changed_save(struct widget_instance *spinner, struct pc_m
 	return TRUE;
 }
 
-/* "port settings keep" (a row that opens one of the screen's pages, in its
-place): the values changed and not yet saved, which setting_load shows
-when the screen is made again on the way back, for its OK to save or its
-Cancel to drop */
+/* "port settings keep" */
 static boolean setting_keep(struct widget_instance *spinner, struct pc_menu_setting *setting)
 {
 	short index = spinner->parameters.list.selected_index;

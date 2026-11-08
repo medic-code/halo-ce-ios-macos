@@ -1,8 +1,9 @@
 #include "harness.h"
-/* Audio Setup's two rows and Sound Processing's one, each a spinner of a
-setting in config.toml, and a page's row of Audio Setup's MASTER (as HDR
-Calibration's rows are Extra Effects'); a screen's widgets are made again each time it opens
-(ui_widget.c deletes the screen a page opens in place of) */
+/* Audio Setup's two rows, Sound Processing's one and a page's row of
+Audio Setup's MASTER (as HDR Calibration's are Extra Effects'), each a
+spinner of a setting in config.toml; a screen's widgets are made again
+each time it opens (ui_widget.c deletes the screen a page opens in place
+of) */
 #define MAXIMUM_STRINGS 64
 struct widget_instance {
  long definition_tag_index; short type;
@@ -27,7 +28,6 @@ static boolean setting_write(char const *name,char const *value)
 {int i=setting_index(name);if(i<0)return FALSE;snprintf(config[i],sizeof(config[i]),"%s",value);writes++;return TRUE;}
 #include "under_test.inc"
 static struct widget_instance screen,row[2],spinner[2],item[2][3];
-/* a screen of the spinners [first, first + count): made, and each loaded as its created event does */
 static void screen_open(int first,int count)
 {
  memset(&screen,0,sizeof(screen));screen.child=&row[0];
@@ -44,7 +44,6 @@ static void screen_open(int first,int count)
 static void audio_open(void){screen_open(0,2);}
 static void audio_back(void){going_back=TRUE;audio_open();going_back=FALSE;}
 static void sound_processing_open(void){screen_open(2,1);}
-/* the row that opens Sound Processing: run="port settings keep" open=... */
 static void sound_processing_row(void){settings_each(&screen,setting_keep);sound_processing_open();}
 static void ok(void){settings_each(&screen,setting_changed_save);}
 static short shown(int i){return spinner[i].parameters.list.selected_index;}
@@ -57,7 +56,6 @@ static void setup(void)
   for(int j=0;j<settings[i].value_count;j++)settings[i].values[j]=i!=2?volumes[j]:switches[j];
  }
 }
-/* Audio Setup's MASTER changed to 0, then SOUND PROCESSING opened and REVERB changed */
 static void round_trip(boolean sub_ok)
 {
  audio_open();CHECK(shown(0)==2&&shown(1)==1,"saved values shown");
@@ -96,7 +94,6 @@ int main(int argc,char **argv)
  } else CASE("unchanged") {
   audio_open();sound_processing_row();
   CHECK(settings[0].kept_index==NONE&&settings[1].kept_index==NONE,"unchanged rows kept");
-  /* saved elsewhere meanwhile: the screen shows config.toml's */
   snprintf(config[1],sizeof(config[1]),"0");
   audio_back();CHECK(shown(0)==2&&shown(1)==0,"shows %d %d",shown(0),shown(1));
  } else CASE("closed") {
