@@ -260,7 +260,7 @@ static void check_election(void)
 struct machine
 {
 	struct mm_search search;
-	int quit;
+	int hosting, players, most, quit;
 };
 
 static struct machine machines[8];
@@ -348,6 +348,20 @@ static void replay_captured(int to)
 	}
 }
 
+static void game_side(int index)
+{
+	struct machine *machine = &machines[index];
+	struct p2p_mm_decision decision = machine->search.decision;
+
+	machine->search.decision.kind = P2P_MM_DECIDE_NONE;
+	if (decision.kind == P2P_MM_DECIDE_HOST)
+	{
+		machine->hosting = 1;
+		machine->players = 1;
+		machine->most = p2p_mm_size_players(decision.size);
+	}
+}
+
 static void run(double seconds)
 {
 	unsigned long until = now_ms + (unsigned long)(seconds * 1000);
@@ -365,6 +379,7 @@ static void run(double seconds)
 				continue;
 			publish(index, out,
 				mm_step(&machines[index].search, now_ms, out, MM_MAXIMUM_OUT));
+			game_side(index);
 		}
 	}
 }
@@ -392,6 +407,15 @@ static void start_searching(int index, unsigned playlists, int size, int can_hos
 	machines[index].search.can_host = can_host;
 }
 
+static int host_count(void)
+{
+	int index, count = 0;
+
+	for (index = 0; index < machine_count; index++)
+		count += machines[index].hosting && !machines[index].quit;
+	return count;
+}
+
 static int peer_count(const struct mm_search *search)
 {
 	int index, count = 0;
@@ -399,6 +423,12 @@ static int peer_count(const struct mm_search *search)
 	for (index = 0; index < MM_MAXIMUM_UNITS; index++)
 		count += search->peers[index].used && mm_counted(&search->peers[index]);
 	return count;
+}
+
+static int same_pool(const struct mm_search *a, const struct mm_search *b)
+{
+	return a->pool_count > 0 && a->pool_count == b->pool_count &&
+		!memcmp(a->pool, b->pool, (size_t)a->pool_count * P2P_KEY_HASH_SIZE);
 }
 
 static void check_ffa_leaves_ctf(void)
@@ -430,6 +460,23 @@ static void check_lost_cancel(void)
 	CHECK(peer_count(&machines[1].search) == 1, "E19: kept within 3 intervals of its last record");
 	run(4.0);
 	CHECK(peer_count(&machines[1].search) == 0, "E19: dropped 10 s after its last record");
+}
+
+static void check_stun_unknown(void)
+{
+	int index;
+
+	case_name = "e48_stun_unknown";
+	world(4);
+	for (index = 0; index < 4; index++)
+		start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_2V2, index == 3 ? -1 : 0);
+	run(20.0);
+	CHECK(host_count() == 0, "E48: unknown cannot host");
+	CHECK(!machines[0].search.pool_count && !machines[1].search.pool_count && !machines[2].search.pool_count,
+		"E48: no one forms a pool around it");
+	machines[3].search.can_host = 1;
+	run(20.0);
+	CHECK(machines[3].hosting, "E48: once STUN answers, it can host");
 }
 
 static void check_reconnect(void)
@@ -481,6 +528,23 @@ static void check_two_refreshes(void)
 	CHECK(peer_count(&machines[1].search) == 0, "E14: not counted on its first refresh");
 	run(2.5);
 	CHECK(peer_count(&machines[1].search) == 1, "E14: counted on its second refresh");
+}
+
+/* a minute's listening and 5 s of it hold a searcher at the same place in the queue */
+static void check_late_listener(void)
+{
+	int index;
+
+	case_name = "e37_late_listener";
+	world(6);
+	for (index = 0; index < 5; index++)
+		start_searching(index, 1u << P2P_MM_SLAYER, P2P_MM_3V3, 1);
+	run(55.0);
+	CHECK(host_count() == 0 && machines[0].search.pool_count == 0, "E37: five searchers are no pool of six");
+	start_searching(5, 1u << P2P_MM_SLAYER, P2P_MM_3V3, 1);
+	run(20.0);
+	CHECK(same_pool(&machines[0].search, &machines[5].search), "E37: the same pool, in the same order");
+	CHECK(host_count() == 1, "E37: one host: %d", host_count());
 }
 
 static void heard_kind(struct mm_search *search, int machine, unsigned long sequence, int kind)
@@ -568,9 +632,11 @@ int main(void)
 	check_topic_moves();
 	check_ffa_leaves_ctf();
 	check_lost_cancel();
+	check_stun_unknown();
 	check_reconnect();
 	check_replay();
 	check_two_refreshes();
+	check_late_listener();
 	check_full_table();
 	check_search_after_cancel();
 	printf(failures ? "FAILED %d\n" : "PASS\n", failures);
