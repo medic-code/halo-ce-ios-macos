@@ -267,6 +267,8 @@ static struct machine machines[8];
 static int machine_count;
 static unsigned long now_ms, now_unix;
 static int drop_percent;
+static int capture_from = -1, captured_count;
+static struct mm_out captured[256], quit_out[MM_MAXIMUM_OUT];
 
 struct in_flight
 {
@@ -297,6 +299,8 @@ static void publish(int from, const struct mm_out *out, int count)
 
 	for (index = 0; index < count; index++)
 	{
+		if (from == capture_from && captured_count < 256)
+			captured[captured_count++] = out[index];
 		for (to = 0; to < machine_count; to++)
 		{
 			if (to == from || !subscribed(&machines[to].search, out[index].topic) || rand() % 100 < drop_percent ||
@@ -332,6 +336,18 @@ static void deliver(void)
 	}
 }
 
+static void replay_captured(int to)
+{
+	int index;
+
+	for (index = 0; index < captured_count && flight_count < 1024; index++)
+	{
+		flight[flight_count].to = to;
+		flight[flight_count].at = now_ms + 100;
+		flight[flight_count++].out = captured[index];
+	}
+}
+
 static void run(double seconds)
 {
 	unsigned long until = now_ms + (unsigned long)(seconds * 1000);
@@ -359,7 +375,8 @@ static void world(int count)
 	machine_count = count;
 	now_ms = 1000;
 	now_unix = 1800000000UL;
-	drop_percent = flight_count = 0;
+	drop_percent = flight_count = captured_count = 0;
+	capture_from = -1;
 	srand(1);
 }
 
@@ -415,6 +432,19 @@ static void check_lost_cancel(void)
 	CHECK(peer_count(&machines[1].search) == 0, "E19: dropped 10 s after its last record");
 }
 
+static void check_quit(void)
+{
+	case_name = "quit";
+	world(2);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	start_searching(1, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(8.0);
+	publish(0, quit_out, mm_cancel(&machines[0].search, quit_out, MM_MAXIMUM_OUT));
+	machines[0].quit = 1;
+	run(0.5);
+	CHECK(peer_count(&machines[1].search) == 0, "quit: dropped at once by its cancel");
+}
+
 static void check_reconnect(void)
 {
 	unsigned long started;
@@ -432,6 +462,23 @@ static void check_reconnect(void)
 	run(9.5);
 	CHECK(machines[0].search.started == started, "reconnect: the same start");
 	CHECK(peer_count(&machines[1].search) == 1, "reconnect: counted again after 2 refreshes");
+}
+
+static void check_replay(void)
+{
+	case_name = "e43_replay";
+	world(2);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	start_searching(1, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	capture_from = 0;
+	run(8.0);
+	capture_from = -1;
+	publish(0, quit_out, mm_cancel(&machines[0].search, quit_out, MM_MAXIMUM_OUT));
+	machines[0].quit = 1;
+	run(1.0);
+	replay_captured(1);
+	run(7.0);
+	CHECK(peer_count(&machines[1].search) == 0, "E43: a replayed searcher is never counted again");
 }
 
 static void check_two_refreshes(void)
@@ -504,6 +551,38 @@ static void check_full_table(void)
 		"counted searchers are never evicted for a new one");
 }
 
+static void check_search_after_cancel(void)
+{
+	struct mm_search *search = &machines[0].search;
+
+	case_name = "e14_after_cancel";
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	heard_from(search, 300, 1);
+	heard_from(search, 300, 2);
+	heard_from(search, 300, 3);
+	heard_kind(search, 300, 4, MM_KIND_CANCEL);
+	heard_from(search, 300, 5);
+	heard_from(search, 300, 6);
+	CHECK(peer_count(search) == 0, "E14: a search after a cancel is not counted on its first refresh");
+	heard_from(search, 300, 7);
+	CHECK(peer_count(search) == 1, "E14: a search after a cancel is counted on its second refresh");
+}
+
+static void check_restart(void)
+{
+	case_name = "restart";
+	world(2);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	start_searching(1, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(8.0);
+	publish(0, quit_out, mm_cancel(&machines[0].search, quit_out, MM_MAXIMUM_OUT));
+	run(1.0);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(6.5);
+	CHECK(peer_count(&machines[1].search) == 1, "a search begun again at once is counted within 2 intervals");
+}
+
 int main(void)
 {
 	check_pool();
@@ -515,9 +594,13 @@ int main(void)
 	check_topic_moves();
 	check_ffa_leaves_ctf();
 	check_lost_cancel();
+	check_quit();
 	check_reconnect();
+	check_replay();
 	check_two_refreshes();
 	check_full_table();
+	check_search_after_cancel();
+	check_restart();
 	printf(failures ? "FAILED %d\n" : "PASS\n", failures);
 	return failures != 0;
 }
