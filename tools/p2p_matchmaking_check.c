@@ -263,6 +263,32 @@ static void check_joined_then_lost(void)
 	p2p_mm_cancel();
 }
 
+static void look_start(struct mm_search *search, unsigned playlists, int size, unsigned long now)
+{
+	struct p2p_mm_choice choice = { playlists, size };
+	unsigned char seed[P2P_SEED_SIZE];
+
+	seed_of(30, seed);
+	mm_start(search, seed, &choice, now, 1800000000UL);
+}
+
+static void check_ffa_wanted(void)
+{
+	static struct mm_search search;
+	struct p2p_lobby_wanted wanted;
+
+	case_name = "e63_ffa_wanted";
+	look_start(&search, 1u << P2P_MM_SLAYER | 1u << P2P_MM_CTF, P2P_MM_FFA_6, 1000);
+	mm_wanted(&search, &wanted);
+	CHECK(wanted.engines == 1u << 2 && wanted.players == 6 && !wanted.teams,
+		"E63: an FFA 6 search wants Slayer alone, 6 players, no teams: %u %d %d", wanted.engines, wanted.players,
+		wanted.teams);
+	look_start(&search, 1u << P2P_MM_SLAYER | 1u << P2P_MM_CTF, P2P_MM_2V2, 1000);
+	mm_wanted(&search, &wanted);
+	CHECK(wanted.engines == (1u << 2 | 1u << 1) && wanted.players == 4 && wanted.teams,
+		"a 2V2 search wants both: %u %d %d", wanted.engines, wanted.players, wanted.teams);
+}
+
 static int contains(const unsigned char *bytes, int size, const unsigned char *part, int part_size)
 {
 	int at;
@@ -1239,6 +1265,7 @@ int main(void)
 	check_verify_budget();
 	check_run_key();
 	check_joined_then_lost();
+	check_ffa_wanted();
 	check_worlds();
 	check_faults();
 	printf(failures ? "FAILED %d\n" : "PASS\n", failures);
