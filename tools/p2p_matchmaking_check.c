@@ -36,6 +36,26 @@ void p2p_key_hash(const unsigned char *key, unsigned char *hash)
 	memcpy(hash, digest, P2P_KEY_HASH_SIZE);
 }
 
+static unsigned char run_seed[P2P_SEED_SIZE] = { 0x77, 0x13 }, run_key[P2P_KEY_SIZE];
+
+const unsigned char *p2p_signing_seed(void) { return run_seed; }
+const unsigned char *p2p_signing_key(void)
+{
+	p2p_ed25519_public(run_seed, run_key, NULL);
+	return run_key;
+}
+void p2p_signal_mm_topics(const char topics[][P2P_MM_TOPIC_SIZE], int count) { (void)topics; (void)count; }
+
+static unsigned char published[MM_MAXIMUM_RECORD_SIZE];
+static int published_size;
+
+void p2p_signal_mm_publish(const char *topic, const unsigned char *payload, int size)
+{
+	(void)topic;
+	memcpy(published, payload, (size_t)size);
+	published_size = size;
+}
+
 static int failures;
 
 #define CHECK(condition, ...) do { if (!(condition)) { failures++; printf("FAIL %s: ", case_name); \
@@ -135,6 +155,23 @@ static void check_topic_moves(void)
 		}
 	}
 	CHECK(unsubscribed == 1 && !unsubscribed_wanted, "[A,B,C] to [B,C]: only A is unsubscribed: %d", unsubscribed);
+}
+
+static void check_run_key(void)
+{
+	struct p2p_mm_choice choice = { 1u << P2P_MM_SLAYER, P2P_MM_2V2 };
+	struct mm_record record;
+
+	case_name = "run_key";
+	published_size = 0;
+	p2p_mm_search(&choice);
+	pthread_mutex_lock(&p2p_lock);
+	p2p_mm_update(clock_now, 1);
+	pthread_mutex_unlock(&p2p_lock);
+	CHECK(published_size && mm_record_read(published, published_size, &record), "a searching record is published");
+	CHECK(published_size && !memcmp(record.key, p2p_signing_key(), P2P_KEY_SIZE),
+		"the search is the run's identity: its key is the signing key");
+	p2p_mm_cancel();
 }
 
 static int contains(const unsigned char *bytes, int size, const unsigned char *part, int part_size)
@@ -1164,6 +1201,7 @@ int main(int argc, char **argv)
 	check_playlists();
 	check_topics();
 	check_topic_moves();
+	check_run_key();
 	check_worlds();
 	check_faults();
 	if (argc > 1)
