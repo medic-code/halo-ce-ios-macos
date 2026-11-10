@@ -424,6 +424,7 @@ enum
 	P2P_MM_LOOKING,
 	P2P_MM_QUEUED,
 	P2P_MM_FOUND,
+	P2P_MM_HOSTING,
 };
 enum
 {
@@ -435,6 +436,7 @@ struct p2p_mm_decision
 {
 	int kind;
 	int playlist, size;
+	char invite[P2P_LISTING_INVITE_SIZE];
 };
 
 #endif
