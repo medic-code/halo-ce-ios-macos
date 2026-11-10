@@ -205,11 +205,56 @@ static void check_run_key(void)
 	published_size = 0;
 	p2p_mm_search(&choice);
 	pthread_mutex_lock(&p2p_lock);
-	p2p_mm_update(clock_now, 1);
+	p2p_mm_update(clock_now, 1, NULL);
 	pthread_mutex_unlock(&p2p_lock);
 	CHECK(published_size && mm_record_read(published, published_size, &record), "a searching record is published");
 	CHECK(published_size && !memcmp(record.key, p2p_signing_key(), P2P_KEY_SIZE),
 		"the search is the run's identity: its key is the signing key");
+	p2p_mm_cancel();
+}
+
+static void check_joined_then_lost(void)
+{
+	struct p2p_mm_choice choice = { 1u << P2P_MM_SLAYER, P2P_MM_2V2 };
+	struct mm_record record = searching(20, 1);
+	struct p2p_mm_decision decision;
+	struct p2p_mm_status status;
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+	int size;
+
+	case_name = "joined_then_lost";
+	record.kind = MM_KIND_HOSTING;
+	record.players = 1;
+	record.most_players = 4;
+	seed_of(20, seed);
+	size = mm_record_write(&record, seed, bytes, sizeof(bytes));
+	p2p_mm_search(&choice);
+	pthread_mutex_lock(&p2p_lock);
+	p2p_mm_heard(bytes, size);
+	p2p_mm_update(clock_now, 1, NULL);
+	pthread_mutex_unlock(&p2p_lock);
+	CHECK(p2p_mm_take_decision(&decision) == P2P_MM_DECIDE_JOIN, "a hosted game is joined");
+	p2p_mm_joined(0);
+	p2p_mm_get_status(&status);
+	CHECK(status.state == P2P_MM_QUEUED, "a failed join requeues: %d", status.state);
+	p2p_mm_cancel();
+	p2p_mm_search(&choice);
+	pthread_mutex_lock(&p2p_lock);
+	record.sequence = 2;
+	size = mm_record_write(&record, seed, bytes, sizeof(bytes));
+	p2p_mm_heard(bytes, size);
+	p2p_mm_update(clock_now, 1, NULL);
+	pthread_mutex_unlock(&p2p_lock);
+	CHECK(p2p_mm_take_decision(&decision) == P2P_MM_DECIDE_JOIN, "joined again");
+	p2p_mm_joined(1);
+	p2p_mm_get_status(&status);
+	CHECK(status.state == P2P_MM_OFF, "joined: the search is over");
+	published_size = 0;
+	pthread_mutex_lock(&p2p_lock);
+	p2p_mm_update(clock_now, 1, NULL);
+	pthread_mutex_unlock(&p2p_lock);
+	CHECK(published_size && mm_record_read(published, published_size, &record) && record.kind == MM_KIND_CANCEL &&
+		record.playlist == P2P_MM_SLAYER && record.size == P2P_MM_2V2, "joined: the queue it joined in is cancelled");
 	p2p_mm_cancel();
 }
 
@@ -1242,6 +1287,7 @@ int main(int argc, char **argv)
 	check_topic_moves();
 	check_verify_budget();
 	check_run_key();
+	check_joined_then_lost();
 	check_worlds();
 	check_faults();
 	if (argc > 1)
