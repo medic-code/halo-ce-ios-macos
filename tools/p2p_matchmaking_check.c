@@ -236,7 +236,8 @@ static void check_joined_then_lost(void)
 	CHECK(p2p_mm_take_decision(&decision) == P2P_MM_DECIDE_JOIN, "a hosted game is joined");
 	p2p_mm_joined(0);
 	p2p_mm_get_status(&status);
-	CHECK(status.state == P2P_MM_QUEUED, "a failed join requeues: %d", status.state);
+	CHECK(status.state == P2P_MM_QUEUED && status.notice == P2P_MM_NOTICE_HOST_UNREACHED, "a failed join requeues: %d", status.state);
+	p2p_mm_game_lost();
 	p2p_mm_cancel();
 	p2p_mm_search(&choice);
 	pthread_mutex_lock(&p2p_lock);
@@ -255,6 +256,10 @@ static void check_joined_then_lost(void)
 	pthread_mutex_unlock(&p2p_lock);
 	CHECK(published_size && mm_record_read(published, published_size, &record) && record.kind == MM_KIND_CANCEL &&
 		record.playlist == P2P_MM_SLAYER && record.size == P2P_MM_2V2, "joined: the queue it joined in is cancelled");
+	p2p_mm_game_lost();
+	p2p_mm_get_status(&status);
+	CHECK(status.state == P2P_MM_QUEUED && status.notice == P2P_MM_NOTICE_HOST_LEFT,
+		"E11: the host left a joined game: queued again, told: %d", status.state);
 	p2p_mm_cancel();
 }
 

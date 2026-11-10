@@ -798,8 +798,10 @@ static struct
 	int queue_count;
 	struct p2p_mm_decision pending;
 	int subscribed[P2P_MM_MAXIMUM_TOPICS][2], subscribed_count;
+	int in_game;
 	int has_token;
 	unsigned char token[P2P_TOKEN_SIZE];
+	int notice;
 } mm;
 
 static unsigned long monotonic_us(void)
@@ -840,6 +842,11 @@ static void publish_out(const struct mm_out *out, int count)
 
 	for (index = 0; index < count; index++)
 		p2p_signal_mm_publish(out[index].topic, out[index].bytes, out[index].size);
+}
+
+static int notice_after(int notice, int state)
+{
+	return state == P2P_MM_LOOKING || state == P2P_MM_QUEUED ? notice : P2P_MM_NOTICE_NONE;
 }
 
 void p2p_mm_heard(const unsigned char *payload, int size)
@@ -919,6 +926,7 @@ void p2p_mm_update(unsigned long now, int can_host, const unsigned char *token)
 	p2p_mm_verify_pass(now);
 	count = mm_step(&mm.search, now, out, MM_MAXIMUM_OUT);
 	publish_out(out, count);
+	mm.notice = notice_after(mm.notice, mm.search.state);
 	if (mm.search.decision.kind != P2P_MM_DECIDE_NONE)
 	{
 		mm.pending = mm.search.decision;
@@ -932,6 +940,7 @@ static void cancel_search(void)
 	struct mm_out out[MM_MAXIMUM_OUT];
 
 	publish_out(out, mm_cancel(&mm.search, out, MM_MAXIMUM_OUT));
+	mm.in_game = 0;
 	mm.pending.kind = P2P_MM_DECIDE_NONE;
 	mm.queue_count = 0;
 }
@@ -941,7 +950,9 @@ void p2p_mm_search(const struct p2p_mm_choice *choice)
 	pthread_mutex_lock(&p2p_lock);
 	if (mm.search.state != P2P_MM_OFF)
 		cancel_search();
+	mm.in_game = 0;
 	mm_start(&mm.search, p2p_signing_seed(), choice, p2p_now(), (unsigned long)time(NULL));
+	mm.notice = P2P_MM_NOTICE_NONE;
 	pthread_mutex_unlock(&p2p_lock);
 }
 
@@ -950,6 +961,8 @@ void p2p_mm_cancel(void)
 	pthread_mutex_lock(&p2p_lock);
 	if (mm.search.state != P2P_MM_OFF)
 		cancel_search();
+	mm.in_game = 0;
+	mm.notice = P2P_MM_NOTICE_NONE;
 	pthread_mutex_unlock(&p2p_lock);
 }
 
@@ -968,7 +981,24 @@ void p2p_mm_joined(int ok)
 {
 	pthread_mutex_lock(&p2p_lock);
 	if (mm.search.state == P2P_MM_FOUND && mm.search.decided == P2P_MM_DECIDE_JOIN)
+	{
 		mm_joined(&mm.search, ok, p2p_now());
+		mm.in_game = ok;
+		if (!ok)
+			mm.notice = P2P_MM_NOTICE_HOST_UNREACHED;
+	}
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+void p2p_mm_game_lost(void)
+{
+	pthread_mutex_lock(&p2p_lock);
+	if (mm.search.state != P2P_MM_OFF || mm.in_game)
+	{
+		mm_game_lost(&mm.search, p2p_now());
+		mm.in_game = 0;
+		mm.notice = P2P_MM_NOTICE_HOST_LEFT;
+	}
 	pthread_mutex_unlock(&p2p_lock);
 }
 
@@ -1031,6 +1061,7 @@ void p2p_mm_get_status(struct p2p_mm_status *status)
 				status->needed = p2p_mm_size_players(status->size);
 			}
 		}
+		status->notice = mm.notice = notice_after(mm.notice, search->state);
 	}
 	pthread_mutex_unlock(&p2p_lock);
 }
