@@ -266,6 +266,7 @@ struct machine
 static struct machine machines[8];
 static int machine_count;
 static unsigned long now_ms, now_unix;
+static int drop_percent;
 
 struct in_flight
 {
@@ -298,7 +299,8 @@ static void publish(int from, const struct mm_out *out, int count)
 	{
 		for (to = 0; to < machine_count; to++)
 		{
-			if (to == from || !subscribed(&machines[to].search, out[index].topic) || flight_count == 1024)
+			if (to == from || !subscribed(&machines[to].search, out[index].topic) || rand() % 100 < drop_percent ||
+				flight_count == 1024)
 			{
 				continue;
 			}
@@ -357,7 +359,8 @@ static void world(int count)
 	machine_count = count;
 	now_ms = 1000;
 	now_unix = 1800000000UL;
-	flight_count = 0;
+	drop_percent = flight_count = 0;
+	srand(1);
 }
 
 static void start_searching(int index, unsigned playlists, int size, int can_host)
@@ -395,6 +398,40 @@ static void check_ffa_leaves_ctf(void)
 	CHECK(subscribed(&machines[0].search, slayer), "E63: the Slayer FFA 6 queue");
 	CHECK(!subscribed(&machines[0].search, ctf), "E63: no CTF FFA 6 queue");
 	CHECK(peer_count(&machines[0].search) == 0, "E63: a CTF-only FFA 6 search is not counted by it");
+}
+
+static void check_lost_cancel(void)
+{
+	case_name = "e19_lost_cancel";
+	world(2);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	start_searching(1, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(8.0);
+	CHECK(peer_count(&machines[1].search) == 1, "heard");
+	machines[0].quit = 1;
+	run(6.5);
+	CHECK(peer_count(&machines[1].search) == 1, "E19: kept within 3 intervals of its last record");
+	run(4.0);
+	CHECK(peer_count(&machines[1].search) == 0, "E19: dropped 10 s after its last record");
+}
+
+static void check_reconnect(void)
+{
+	unsigned long started;
+
+	case_name = "reconnect";
+	world(2);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	start_searching(1, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(8.0);
+	started = machines[0].search.started;
+	drop_percent = 100;
+	run(15.0);
+	CHECK(peer_count(&machines[1].search) == 0, "expired while unheard");
+	drop_percent = 0;
+	run(9.5);
+	CHECK(machines[0].search.started == started, "reconnect: the same start");
+	CHECK(peer_count(&machines[1].search) == 1, "reconnect: counted again after 2 refreshes");
 }
 
 static void check_two_refreshes(void)
@@ -477,6 +514,8 @@ int main(void)
 	check_topics();
 	check_topic_moves();
 	check_ffa_leaves_ctf();
+	check_lost_cancel();
+	check_reconnect();
 	check_two_refreshes();
 	check_full_table();
 	printf(failures ? "FAILED %d\n" : "PASS\n", failures);
