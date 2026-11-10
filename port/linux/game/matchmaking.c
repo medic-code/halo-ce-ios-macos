@@ -20,6 +20,7 @@
 
 /* one under 5000: a countdown message rounds down, so 4999 reads 4 and the lobby's line adds 1 */
 #define MATCHMAKING_START_MILLISECONDS 4999
+#define MATCHMAKING_JOIN_SECONDS 25.0f
 
 /* the server's setup clears a map set sooner */
 #define MATCHMAKING_MAP_SECONDS 1.0f
@@ -29,6 +30,7 @@ char const *pc_menus_screen(char const *name);
 unsigned long system_milliseconds(void);
 boolean main_menu_is_loaded(void);
 boolean pc_menu_player1_profile(void);
+boolean pc_menu_multiplayer_player(short controller);
 void platform_log(char const *format, ...);
 
 static char const *const slayer_small_maps[] = { "chillout", "prisoner", "wizard", "longest", "carousel", "damnation", NULL };
@@ -57,6 +59,8 @@ enum
 {
 	_matchmaking_idle,
 	_matchmaking_hosting,
+	_matchmaking_joining,
+	_matchmaking_joined,
 };
 
 static struct
@@ -66,7 +70,14 @@ static struct
 	short playlist, size;
 	char map[64];
 	boolean map_set, player_added;
+	boolean public_game;
+	byte host[6];
 } matchmaking;
+
+boolean matchmaking_game_locked(void)
+{
+	return matchmaking.role != _matchmaking_idle && !matchmaking.public_game;
+}
 
 static void matchmaking_start_countdown(struct network_game_server *server, short players, short most_players)
 {
@@ -78,6 +89,13 @@ static void matchmaking_start_countdown(struct network_game_server *server, shor
 
 /* copies of network_server_manager.c's and network_client_manager.c's private state enums: keep the values in step */
 enum { SERVER_PREGAME };
+
+enum
+{
+	_client_state_searching,
+	_client_state_joining,
+	_client_state_pregame,
+};
 
 /* the screens behind are history only: loading the main menu runs
 main_menu_initialize, which ends the client's game */
@@ -124,6 +142,7 @@ static void matchmaking_begin_host(struct p2p_mm_decision const *decision)
 	p2p_set_hosting_public(FALSE);
 	matchmaking_open_lobby();
 	matchmaking.role = _matchmaking_hosting;
+	matchmaking.public_game = FALSE;
 	matchmaking.seconds = 0.0f;
 	matchmaking.map_set = matchmaking.player_added = FALSE;
 }
@@ -182,24 +201,86 @@ static void matchmaking_update_host(float seconds)
 		matchmaking_start_countdown(server, game->player_count, game->maximum_players);
 }
 
+static void matchmaking_begin_join(struct p2p_mm_decision const *decision)
+{
+	dispose_global_network_game_client();
+	dispose_global_network_game_server();
+	if (!create_global_network_game_client())
+	{
+		p2p_mm_joined(0);
+		return;
+	}
+	game_connection_set(_game_connection_network_client);
+	if (!pc_menu_multiplayer_player(0) || !p2p_invite_host(decision->invite, matchmaking.host) || !p2p_join_invite(decision->invite))
+	{
+		dispose_global_network_game_client();
+		p2p_mm_joined(0);
+		return;
+	}
+	matchmaking.role = _matchmaking_joining;
+	matchmaking.public_game = decision->public_game != 0;
+	matchmaking.seconds = 0.0f;
+}
+
+static void matchmaking_update_join(float seconds)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	short state_data;
+	int stage;
+
+	matchmaking.seconds += seconds;
+	p2p_join_progress(&stage, NULL, 0);
+	if (client && network_game_client_get_state(client, &state_data) == _client_state_pregame)
+	{
+		matchmaking_open_lobby();
+		p2p_mm_joined(1);
+		matchmaking.role = _matchmaking_joined;
+		return;
+	}
+	network_game_client_port_join_host(matchmaking.host);
+	if (!client || matchmaking.seconds >= MATCHMAKING_JOIN_SECONDS || stage == P2P_JOIN_FAILED)
+	{
+		dispose_global_network_game_client();
+		p2p_mm_joined(0);
+		matchmaking.role = _matchmaking_idle;
+	}
+}
+
 void matchmaking_update(float seconds)
 {
 	struct p2p_mm_status status;
 	struct p2p_mm_decision decision;
 
 	p2p_mm_get_status(&status);
-	if (status.state == P2P_MM_OFF && matchmaking.role == _matchmaking_hosting)
-		matchmaking_end_host();
+	/* the search is off while joined: a joined game must not end here */
+	if (status.state == P2P_MM_OFF && (matchmaking.role == _matchmaking_hosting || matchmaking.role == _matchmaking_joining))
+	{
+		if (matchmaking.role == _matchmaking_hosting)
+			matchmaking_end_host();
+		else
+			dispose_global_network_game_client();
+		matchmaking.role = _matchmaking_idle;
+	}
 	switch (matchmaking.role)
 	{
 	case _matchmaking_hosting:
 		matchmaking_update_host(seconds);
 		break;
+	case _matchmaking_joining:
+		matchmaking_update_join(seconds);
+		break;
 	}
-	if (matchmaking.role == _matchmaking_idle && status.state != P2P_MM_OFF && main_menu_is_loaded())
+	if ((matchmaking.role == _matchmaking_idle || matchmaking.role == _matchmaking_hosting) &&
+		status.state != P2P_MM_OFF && main_menu_is_loaded())
 	{
 		p2p_mm_take_decision(&decision);
-		if (decision.kind == P2P_MM_DECIDE_HOST)
+		if (decision.kind == P2P_MM_DECIDE_HOST && matchmaking.role == _matchmaking_idle)
 			matchmaking_begin_host(&decision);
+		else if (decision.kind == P2P_MM_DECIDE_JOIN)
+		{
+			if (matchmaking.role == _matchmaking_hosting)
+				matchmaking_end_host();
+			matchmaking_begin_join(&decision);
+		}
 	}
 }
