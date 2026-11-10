@@ -47,6 +47,19 @@ const unsigned char *p2p_signing_key(void)
 }
 void p2p_signal_mm_topics(const char topics[][P2P_MM_TOPIC_SIZE], int count) { (void)topics; (void)count; }
 
+static struct p2p_listing listings[8];
+static int listing_count;
+
+int lobby_games_unlocked(struct p2p_listing *games, int maximum_count)
+{
+	int count = listing_count < maximum_count ? listing_count : maximum_count;
+
+	memcpy(games, listings, (size_t)count * sizeof(*games));
+	return count;
+}
+/* lobby_pick.inc: written by tools/test_linux_port.py from p2p_lobby.c */
+#include "lobby_pick.inc"
+
 static unsigned char published[MM_MAXIMUM_RECORD_SIZE];
 static int published_size;
 
@@ -205,6 +218,7 @@ static void check_run_key(void)
 	published_size = 0;
 	p2p_mm_search(&choice);
 	pthread_mutex_lock(&p2p_lock);
+	clock_now += MM_LOOK_TIME;
 	p2p_mm_update(clock_now, 1, NULL);
 	pthread_mutex_unlock(&p2p_lock);
 	CHECK(published_size && mm_record_read(published, published_size, &record), "a searching record is published");
@@ -231,6 +245,7 @@ static void check_joined_then_lost(void)
 	p2p_mm_search(&choice);
 	pthread_mutex_lock(&p2p_lock);
 	p2p_mm_heard(bytes, size);
+	clock_now += MM_LOOK_TIME;
 	p2p_mm_update(clock_now, 1, NULL);
 	pthread_mutex_unlock(&p2p_lock);
 	CHECK(p2p_mm_take_decision(&decision) == P2P_MM_DECIDE_JOIN, "a hosted game is joined");
@@ -244,6 +259,7 @@ static void check_joined_then_lost(void)
 	record.sequence = 2;
 	size = mm_record_write(&record, seed, bytes, sizeof(bytes));
 	p2p_mm_heard(bytes, size);
+	clock_now += MM_LOOK_TIME;
 	p2p_mm_update(clock_now, 1, NULL);
 	pthread_mutex_unlock(&p2p_lock);
 	CHECK(p2p_mm_take_decision(&decision) == P2P_MM_DECIDE_JOIN, "joined again");
@@ -258,9 +274,26 @@ static void check_joined_then_lost(void)
 		record.playlist == P2P_MM_SLAYER && record.size == P2P_MM_2V2, "joined: the queue it joined in is cancelled");
 	p2p_mm_game_lost();
 	p2p_mm_get_status(&status);
-	CHECK(status.state == P2P_MM_QUEUED && status.notice == P2P_MM_NOTICE_HOST_LEFT,
-		"E11: the host left a joined game: queued again, told: %d", status.state);
+	CHECK(status.state == P2P_MM_LOOKING && status.notice == P2P_MM_NOTICE_HOST_LEFT,
+		"E11: the host left a joined game: searching again, told: %d", status.state);
 	p2p_mm_cancel();
+}
+
+static void add_listing(const char *name, int engine, int players, int most, int ping)
+{
+	struct p2p_listing *game = &listings[listing_count++];
+
+	memset(game, 0, sizeof(*game));
+	snprintf(game->name, sizeof(game->name), "%s", name);
+	snprintf(game->invite, sizeof(game->invite), "halo://join/%s", name);
+	game->identifier[0] = (unsigned char)listing_count;
+	game->engine_type = (unsigned char)engine;
+	game->player_count = (unsigned char)players;
+	game->maximum_player_count = (unsigned char)most;
+	game->has_teams = 1;
+	game->open = 1;
+	game->ping = (short)ping;
+	game->network_version = HALO_PORT_NETWORK_VERSION;
 }
 
 static void look_start(struct mm_search *search, unsigned playlists, int size, unsigned long now)
@@ -268,8 +301,64 @@ static void look_start(struct mm_search *search, unsigned playlists, int size, u
 	struct p2p_mm_choice choice = { playlists, size };
 	unsigned char seed[P2P_SEED_SIZE];
 
+	listing_count = 0;
 	seed_of(30, seed);
 	mm_start(search, seed, &choice, now, 1800000000UL);
+}
+
+static void check_look(void)
+{
+	static struct mm_search search;
+	struct mm_out out[MM_MAXIMUM_OUT];
+	struct mm_record record;
+	int count, queues;
+
+	case_name = "look";
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1000);
+	CHECK(search.state == P2P_MM_LOOKING, "a search starts by looking");
+	add_listing("game", 2, 2, 4, -1);
+	count = mm_step(&search, 3000, out, MM_MAXIMUM_OUT);
+	CHECK(search.state == P2P_MM_LOOKING && !count && search.decision.kind == P2P_MM_DECIDE_NONE,
+		"a fitting game with no ping holds the look: %d", search.state);
+	CHECK(search.games_checked == 1, "the games examined are counted: %d", search.games_checked);
+	listings[0].ping = 40;
+	mm_step(&search, 3100, out, MM_MAXIMUM_OUT);
+	CHECK(search.decision.kind == P2P_MM_DECIDE_JOIN && !strcmp(search.decision.invite, "halo://join/game") &&
+		search.state == P2P_MM_FOUND, "a timed fitting game is joined: %d", search.decision.kind);
+	CHECK(search.decision.playlist == P2P_MM_SLAYER && search.decision.size == P2P_MM_2V2, "its playlist and size");
+	CHECK(search.decision.public_game, "a public game's join says so");
+
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1000);
+	add_listing("ctf", 1, 2, 4, 40);
+	count = mm_step(&search, 6900, out, MM_MAXIMUM_OUT);
+	CHECK(search.state == P2P_MM_LOOKING && !count, "before 6 s nothing fitting keeps the look");
+	count = mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
+	CHECK(search.state == P2P_MM_QUEUED && count == 1 && mm_record_read(out[0].bytes, out[0].size, &record) &&
+		record.kind == MM_KIND_SEARCHING, "at 6 s the search queues and its record goes out at once: %d", count);
+
+	look_start(&search, 1u << P2P_MM_SLAYER | 1u << P2P_MM_CTF, P2P_MM_2V2, 1000);
+	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
+	queues = search.queue_count;
+	add_listing("late", 1, 3, 4, 50);
+	count = mm_step(&search, 8000, out, MM_MAXIMUM_OUT);
+	CHECK(search.decision.kind == P2P_MM_DECIDE_JOIN && search.decision.playlist == P2P_MM_CTF &&
+		!strcmp(search.decision.invite, "halo://join/late"), "E20: a game that appears while queued is joined");
+	CHECK(queues == 2 && count == queues, "E20: a cancel for each queue: %d of %d", count, queues);
+	for (queues = 0; queues < count; queues++)
+		CHECK(mm_record_read(out[queues].bytes, out[queues].size, &record) && record.kind == MM_KIND_CANCEL,
+			"E20: output %d is a cancel", queues);
+	listing_count = 0;
+
+	look_start(&search, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1000);
+	add_listing("quick", 2, 2, 4, 40);
+	add_listing("unpinged", 2, 3, 4, -1);
+	mm_step(&search, 3000, out, MM_MAXIMUM_OUT);
+	CHECK(search.state == P2P_MM_LOOKING && search.decision.kind == P2P_MM_DECIDE_NONE,
+		"a pinged fit waits while another fit is unpinged: %d", search.state);
+	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
+	CHECK(search.decision.kind == P2P_MM_DECIDE_JOIN && !strcmp(search.decision.invite, "halo://join/quick"),
+		"at 6 s the timed fit is taken");
+	listing_count = 0;
 }
 
 static void check_ffa_wanted(void)
@@ -644,6 +733,7 @@ static void start_searching(int index, unsigned playlists, int size, int can_hos
 	choice.size = size;
 	seed_of(100 + index, seed);
 	mm_start(&machines[index].search, seed, &choice, now_ms, now_unix);
+	machines[index].search.state = P2P_MM_QUEUED;
 	machines[index].search.can_host = can_host;
 }
 
@@ -1061,6 +1151,7 @@ static void check_invited_twice(void)
 	hear_game(301, 3, 1, 1, fuller);
 	mm_step(&machines[0].search, now_ms, out, MM_MAXIMUM_OUT);
 	p2p_hex(fuller, P2P_KEY_HASH_SIZE, text);
+	CHECK(!machines[0].search.decision.public_game, "a pool's join is not a public game's");
 	CHECK(machines[0].search.decision.kind == P2P_MM_DECIDE_JOIN &&
 		!strncmp(machines[0].search.decision.invite + strlen("halo://join/"), text, strlen(text)),
 		"E10: invited by two hosts, it joins the one with more players");
@@ -1108,8 +1199,8 @@ static void check_host_quits_lobby(void)
 	run(1.0);
 	for (index = 0; index < 4; index++)
 		if (index != host)
-			kept &= machines[index].search.state == P2P_MM_QUEUED && machines[index].search.started == starts[index];
-	CHECK(kept, "E11: back in the queue with their original starts");
+			kept &= machines[index].search.state == P2P_MM_LOOKING && machines[index].search.started == starts[index];
+	CHECK(kept, "E11: back in the search with their original starts");
 	start_searching(4, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
 	run(30.0);
 	CHECK(host_count() == 1 && machines[find_host()].players == 4, "E11: they elect again with the next searcher");
@@ -1319,6 +1410,7 @@ int main(int argc, char **argv)
 	check_verify_budget();
 	check_run_key();
 	check_joined_then_lost();
+	check_look();
 	check_ffa_wanted();
 	check_worlds();
 	check_faults();
