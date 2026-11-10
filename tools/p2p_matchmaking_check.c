@@ -48,7 +48,7 @@ const unsigned char *p2p_signing_key(void)
 void p2p_signal_mm_topics(const char topics[][P2P_MM_TOPIC_SIZE], int count) { (void)topics; (void)count; }
 
 static struct p2p_listing listings[8];
-static int listing_count;
+static int listing_count, browsing, browse_calls;
 
 int lobby_games_unlocked(struct p2p_listing *games, int maximum_count)
 {
@@ -59,6 +59,12 @@ int lobby_games_unlocked(struct p2p_listing *games, int maximum_count)
 }
 /* lobby_pick.inc: written by tools/test_linux_port.py from p2p_lobby.c */
 #include "lobby_pick.inc"
+int p2p_lobby_browsing(void) { return browsing; }
+void p2p_lobby_browse(int on)
+{
+	browsing = on;
+	browse_calls++;
+}
 
 static unsigned char published[MM_MAXIMUM_RECORD_SIZE];
 static int published_size;
@@ -272,11 +278,14 @@ static void check_joined_then_lost(void)
 	pthread_mutex_unlock(&p2p_lock);
 	CHECK(published_size && mm_record_read(published, published_size, &record) && record.kind == MM_KIND_CANCEL &&
 		record.playlist == P2P_MM_SLAYER && record.size == P2P_MM_2V2, "joined: the queue it joined in is cancelled");
+	CHECK(!browsing, "joined: the browser is left as it was");
 	p2p_mm_game_lost();
 	p2p_mm_get_status(&status);
 	CHECK(status.state == P2P_MM_LOOKING && status.notice == P2P_MM_NOTICE_HOST_LEFT,
 		"E11: the host left a joined game: searching again, told: %d", status.state);
+	CHECK(browsing, "the restarted search holds the server browser open");
 	p2p_mm_cancel();
+	CHECK(!browsing, "the end of the search leaves the browser as it was");
 }
 
 static void add_listing(const char *name, int engine, int players, int most, int ping)
