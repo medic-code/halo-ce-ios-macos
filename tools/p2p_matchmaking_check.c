@@ -267,12 +267,97 @@ static struct machine machines[8];
 static int machine_count;
 static unsigned long now_ms, now_unix;
 
+struct in_flight
+{
+	int to;
+	unsigned long at;
+	struct mm_out out;
+};
+static struct in_flight flight[1024];
+static int flight_count;
+
+static int subscribed(const struct mm_search *search, const char *topic)
+{
+	char own[P2P_MM_TOPIC_SIZE];
+	int index;
+
+	for (index = 0; search->state != P2P_MM_OFF && index < search->queue_count; index++)
+	{
+		mm_topic(search->queues[index][0], search->queues[index][1], own, sizeof(own));
+		if (!strcmp(own, topic))
+			return 1;
+	}
+	return 0;
+}
+
+static void publish(int from, const struct mm_out *out, int count)
+{
+	int index, to;
+
+	for (index = 0; index < count; index++)
+	{
+		for (to = 0; to < machine_count; to++)
+		{
+			if (to == from || !subscribed(&machines[to].search, out[index].topic) || flight_count == 1024)
+			{
+				continue;
+			}
+			flight[flight_count].to = to;
+			flight[flight_count].at = now_ms + 100;
+			flight[flight_count++].out = out[index];
+		}
+	}
+}
+
+static void deliver(void)
+{
+	struct mm_record record;
+	int index = 0;
+
+	while (index < flight_count)
+	{
+		if (flight[index].at > now_ms)
+		{
+			index++;
+			continue;
+		}
+		if (!machines[flight[index].to].quit &&
+			mm_record_read(flight[index].out.bytes, flight[index].out.size, &record))
+		{
+			mm_heard(&machines[flight[index].to].search, &record, now_ms);
+		}
+		flight[index] = flight[--flight_count];
+	}
+}
+
+static void run(double seconds)
+{
+	unsigned long until = now_ms + (unsigned long)(seconds * 1000);
+	struct mm_out out[MM_MAXIMUM_OUT];
+	int index;
+
+	for (; now_ms < until; now_ms += 100)
+	{
+		if (now_ms % 1000 == 0)
+			now_unix++;
+		deliver();
+		for (index = 0; index < machine_count; index++)
+		{
+			if (machines[index].quit)
+				continue;
+			publish(index, out,
+				mm_step(&machines[index].search, now_ms, out, MM_MAXIMUM_OUT));
+		}
+	}
+}
+
 static void world(int count)
 {
 	memset(machines, 0, sizeof(machines));
 	machine_count = count;
 	now_ms = 1000;
 	now_unix = 1800000000UL;
+	flight_count = 0;
 }
 
 static void start_searching(int index, unsigned playlists, int size, int can_host)
@@ -285,6 +370,45 @@ static void start_searching(int index, unsigned playlists, int size, int can_hos
 	seed_of(100 + index, seed);
 	mm_start(&machines[index].search, seed, &choice, now_ms, now_unix);
 	machines[index].search.can_host = can_host;
+}
+
+static int peer_count(const struct mm_search *search)
+{
+	int index, count = 0;
+
+	for (index = 0; index < MM_MAXIMUM_UNITS; index++)
+		count += search->peers[index].used && mm_counted(&search->peers[index]);
+	return count;
+}
+
+static void check_ffa_leaves_ctf(void)
+{
+	char ctf[P2P_MM_TOPIC_SIZE], slayer[P2P_MM_TOPIC_SIZE];
+
+	case_name = "e63_ffa_leaves_ctf";
+	world(2);
+	mm_topic(P2P_MM_CTF, P2P_MM_FFA_6, ctf, sizeof(ctf));
+	mm_topic(P2P_MM_SLAYER, P2P_MM_FFA_6, slayer, sizeof(slayer));
+	start_searching(0, 1u << P2P_MM_SLAYER | 1u << P2P_MM_CTF, P2P_MM_FFA_6, 1);
+	start_searching(1, 1u << P2P_MM_CTF, P2P_MM_FFA_6, 1);
+	run(8.0);
+	CHECK(subscribed(&machines[0].search, slayer), "E63: the Slayer FFA 6 queue");
+	CHECK(!subscribed(&machines[0].search, ctf), "E63: no CTF FFA 6 queue");
+	CHECK(peer_count(&machines[0].search) == 0, "E63: a CTF-only FFA 6 search is not counted by it");
+}
+
+static void check_two_refreshes(void)
+{
+	case_name = "e14_two_refreshes";
+	world(2);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	start_searching(1, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	run(1.0);
+	CHECK(peer_count(&machines[1].search) == 0, "E14: not counted on its first record");
+	run(4.0);
+	CHECK(peer_count(&machines[1].search) == 0, "E14: not counted on its first refresh");
+	run(2.5);
+	CHECK(peer_count(&machines[1].search) == 1, "E14: counted on its second refresh");
 }
 
 static void heard_kind(struct mm_search *search, int machine, unsigned long sequence, int kind)
@@ -352,6 +476,8 @@ int main(void)
 	check_playlists();
 	check_topics();
 	check_topic_moves();
+	check_ffa_leaves_ctf();
+	check_two_refreshes();
 	check_full_table();
 	printf(failures ? "FAILED %d\n" : "PASS\n", failures);
 	return failures != 0;
