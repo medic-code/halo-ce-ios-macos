@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from tools import linux_build, linux_link_check, linux_msvc_semantics
+from tools.harness import function, read
 
 # for tests that compile for the Linux target (and run what they build)
 linux_host_only = pytest.mark.skipif(not sys.platform.startswith("linux"),
@@ -415,10 +416,12 @@ def matchmaking_check(tmp_path, fault=None):
         source = source.replace(*fault)
     copy = tmp_path / "p2p_matchmaking.c"
     copy.write_text(source)
+    lobby = read("port/linux/src/p2p_lobby.c")
+    (tmp_path / "lobby_pick.inc").write_text("\n".join(function(lobby, name) for name in
+                                                      ("pick_fits", "p2p_lobby_pick", "p2p_lobby_pick_unpinged")))
     program = tmp_path / "p2p_matchmaking_check"
-    built = subprocess.run(["clang", *platform_flags(), "-Iport/linux/src", "-O1", "-no-pie",
-                            "-Wl,--unresolved-symbols=ignore-all", "-o", str(program),
-                            "tools/p2p_matchmaking_check.c", str(copy), *MATCHMAKING_SOURCES],
+    built = subprocess.run(["clang", *platform_flags(), "-Iport/linux/src", f"-I{tmp_path}", "-O1", "-no-pie",
+                            "-Wl,--unresolved-symbols=ignore-all", "-o", str(program), "tools/p2p_matchmaking_check.c", str(copy), *MATCHMAKING_SOURCES],
                            capture_output=True, text=True)
     assert built.returncode == 0, built.stderr[-4000:]
     return subprocess.run([str(program)], capture_output=True, text=True, timeout=120).stdout
