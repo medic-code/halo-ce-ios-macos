@@ -66,6 +66,19 @@ int lobby_games_unlocked(struct p2p_listing *games, int maximum_count)
 	memcpy(games, listings, (size_t)count * sizeof(*games));
 	return count;
 }
+static unsigned char marked[P2P_IDENTIFIER_SIZE];
+static int marked_count;
+
+void lobby_mark_failed_unlocked(const unsigned char *identifier)
+{
+	int index;
+
+	memcpy(marked, identifier, sizeof(marked));
+	marked_count++;
+	for (index = 0; index < listing_count; index++)
+		if (!memcmp(listings[index].identifier, identifier, P2P_IDENTIFIER_SIZE))
+			listings[index].failed = 1;
+}
 /* lobby_pick.inc: written by tools/test_linux_port.py from p2p_lobby.c */
 #include "lobby_pick.inc"
 int p2p_lobby_browsing(void) { return browsing; }
@@ -401,6 +414,43 @@ static void check_look(void)
 	mm_step(&search, 7000, out, MM_MAXIMUM_OUT);
 	CHECK(search.decision.kind == P2P_MM_DECIDE_JOIN && !strcmp(search.decision.invite, "halo://join/quick"),
 		"at 6 s the timed fit is taken");
+	listing_count = 0;
+}
+
+static void check_failed_pick(void)
+{
+	struct p2p_mm_choice choice = { 1u << P2P_MM_SLAYER, P2P_MM_2V2 };
+	struct p2p_mm_decision decision;
+
+	case_name = "step1_failed";
+	listing_count = marked_count = 0;
+	add_listing("host", 2, 2, 4, 40);
+	p2p_mm_search(&choice);
+	CHECK(browsing, "a search holds the server browser open");
+	pthread_mutex_lock(&p2p_lock);
+	clock_now += MM_LOOK_TIME;
+	p2p_mm_update(clock_now, 1, NULL);
+	pthread_mutex_unlock(&p2p_lock);
+	CHECK(p2p_mm_take_decision(&decision) == P2P_MM_DECIDE_JOIN && !strcmp(decision.invite, "halo://join/host"),
+		"the game is joined");
+	p2p_mm_joined(0);
+	CHECK(marked_count == 1 && !memcmp(marked, listings[0].identifier, P2P_IDENTIFIER_SIZE),
+		"a join that fails marks the listing failed: %d", marked_count);
+	pthread_mutex_lock(&p2p_lock);
+	clock_now += 100;
+	p2p_mm_update(clock_now, 1, NULL);
+	pthread_mutex_unlock(&p2p_lock);
+	CHECK(p2p_mm_take_decision(&decision) == P2P_MM_DECIDE_NONE, "the failed game is passed over");
+	p2p_mm_cancel();
+	CHECK(!browsing, "the end of the search leaves the browser as it was");
+
+	p2p_mm_search(&choice);
+	pthread_mutex_lock(&p2p_lock);
+	clock_now += MM_LOOK_TIME;
+	p2p_mm_update(clock_now, 1, NULL);
+	pthread_mutex_unlock(&p2p_lock);
+	CHECK(p2p_mm_take_decision(&decision) == P2P_MM_DECIDE_NONE, "the failed game stays passed over");
+	p2p_mm_cancel();
 	listing_count = 0;
 }
 
@@ -1402,6 +1452,7 @@ int main(void)
 	check_lost_in_verify();
 	check_look();
 	check_ffa_wanted();
+	check_failed_pick();
 	check_worlds();
 	check_faults();
 	printf(failures ? "FAILED %d\n" : "PASS\n", failures);
