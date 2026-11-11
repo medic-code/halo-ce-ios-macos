@@ -117,5 +117,29 @@ int main(int argc, char **argv)
 		matchmaking_lines(&status, title, count, help, notice, 64);
 		CHECK(!notice[0], "none: %ls", notice);
 	}
+	CASE("slots")
+	{
+		short filled;
+
+		status = queued(1);
+		CHECK(matchmaking_search_slots(&status, P2P_MM_2V2, &filled) == 4 && filled == 3, "queued: 3 of 4");
+		status.count = status.needed = 0;
+		CHECK(matchmaking_search_slots(&status, P2P_MM_2V2, &filled) == 4 && filled == 1,
+			"not counted yet: this player of the chosen size");
+		status.count = 12;
+		status.needed = 16;
+		CHECK(matchmaking_search_slots(&status, P2P_MM_2V2, &filled) == 8 && filled == 8, "a big game: 8 slots");
+		status.state = P2P_MM_FOUND;
+		status.players = 2;
+		status.most_players = 4;
+		CHECK(matchmaking_search_slots(&status, P2P_MM_2V2, &filled) == 4 && filled == 2, "found: the game's players");
+		status.state = P2P_MM_HOSTING;
+		status.hosts = 1;
+		status.players = 0;
+		CHECK(matchmaking_search_slots(&status, P2P_MM_2V2, &filled) == 4 && filled == 1,
+			"hosting before its own player: this player");
+		memset(&status, 0, sizeof(status));
+		CHECK(matchmaking_search_slots(&status, P2P_MM_2V2, &filled) == 1 && filled == 1, "off: this player alone");
+	}
 	return 0;
 }
