@@ -102,8 +102,8 @@
 		<on event="created" run="port setting load"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/op_hdr_calibration" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF" platform="desktop">
-		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/hdr_calibration/hdr_calibration_settings_screen"/>
-		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/hdr_calibration/hdr_calibration_settings_screen"/>
+		<on event="a" run="port settings keep" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/hdr_calibration/hdr_calibration_settings_screen"/>
+		<on event="start" run="port settings keep" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/hdr_calibration/hdr_calibration_settings_screen"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/hdr_calibration_label"/>
 	</widget>

@@ -3263,6 +3263,9 @@ static void widget_instance_set_focused_child_by_index(
 	return;
 }
 
+/* port: (ui_widget_port_going_back) */
+static boolean widget_going_back = FALSE;
+
 static void widget_instance_go_back_to_previous(
 	struct widget_instance *widget)
 {
@@ -3282,6 +3285,7 @@ static void widget_instance_go_back_to_previous(
 		previous_widget_tag = NONE;
 	}
 	ui_widget_delete(widget_instance_get_topmost_parent(widget));
+	widget_going_back = TRUE; /* port: (ui_widget_port_going_back) */
 	if (previous_widget_tag != NONE)
 	{
 		struct widget_instance *new_widget = ui_widget_load_by_name_or_tag(
@@ -3301,6 +3305,7 @@ static void widget_instance_go_back_to_previous(
 				data.focused_child_index);
 		}
 	}
+	widget_going_back = FALSE; /* port: (ui_widget_port_going_back) */
 
 	return;
 }
@@ -3977,6 +3982,13 @@ void ui_widget_port_go_back(
 	struct widget_instance *widget)
 {
 	widget_instance_go_back_to_previous(widget);
+}
+
+/* port: whether the screen being made is one gone back to, not one opened */
+boolean ui_widget_port_going_back(
+	void)
+{
+	return widget_going_back;
 }
 
 struct widget_instance *ui_widget_load_by_name_or_tag(

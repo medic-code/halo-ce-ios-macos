@@ -190,8 +190,10 @@ widgets, `initialize sp level list solo`, `solo level set map` and `set
 difficulty` are the port's, as the Xbox's take the Xbox's widgets. The
 settings screens': `port settings save` (OK) writes the settings changed
 (config.toml's, or `profile.<field>`: the profile being edited) and applies
-them, `port settings defaults` shows the defaults, `port settings help` the
-help of the row chosen; HDR Calibration's `port hdr calibration` (a
+them, `port settings defaults` shows the defaults, `port settings keep` (on
+a row that opens one of the screen's pages) keeps the values changed for
+the screen's OK or Cancel on the way back, `port settings help` the help
+of the row chosen; HDR Calibration's `port hdr calibration` (a
 `<data>`) has the renderer draw the pattern of the row chosen at the values
 shown; Controls Setup's `controls ...` bind the keyboard
 and mouse's controls (Enter takes the next key or button pressed; left and
