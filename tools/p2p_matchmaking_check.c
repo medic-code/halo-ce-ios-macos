@@ -39,6 +39,7 @@ static void seed_of(int machine, unsigned char *seed)
 {
 	memset(seed, 0, P2P_SEED_SIZE);
 	seed[0] = (unsigned char)(machine + 1);
+	seed[1] = (unsigned char)((machine + 1) >> 8);
 }
 
 static struct mm_record searching(int machine, unsigned long sequence)
@@ -256,6 +257,92 @@ static void check_election(void)
 	CHECK((winners & (winners - 1)) != 0, "E14: one of the three always wins when it can: %d", winners);
 }
 
+struct machine
+{
+	struct mm_search search;
+	int quit;
+};
+
+static struct machine machines[8];
+static int machine_count;
+static unsigned long now_ms, now_unix;
+
+static void world(int count)
+{
+	memset(machines, 0, sizeof(machines));
+	machine_count = count;
+	now_ms = 1000;
+	now_unix = 1800000000UL;
+}
+
+static void start_searching(int index, unsigned playlists, int size, int can_host)
+{
+	struct p2p_mm_choice choice;
+	unsigned char seed[P2P_SEED_SIZE];
+
+	choice.playlists = playlists;
+	choice.size = size;
+	seed_of(100 + index, seed);
+	mm_start(&machines[index].search, seed, &choice, now_ms, now_unix);
+	machines[index].search.can_host = can_host;
+}
+
+static void heard_kind(struct mm_search *search, int machine, unsigned long sequence, int kind)
+{
+	struct mm_record record = searching(machine, sequence), read_back;
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+	int size;
+
+	record.kind = kind;
+	seed_of(machine, seed);
+	size = mm_record_write(&record, seed, bytes, sizeof(bytes));
+	if (mm_record_read(bytes, size, &read_back))
+		mm_heard(search, &read_back, now_ms);
+}
+
+static void heard_from(struct mm_search *search, int machine, unsigned long sequence)
+{
+	heard_kind(search, machine, sequence, MM_KIND_SEARCHING);
+}
+
+static int has_peer(const struct mm_search *search, int machine)
+{
+	struct mm_record record = searching(machine, 1);
+	int index;
+
+	for (index = 0; index < MM_MAXIMUM_UNITS; index++)
+		if (search->peers[index].used && !memcmp(search->peers[index].record.key, record.key, P2P_KEY_SIZE))
+			return 1;
+	return 0;
+}
+
+static void check_full_table(void)
+{
+	int machine;
+
+	case_name = "full_table";
+	world(1);
+	start_searching(0, 1u << P2P_MM_SLAYER, P2P_MM_2V2, 1);
+	for (machine = 300; machine < 555; machine++, now_ms++)
+	{
+		heard_from(&machines[0].search, machine, 1);
+		heard_from(&machines[0].search, machine, 2);
+		heard_from(&machines[0].search, machine, 3);
+	}
+	heard_from(&machines[0].search, 555, 1);
+	CHECK(has_peer(&machines[0].search, 555), "256 searchers fill the table");
+	heard_from(&machines[0].search, 556, 1);
+	CHECK(has_peer(&machines[0].search, 556) && !has_peer(&machines[0].search, 555),
+		"a new searcher replaces the uncounted one");
+	heard_from(&machines[0].search, 556, 2);
+	heard_from(&machines[0].search, 556, 3);
+	heard_from(&machines[0].search, 557, 1);
+	heard_from(&machines[0].search, 557, 2);
+	heard_from(&machines[0].search, 557, 3);
+	CHECK(!has_peer(&machines[0].search, 557) && has_peer(&machines[0].search, 300),
+		"counted searchers are never evicted for a new one");
+}
+
 int main(void)
 {
 	check_pool();
@@ -265,6 +352,7 @@ int main(void)
 	check_playlists();
 	check_topics();
 	check_topic_moves();
+	check_full_table();
 	printf(failures ? "FAILED %d\n" : "PASS\n", failures);
 	return failures != 0;
 }
