@@ -40,7 +40,9 @@ one deletes or keeps is no authority, so
   left it, and a live one only within LIVE_WINDOW, so an old listing
   published again by someone else does not list a game long gone), takes
   a host's closing listing (a tombstone) as its end, and ignores an
-  emptied slot (a wipe is not a delete).
+  emptied slot (a wipe is not a delete);
+- on Refresh, a browser drops a game not heard within REFRESH_WAIT of its
+  query going out, unless a master server lists it.
 A host that stops publishes a tombstone, then clears its slot. Going private
 makes a new invite (p2p.c), so a listing seen before lets no one in.
 
@@ -112,6 +114,9 @@ enum
 	TRIGGER_INTERVAL = 5000,
 	QUERY_JITTER = 2000,
 	GAME_EXPIRY = 90000,
+	/* (a host asked publishes within QUERY_JITTER, or TRIGGER_INTERVAL after
+	its last publish) */
+	REFRESH_WAIT = TRIGGER_INTERVAL + QUERY_JITTER,
 	PROBE_REFRESH = 120000,
 	PROBE_HOLD = 1000,
 	TOMBSTONE_TIME = 600000,
@@ -233,6 +238,9 @@ static struct
 	PROBE_HOLD from it for the queue) */
 	unsigned long browse_time;
 	int query_wanted;
+	int refresh_wanted;
+	/* when Refresh's query went out; 0 while no wait runs */
+	unsigned long refresh_time;
 	struct queued queue[MAXIMUM_QUEUED];
 	int queue_count;
 	struct game games[MAXIMUM_GAMES];
@@ -854,12 +862,14 @@ static int listing_wanted(const unsigned char *payload, int size, int retained, 
 static void update_browsing(void)
 {
 	unsigned long start = p2p_now();
-	int index;
+	int index, refresh_over;
 
 	if (lobby.query_wanted)
 	{
 		lobby.query_wanted = 0;
-		p2p_signal_lobby_query();
+		/* (nothing was asked, so no game may be dropped) */
+		if (!p2p_signal_lobby_query())
+			lobby.refresh_wanted = 0;
 	}
 	/* the queue, within the budget (one at least) */
 	while (lobby.queue_count && (p2p_now() == start || !elapsed(start, VERIFY_BUDGET)))
@@ -888,10 +898,17 @@ static void update_browsing(void)
 	}
 	if (lobby.queue_count && !lobby.browsing)
 		lobby.queue_count = 0;
+	refresh_over = lobby.refresh_time && elapsed(lobby.refresh_time, REFRESH_WAIT);
 	for (index = 0; index < MAXIMUM_GAMES; index++)
 	{
-		if (lobby.games[index].used && elapsed(lobby.games[index].heard_time, GAME_EXPIRY))
+		/* (a master's game is heard on the master's round, which can take
+		longer) */
+		if (lobby.games[index].used && (elapsed(lobby.games[index].heard_time, GAME_EXPIRY) ||
+			(refresh_over && !lobby.games[index].master &&
+			(long)(lobby.games[index].heard_time - lobby.refresh_time) < 0)))
+		{
 			lobby.games[index].used = 0;
+		}
 		if (lobby.games[index].used && lobby.games[index].master && elapsed(lobby.games[index].master_time, GAME_EXPIRY))
 		{
 			lobby.games[index].master = 0;
@@ -901,6 +918,8 @@ static void update_browsing(void)
 		if (lobby.newer[index].used && elapsed(lobby.newer[index].heard_time, GAME_EXPIRY))
 			lobby.newer[index].used = 0;
 	}
+	if (refresh_over)
+		lobby.refresh_time = 0;
 	/* (the listings still waiting are shown before the probes start, which
 	then start in the order shown, unless they keep coming) */
 	if (lobby.browsing && (!lobby.queue_count || elapsed(lobby.browse_time, PROBE_HOLD)))
@@ -925,6 +944,13 @@ void p2p_lobby_probed(const unsigned char *identifier, int ping)
 				game->ping = ping;
 		}
 	}
+}
+
+void p2p_lobby_query_sent(void)
+{
+	if (lobby.refresh_wanted && (!lobby.refresh_time || elapsed(lobby.refresh_time, REFRESH_WAIT)))
+		lobby.refresh_time = p2p_now() ? p2p_now() : 1;
+	lobby.refresh_wanted = 0;
 }
 
 /* ---------- the master servers' (master_list.c, server_master.c) */
@@ -1167,6 +1193,7 @@ void p2p_lobby_refresh(void)
 	if (lobby.browsing)
 	{
 		lobby.query_wanted = 1;
+		lobby.refresh_wanted = 1;
 		lobby.browse_time = p2p_now();
 	}
 	/* (the pings timed again, a probe under way included; a master

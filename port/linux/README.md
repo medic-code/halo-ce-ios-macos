@@ -1170,7 +1170,9 @@ REFRESH, shows moving dots, and the line below the games says
 Joining a host whose tunnel is open uses that tunnel. A game with a
 password, whose invite the listing hides, shows no ping, nor does a host
 not reached; a game that is full or starting shows CLOSED. REFRESH also
-asks the hosts for their listings again.
+asks the hosts for their listings again, and removes in 7 seconds the
+games whose host does not answer. It asks the master servers for their
+lists again too, and does not remove a game that one lists.
 
 The gametype column names an OpenCE gametype's kind (SWAT, INFECTION, GUN
 GAME, or HC and the game engine for Hardcore: HC CTF, HC SLAYER), which the
