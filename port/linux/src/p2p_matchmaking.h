@@ -67,7 +67,6 @@ struct mm_unit
 {
 	unsigned char key[P2P_KEY_SIZE];
 	unsigned char key_hash[P2P_KEY_HASH_SIZE];
-	int players;
 	int can_host;
 	int failed;
 };
@@ -78,9 +77,21 @@ int mm_elect(const struct mm_unit *units, const int *pool, int pool_count);
 enum
 {
 	/* milliseconds */
+	MM_SETTLE = 4000,
+	MM_HOLD = 20000,
+	MM_HOST_WAIT = 20000,
 	MM_EXPIRY_INTERVALS = 3,
+	MM_RUNNING_INTERVAL = 25000,
 	MM_LOOK_TIME = 6000,
 	MM_MAXIMUM_OUT = 32,
+};
+
+enum
+{
+	MM_FAILED_NONE,
+	MM_FAILED_GAME_UNJOINABLE,
+	/* an elected host, until it is heard hosting */
+	MM_FAILED_PASSED_OVER
 };
 
 struct mm_peer
@@ -91,6 +102,7 @@ struct mm_peer
 	/* this machine's milliseconds, not the sender's clock */
 	unsigned long heard;
 	int refreshes;
+	int failed;
 };
 
 struct mm_out
@@ -116,6 +128,16 @@ struct mm_search
 	int next_queue;
 	unsigned long next_record;
 	struct mm_peer peers[MM_MAXIMUM_UNITS];
+	unsigned char pool[MM_MAXIMUM_POOL][P2P_KEY_HASH_SIZE];
+	int pool_count, pool_playlist, pool_size;
+	unsigned long pool_since;
+	int hosting_playlist, hosting_size, players, most_players, under_way;
+	unsigned char token[P2P_TOKEN_SIZE];
+	unsigned long held_until, next_hosting_record;
+	unsigned char joining[P2P_KEY_HASH_SIZE];
+	unsigned long joining_since;
+	struct p2p_mm_decision decision;
+	int decided;
 };
 
 int mm_counted(const struct mm_peer *peer);
@@ -125,6 +147,10 @@ void mm_start(struct mm_search *search, const unsigned char *seed, const struct 
 /* the record must already be verified (mm_record_read) */
 void mm_heard(struct mm_search *search, const struct mm_record *record, unsigned long now);
 int mm_step(struct mm_search *search, unsigned long now, struct mm_out *out, int out_size);
+void mm_hosted(struct mm_search *search, const unsigned char *token, int players, int most_players, int under_way,
+	unsigned long now);
+void mm_joined(struct mm_search *search, int ok, unsigned long now);
 int mm_cancel(struct mm_search *search, struct mm_out *out, int out_size);
+void mm_game_lost(struct mm_search *search, unsigned long now);
 
 #endif

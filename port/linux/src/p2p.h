@@ -409,6 +409,7 @@ enum
 	NUMBER_OF_P2P_MM_SMALL_SIZES,
 	NUMBER_OF_P2P_MM_SIZES = NUMBER_OF_P2P_MM_SMALL_SIZES
 };
+int p2p_mm_size_players(int size);
 /* CTF has no free-for-all variant; playlists has a bit per playlist */
 int mm_playlist_has_size(unsigned playlists, int size);
 
@@ -422,6 +423,40 @@ enum
 	P2P_MM_OFF,
 	P2P_MM_LOOKING,
 	P2P_MM_QUEUED,
+	P2P_MM_FOUND,
+	P2P_MM_HOSTING,
 };
+enum
+{
+	P2P_MM_DECIDE_NONE,
+	P2P_MM_DECIDE_HOST,
+	P2P_MM_DECIDE_JOIN,
+};
+struct p2p_mm_decision
+{
+	int kind;
+	int playlist, size;
+	char invite[P2P_LISTING_INVITE_SIZE];
+};
+
+/* these take p2p_lock: call from the game's thread, never the p2p thread */
+void p2p_mm_search(const struct p2p_mm_choice *choice);
+void p2p_mm_cancel(void);
+/* each is ignored unless it answers its decision: p2p_mm_game a HOST, p2p_mm_joined a JOIN */
+void p2p_mm_game(int players, int most_players, int under_way);
+void p2p_mm_joined(int ok);
+void p2p_mm_game_lost(void);
+int p2p_mm_take_decision(struct p2p_mm_decision *decision);
+struct p2p_mm_status
+{
+	int state;
+	int can_host;
+	/* counts include this machine */
+	int playlist, size, count, needed;
+	int games_checked;
+	int notice;
+};
+enum { P2P_MM_NOTICE_NONE, P2P_MM_NOTICE_HOST_LEFT, P2P_MM_NOTICE_HOST_UNREACHED };
+void p2p_mm_get_status(struct p2p_mm_status *status);
 
 #endif
