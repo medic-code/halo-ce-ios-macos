@@ -428,6 +428,10 @@ int p2p_mm_size_players(int size);
 /* CTF has no free-for-all variant; playlists has a bit per playlist */
 int mm_playlist_has_size(unsigned playlists, int size);
 
+/* on the wire (queue topics) and in config.toml */
+extern const char *const p2p_mm_playlist_names[NUMBER_OF_P2P_MM_PLAYLISTS];
+extern const char *const p2p_mm_size_names[NUMBER_OF_P2P_MM_SIZES];
+
 struct p2p_mm_choice
 {
 	unsigned playlists;
@@ -470,9 +474,13 @@ struct p2p_mm_status
 	/* counts include this machine */
 	int playlist, size, count, needed;
 	int games_checked;
+	/* FOUND and HOSTING only; ping -1: not timed */
+	int hosts, players, most_players, ping;
 	int notice;
 };
-enum { P2P_MM_NOTICE_NONE, P2P_MM_NOTICE_HOST_LEFT, P2P_MM_NOTICE_HOST_UNREACHED };
+enum { P2P_MM_NOTICE_NONE, P2P_MM_NOTICE_HOST_LEFT, P2P_MM_NOTICE_HOST_UNREACHED, P2P_MM_NOTICE_HOST_FAILED };
+enum { P2P_MM_HOST_WAIT_SECONDS = 20 };
 void p2p_mm_get_status(struct p2p_mm_status *status);
+void p2p_mm_host_gave_up(void);
 
 #endif

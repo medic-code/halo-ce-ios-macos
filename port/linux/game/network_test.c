@@ -138,8 +138,6 @@ enum
 	_network_test_match,
 };
 
-static char const *const match_playlists[NUMBER_OF_P2P_MM_PLAYLISTS] = { "slayer", "ctf", "king", "oddball", "race" };
-static char const *const match_sizes[NUMBER_OF_P2P_MM_SIZES] = { "1v1", "2v2", "3v3", "4v4", "ffa6" };
 
 static struct
 {
@@ -240,7 +238,7 @@ static boolean network_test_read_match(
 	choice->size = NONE;
 	for (index = 0; index < NUMBER_OF_P2P_MM_SIZES; index++)
 	{
-		if (!strcmp(size + 1, match_sizes[index]))
+		if (!strcmp(size + 1, p2p_mm_size_names[index]))
 			choice->size = index;
 	}
 	while (text < size)
@@ -248,7 +246,7 @@ static boolean network_test_read_match(
 		size_t length = strcspn(text, ",:");
 
 		for (index = 0; index < NUMBER_OF_P2P_MM_PLAYLISTS &&
-			(strlen(match_playlists[index]) != length || strncmp(text, match_playlists[index], length));
+			(strlen(p2p_mm_playlist_names[index]) != length || strncmp(text, p2p_mm_playlist_names[index], length));
 			index++)
 		{
 		}
@@ -764,22 +762,34 @@ static void network_test_vehicle(
 	}
 }
 
-/* debug.network_test_name: the name the machine's first player takes (its
-profile's, which it joins with), in ASCII */
+/* stored in the profile: a join reads the name from it again */
 static void network_test_set_name(
 	void)
 {
 	char const *name = config_string("debug.network_test_name");
 	struct player_profile profile;
+	wchar_t wide_name[MAXIMUM_PLAYER_PROFILE_NAME_LENGTH];
+	long profile_index;
 	short index;
 
 	if (!name || !name[0])
 		return;
-	player_ui_get_active_player_profile(0, &profile);
 	for (index = 0; name[index] && index < MAXIMUM_PLAYER_PROFILE_NAME_LENGTH - 1; index++)
-		profile.player_name[index] = (wchar_t)(unsigned char)name[index];
-	profile.player_name[index] = 0;
-	player_ui_set_active_player_profile(0, player_ui_get_active_player_profile_index(0), &profile);
+		wide_name[index] = (wchar_t)(unsigned char)name[index];
+	wide_name[index] = 0;
+	profile_index = player_ui_get_active_player_profile_index(0);
+	if (profile_index == NONE || !player_profile_get(profile_index, &profile))
+	{
+		profile_index = player_profile_new(0, wide_name);
+		if (profile_index == NONE || !player_profile_get(profile_index, &profile))
+		{
+			platform_log("network test: no profile could be made for %s", name);
+			return;
+		}
+	}
+	csmemcpy(profile.player_name, wide_name, sizeof(wide_name));
+	player_profile_save(profile_index, &profile);
+	player_ui_set_active_player_profile(0, profile_index, &profile);
 	platform_log("network test: this machine's player is named %s", name);
 }
 

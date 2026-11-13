@@ -71,6 +71,7 @@ static struct
 	char map[64];
 	boolean map_set, player_added;
 	boolean public_game;
+	boolean reopen;
 	byte host[6];
 } matchmaking;
 
@@ -147,6 +148,11 @@ static void matchmaking_begin_host(struct p2p_mm_decision const *decision)
 	matchmaking.map_set = matchmaking.player_added = FALSE;
 }
 
+static boolean matchmaking_host_gave_up(float seconds, short players)
+{
+	return !players && seconds >= MATCHMAKING_PLAYER_SECONDS + P2P_MM_HOST_WAIT_SECONDS;
+}
+
 static void matchmaking_end_host(void)
 {
 	network_game_server_port_set_settings(NULL, 0);
@@ -190,11 +196,20 @@ static void matchmaking_update_host(float seconds)
 		if (!matchmaking.player_added && client && matchmaking.seconds >= MATCHMAKING_PLAYER_SECONDS)
 			matchmaking.player_added = network_game_client_add_player(client, 0);
 	}
-	/* (from the host's own player on: no hosting record says 0 players) */
+	/* (a joiner would read "0 of 4 players" in a record before it) */
 	if (game->player_count)
 		/* a machine joining a game that is over waits out the whole join */
 		p2p_mm_game(game_engine_running() && !game_engine_can_score() ? game->maximum_players : game->player_count,
 			game->maximum_players, state != SERVER_PREGAME);
+	else if (matchmaking_host_gave_up(matchmaking.seconds, game->player_count))
+	{
+		p2p_mm_host_gave_up();
+		matchmaking_end_host();
+		dispose_global_network_game_client();
+		dispose_global_network_game_server();
+		matchmaking.reopen = TRUE;
+		return;
+	}
 	if (state != SERVER_PREGAME)
 		matchmaking.map_set = FALSE;
 	else if (matchmaking.player_added)
@@ -247,10 +262,33 @@ static void matchmaking_update_join(float seconds)
 	}
 }
 
+static void matchmaking_reopen_search(void)
+{
+	static char const *const screens[] = {
+		"pc\\main_menu\\main_menu",
+		"pc\\main_menu\\multiplayer_type_select\\multiplayer_type_select_screen",
+		"pc\\main_menu\\multiplayer_type_select\\matchmaking\\matchmaking_screen",
+		"pc\\main_menu\\multiplayer_type_select\\matchmaking\\search_screen",
+	};
+	long previous = NONE;
+	short index;
+
+	ui_widgets_close_all();
+	for (index = 0; index < NUMBEROF(screens); index++)
+	{
+		if (!ui_widget_load_by_name_or_tag(screens[index], NONE, NULL, NONE, previous, NONE, NONE))
+			return;
+		previous = tag_loaded(UI_WIDGET_DEFINITION_TAG, screens[index]);
+	}
+}
+
 static void matchmaking_update_joined(void)
 {
 	if (network_game_client_port_connection_ended())
+	{
 		p2p_mm_game_lost();
+		matchmaking.reopen = TRUE;
+	}
 	else if (global_network_game_client_get())
 		return;
 	else
@@ -284,6 +322,14 @@ void matchmaking_update(float seconds)
 	case _matchmaking_joined:
 		matchmaking_update_joined();
 		break;
+	}
+	if (matchmaking.reopen && main_menu_is_loaded())
+	{
+		/* p2p_mm_game_lost has restarted the search since the read above */
+		p2p_mm_get_status(&status);
+		matchmaking.reopen = FALSE;
+		if (status.state != P2P_MM_OFF)
+			matchmaking_reopen_search();
 	}
 	if ((matchmaking.role == _matchmaking_idle || matchmaking.role == _matchmaking_hosting) &&
 		status.state != P2P_MM_OFF && main_menu_is_loaded())
