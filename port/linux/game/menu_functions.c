@@ -6734,22 +6734,31 @@ static short matchmaking_search_slots(struct p2p_mm_status const *status, short 
 		status->needed ? status->needed : p2p_mm_size_players(chosen_size), *filled, SEARCH_SLOTS);
 }
 
-static void matchmaking_search_slots_show(struct widget_instance *screen, struct p2p_mm_status const *status)
+/* the party's other members fill the first matched slots: the party searches as one */
+static void matchmaking_search_slots_show(struct widget_instance *screen, struct p2p_mm_status const *status,
+	struct p2p_party_status const *party)
 {
-	short index, filled, slots = matchmaking_search_slots(status, matchmaking_screen.size, &filled);
+	short index, member = 0, filled, slots = matchmaking_search_slots(status, matchmaking_screen.size, &filled);
 
 	text_set(named(named(screen, "search_slot_you", 0), "current_profile_name", 0), matchmaking_screen.name);
 	for (index = 1; index < SEARCH_SLOTS; index++)
 	{
 		struct widget_instance *widget = named(screen, "search_slot", index - 1);
 		struct widget_instance *name = named(widget, "search_slot_name", 0);
+		wchar_t text[P2P_PARTY_NAME_SIZE + 1];
 
 		if (!widget || !name)
 			continue;
+		while (member < party->count && party->members[member].you)
+			member++;
+		if (index < filled && member < party->count)
+			mods_wide_text(party->members[member++].name, text, NUMBEROF(text));
+		else
+			ustrncpy(text, index < filled ? L"Matched player" : L"Looking for player...", NUMBEROF(text));
 		widget->visible = index < slots;
 		widget->animation.current_frame_index = (short)(index < filled ? _search_slot_matched : _search_slot_looking +
 			(system_milliseconds() / 125 + index) % SEARCH_SLOT_SPINNER_FRAMES);
-		text_set(name, index < filled ? L"Matched player" : L"Looking for player...");
+		text_set(name, text);
 		name->alpha_modifier = index < filled ? 1.0f : TAB_UNFOCUSED_ALPHA;
 	}
 }
@@ -6778,7 +6787,7 @@ static void matchmaking_search_update(struct widget_instance *list)
 	text_set_length(named(screen, "search_count", 0), count, MATCHMAKING_TEXT_LENGTH);
 	text_set_length(named(screen, "search_help", 0), help, MATCHMAKING_TEXT_LENGTH);
 	text_set_length(named(screen, "search_notice", 0), notice, MATCHMAKING_TEXT_LENGTH);
-	matchmaking_search_slots_show(screen, &status);
+	matchmaking_search_slots_show(screen, &status, &party);
 	text[0] = 0;
 	for (index = 0; index < NUMBER_OF_P2P_MM_PLAYLISTS; index++)
 	{
