@@ -1472,8 +1472,18 @@ static int friend_add(const unsigned char *key, const char *name)
 		return result;
 	}
 	friend = friend_find(key);
+	if (friend && !friend->sent)
+		return P2P_FRIEND_ADD_FRIEND;
+	/* adding again sends the request again: a refusal empties its record on the brokers */
 	if (friend)
-		return friend->sent ? P2P_FRIEND_ADD_SENT : P2P_FRIEND_ADD_FRIEND;
+	{
+		friend->request_size = 0;
+		friend->request_taken = 0;
+		friend->last_day = friend_today();
+		friend->due = 1;
+		friends_save(friends.list_path);
+		return P2P_FRIEND_ADD_SENT;
+	}
 	if (friends.count == P2P_FRIENDS_MAXIMUM)
 		return P2P_FRIEND_ADD_FULL;
 	friend = &friends.list[friends.count++];

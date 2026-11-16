@@ -1622,7 +1622,7 @@ int main(int argc, char **argv)
 	CASE("publish")
 	{
 		char id[17];
-		int index;
+		int index, before;
 
 		people_make();
 		become(ALICE);
@@ -1658,6 +1658,19 @@ int main(int argc, char **argv)
 		p2p_friends_update();
 		CHECK(published_count == 2, "not after 7 days");
 		test_now -= 8 * 86400;
+		brokers_up(0);
+		p2p_friends_update();
+		brokers_up(4);
+		for (index = 0; index < 3; index++)
+		{
+			test_ms += 1000;
+			p2p_friends_update();
+		}
+		before = published_count;
+		CHECK(p2p_friend_add_member(1) == P2P_FRIEND_ADD_SENT, "Alice adds Bob again");
+		test_ms += 1000;
+		p2p_friends_update();
+		CHECK(published_count == before + 1, "adding again sends it again: %d", published_count - before);
 
 		become(BOB);
 		heard(&published[0]);
