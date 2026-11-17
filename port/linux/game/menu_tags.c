@@ -410,7 +410,7 @@ static char const *const port_function_names[] =
 	"port controller clear", "port controller cancel",
 	"port matchmaking init", "port matchmaking defaults", "port matchmaking search", "port matchmaking back",
 	"port matchmaking search back",
-	"port matchmaking right", "port matchmaking left", "port matchmaking remove", "port matchmaking invite",
+	"port matchmaking left", "port matchmaking remove", "port matchmaking invite",
 	"port matchmaking leave", "port matchmaking yes", "port matchmaking no",
 };
 

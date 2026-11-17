@@ -2248,8 +2248,7 @@ def _matchmaking() -> list:
         lines += _widget(f"{base}/op_{key}", [("width", 296), ("height", 18),
                                               ("flags", "pass_unhandled_to_focused_child"),
                                               ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF")],
-                         ['<on event="right" run="port matchmaking right"/>', f'<child widget="{base}/{key}_label"/>',
-                          f'<child widget="{base}/{spinner}" x="190" y="1"/>'])
+                         [f'<child widget="{base}/{key}_label"/>', f'<child widget="{base}/{spinner}" x="190" y="1"/>'])
         lines += _widget(f"{base}/{key}_label", [("type", "text"), ("controller", 1), ("width", 190), ("height", 18),
                                                  ("string_list", f"{base}/labels"), ("string_index", index or None),
                                                  ("font", "ui\\small_ui"), ("color", "#FF2896FF"), ("text_x", 13),

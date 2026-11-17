@@ -6399,24 +6399,6 @@ static boolean matchmaking_answer(struct widget_instance *widget, boolean yes)
 	return TRUE;
 }
 
-/* the d-pad's right reaches the members, with any to reach; the stick and left still step the value, and a click
-on the value presses right */
-static boolean matchmaking_row_right(struct widget_instance *row, struct event_record *event, boolean *widget_deleted)
-{
-	struct widget_instance *spinner = named(row, "size_spinner", 0);
-	struct p2p_party_status party;
-
-	p2p_party_get_status(&party);
-	ui_play_audio_feedback_sound(SOUND_CURSOR);
-	if (party.count > 1 && !ui_widget_port_pointer_focused())
-	{
-		focus_row(row->parent, MATCHMAKING_ROWS + 1);
-		return TRUE;
-	}
-	return widget_event_function_list_widget_goto_next_item(spinner ? spinner : named(row, "playlist_spinner", 0), event,
-		widget_deleted);
-}
-
 static boolean matchmaking_slot_left(struct widget_instance *slot)
 {
 	focus_row(slot->parent, matchmaking_screen.row);
@@ -9402,10 +9384,6 @@ boolean pc_menu_event_function_invoke(
 			matchmaking_screen.loaded = FALSE;
 			matchmaking_screen.invited = FALSE;
 			matchmaking_screen.asking = _matchmaking_ask_none;
-		}
-		else if (!strcmp(name, "port matchmaking right"))
-		{
-			return matchmaking_row_right(widget, event, widget_deleted);
 		}
 		else if (!strcmp(name, "port matchmaking left"))
 		{
