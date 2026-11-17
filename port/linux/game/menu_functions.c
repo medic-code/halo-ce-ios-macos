@@ -6023,7 +6023,8 @@ enum
 	_search_slot_you,
 	_search_slot_matched,
 	_search_slot_looking,
-	_search_slot_you_focused = _search_slot_looking + SEARCH_SLOT_SPINNER_FRAMES
+	_search_slot_you_focused = _search_slot_looking + SEARCH_SLOT_SPINNER_FRAMES,
+	_search_slot_looking_focused
 };
 enum
 {
@@ -6304,7 +6305,7 @@ static void matchmaking_friend_row(const struct p2p_friend_row *friend_row, bool
 	switch (friend_row->state)
 	{
 	case P2P_FRIEND_MATCHMAKING:
-		words = invited ? L"INVITED" : focused ? L"A INVITE" : L"INVITE";
+		words = invited ? L"INVITED" : focused ? L"PRESS A TO INVITE" : L"INVITE";
 		break;
 	case P2P_FRIEND_MENUS:
 		words = L"IN MENUS";
@@ -6355,7 +6356,7 @@ static void matchmaking_request_row(const struct p2p_friend_row *request, boolea
 	short size)
 {
 	matchmaking_tagless(request->name_tag, name);
-	usnprintf(mark, size - 1, L"%ls", focused ? L"A ANSWER" : L"REQUEST");
+	usnprintf(mark, size - 1, L"%ls", focused ? L"PRESS A TO ANSWER" : L"REQUEST");
 	mark[size - 1] = 0;
 }
 
@@ -6440,7 +6441,7 @@ static wchar_t const *matchmaking_party_mark(const struct p2p_party_status *part
 		matchmaking_party_addable(party, !view->friends_off, index);
 
 	if (index && index == view->focused)
-		return view->asking == _matchmaking_ask_remove ? L"REMOVE?" : addable ? L"A ADD FRIEND" :
+		return view->asking == _matchmaking_ask_remove ? L"REMOVE?" : addable ? L"A: ADD, X: REMOVE" :
 			matchmaking_party_member(party) ? L"" : L"PRESS X TO REMOVE";
 	if ((party->count > 1 || matchmaking_party_member(party)) && party->members[index].leader)
 		return L"LEADER";
@@ -6975,28 +6976,29 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 		struct widget_instance *widget = named(list, "party_slot", slot);
 		const struct matchmaking_row *row = &matchmaking_screen.slots[slot];
 		wchar_t mark[MATCHMAKING_TEXT_LENGTH];
+		boolean focused;
 
 		if (!widget)
 			continue;
+		focused = rows && widget == list->focused_child;
 		widget->visible = row->kind != _matchmaking_row_none && row->kind != _matchmaking_row_heading;
 		widget->disabled = !rows || (row->kind == _matchmaking_row_member && (locked || !row->index));
 		if (row->kind == _matchmaking_row_request)
 		{
-			widget->animation.current_frame_index = _search_slot_looking;
+			widget->animation.current_frame_index = focused ? _search_slot_looking_focused : _search_slot_looking;
 			matchmaking_request_row(&friends.requests[row->index], focused_request == &friends.requests[row->index],
 				text, mark, MATCHMAKING_TEXT_LENGTH);
 		}
 		else if (row->kind == _matchmaking_row_friend)
 		{
-			widget->animation.current_frame_index = _search_slot_you;
+			widget->animation.current_frame_index = focused ? _search_slot_you_focused : _search_slot_you;
 			matchmaking_friend_row(&friends.rows[row->index], focused_friend == &friends.rows[row->index],
 				!strcmp(row->id, matchmaking_screen.invited_id) && system_milliseconds() - matchmaking_screen.invited_at < MATCHMAKING_INVITED_MILLISECONDS,
 				text, mark, MATCHMAKING_TEXT_LENGTH);
 		}
 		else if (row->kind == _matchmaking_row_member)
 		{
-			widget->animation.current_frame_index = rows && widget == list->focused_child ? _search_slot_you_focused :
-				_search_slot_you;
+			widget->animation.current_frame_index = focused ? _search_slot_you_focused : _search_slot_you;
 			mods_wide_text(party->members[row->index].name, text, P2P_PARTY_NAME_SIZE + 1);
 			if (!party->count)
 				ustrncpy(text, matchmaking_screen.name, MATCHMAKING_TEXT_LENGTH);
