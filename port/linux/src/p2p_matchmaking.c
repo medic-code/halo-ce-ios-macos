@@ -1700,7 +1700,7 @@ int p2p_mm_take_decision(struct p2p_mm_decision *decision)
 
 static int searchers_counted(int playlist, int size)
 {
-	int index, other, count = mm.search.party.following ? 0 : party_players(&mm.search);
+	int index, other, count = party_players(&mm.search);
 
 	for (index = 0; index < MM_MAXIMUM_UNITS; index++)
 	{
@@ -1708,7 +1708,8 @@ static int searchers_counted(int playlist, int size)
 		int seen = 0;
 
 		if (!peer->used || peer->record.kind != MM_KIND_SEARCHING || !mm_counted(peer) ||
-			peer->playlist != playlist || peer->size != size)
+			peer->playlist != playlist || peer->size != size ||
+			(mm.search.party.following && !memcmp(peer->record.key, mm.search.party.leader, P2P_KEY_SIZE)))
 		{
 			continue;
 		}

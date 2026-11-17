@@ -3231,6 +3231,38 @@ static void wiring_leader_hears(void)
 	party_send(1, parties[0].topic, party_published, party_published_size);
 }
 
+static void check_member_count(void)
+{
+	struct p2p_mm_choice choice = { 1u << P2P_MM_SLAYER, P2P_MM_2V2 };
+	struct mm_search *search = p2p_mm_local();
+	unsigned char seed[P2P_SEED_SIZE], bytes[MM_MAXIMUM_RECORD_SIZE];
+	struct mm_record record = party_of(30, 1, 1);
+	struct p2p_mm_status status;
+	unsigned long sequence;
+	int size;
+
+	case_name = "member count";
+	seed_of(31, seed);
+	pthread_mutex_lock(&p2p_lock);
+	mm_follow(search, seed, &choice, record.key, 2, clock_now, 1);
+	pthread_mutex_unlock(&p2p_lock);
+	seed_of(30, seed);
+	for (sequence = 1; sequence <= 4; sequence++)
+	{
+		record = party_of(30, 1, sequence);
+		record.size = P2P_MM_2V2;
+		size = mm_record_write(&record, seed, bytes, sizeof(bytes));
+		pthread_mutex_lock(&p2p_lock);
+		p2p_mm_heard(bytes, size);
+		while (p2p_mm_verify_pass(clock_now))
+			;
+		pthread_mutex_unlock(&p2p_lock);
+		p2p_mm_get_status(&status);
+		CHECK(status.count == 2, "a member shows its party of 2 from the leader's record %lu: %d searching", sequence, status.count);
+	}
+	p2p_mm_cancel();
+}
+
 static void check_party_wiring(void)
 {
 	static const unsigned char secret[P2P_PARTY_SECRET_SIZE] = { 9 };
@@ -3354,6 +3386,7 @@ int main(void)
 	check_party_machine();
 	check_party_verify_window();
 	check_party_wiring();
+	check_member_count();
 	printf(failures ? "FAILED %d\n" : "PASS\n", failures);
 	return failures != 0;
 }

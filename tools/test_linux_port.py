@@ -594,6 +594,10 @@ MATCHMAKING_FAULTS = [
     (("restart = left && !mm.search.party.following;", "restart = left;"), "party wiring"),
     (("restart = left && !mm.search.party.following;", "restart = 0;"), "party wiring"),
     (("restarted = !mm.search.party.following;", "restarted = 1;"), "party wiring"),
+    (("count = party_players(&mm.search);", "count = mm.search.party.following ? 0 : party_players(&mm.search);"),
+     "member count"),
+    (("(mm.search.party.following && !memcmp(peer->record.key, mm.search.party.leader, P2P_KEY_SIZE))", "0"),
+     "member count"),
 ]
 
 
