@@ -6451,7 +6451,7 @@ static wchar_t const *matchmaking_party_mark(const struct p2p_party_status *part
 		return L"REQUEST SENT";
 	if (addable)
 		return L"ADD FRIEND";
-	return matchmaking_party_member(party) || view->asking ? L"" : L"X";
+	return L"";
 }
 
 /* the help box's words (empty: the screen's own) and the line under the members */
