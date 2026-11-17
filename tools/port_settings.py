@@ -2236,11 +2236,11 @@ def _matchmaking() -> list:
                       '<on event="left" run="port matchmaking left"/>',
                       '<on event="left_mouse" run="mouse emit accept event"/>',
                       f'<child widget="{base}/party_slot_name" x="24"/>',
-                      f'<child widget="{base}/party_slot_mark" x="145"/>'])
-    lines += _widget(f"{base}/party_slot_name", [("type", "text"), ("controller", 1), ("width", 134),
+                      f'<child widget="{base}/party_slot_mark" x="105"/>'])
+    lines += _widget(f"{base}/party_slot_name", [("type", "text"), ("controller", 1), ("width", 81),
                                                  ("height", SEARCH_SLOT_SIZE[1]), ("font", "ui\\small_ui"),
                                                  ("color", "#FFFFFFFF"), ("text_y", 1)], [])
-    lines += _widget(f"{base}/party_slot_mark", [("type", "text"), ("controller", 1), ("width", 112),
+    lines += _widget(f"{base}/party_slot_mark", [("type", "text"), ("controller", 1), ("width", 152),
                                                  ("height", SEARCH_SLOT_SIZE[1]), ("font", "ui\\small_ui"),
                                                  ("color", gold), ("align", "right"), ("text_y", 1)], [])
     for index, (key, _) in enumerate(rows):
@@ -2272,7 +2272,7 @@ def _matchmaking() -> list:
                       '<child widget="common_button_cancel" x="477" y="1"/>',
                       f'<child widget="{base}/button_yes" x="341" y="1"/>',
                       f'<child widget="{base}/button_no" x="477" y="1"/>'])
-    for key, text, run in (("invite", "INVITE", "port matchmaking invite"), ("leave", "LEAVE PARTY", "port matchmaking leave"),
+    for key, text, run in (("invite", "COPY LINK", "port matchmaking invite"), ("leave", "LEAVE PARTY", "port matchmaking leave"),
                            ("yes", "YES", "port matchmaking yes"), ("no", "NO", "port matchmaking no")):
         lines += _text_button(f"{base}/button_{key}", text,
                               [f'<on event="a" run="{run}"/>', f'<on event="start" run="{run}"/>'])
@@ -2299,22 +2299,27 @@ SEARCH_SLOT_SPINNER_FRAMES = 8
 
 
 def search_slot_frames() -> list:
-    """frames: you, matched, then looking with its spinner (menu_functions.c's _search_slot_*)"""
+    """frames: you, matched, looking with its spinner, then you on the focus bar (menu_functions.c's _search_slot_*)"""
     width, height = SEARCH_SLOT_SIZE
 
     def slot(mark):
         return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
                 f'viewBox="0 0 {width} {height}">\n{mark}</svg>\n', width, height)
 
-    frames = [slot(f'  <rect x="6" y="4" width="10" height="10" fill="{MATCHMAKING_GOLD}"/>\n'),
-              slot('  <rect x="6" y="4" width="10" height="10" fill="#2896ff"/>\n')]
-    for turn in range(SEARCH_SLOT_SPINNER_FRAMES):
-        spinner = ('  <circle cx="11" cy="9" r="4.5" fill="none" stroke="#2896ff" stroke-opacity="0.3" '
-                   'stroke-width="1.6"/>\n'
-                   f'  <path d="M11,4.5 A4.5,4.5 0 0 1 15.5,9" fill="none" stroke="#2896ff" stroke-width="1.6" '
-                   f'transform="rotate({turn * 360 // SEARCH_SLOT_SPINNER_FRAMES} 11 9)"/>\n')
-        frames.append(slot(spinner))
-    return frames
+    you = f'  <rect x="6" y="4" width="10" height="10" fill="{MATCHMAKING_GOLD}"/>\n'
+
+    def spinner(turn):
+        return ('  <circle cx="11" cy="9" r="4.5" fill="none" stroke="#2896ff" stroke-opacity="0.3" '
+                'stroke-width="1.6"/>\n'
+                f'  <path d="M11,4.5 A4.5,4.5 0 0 1 15.5,9" fill="none" stroke="#2896ff" stroke-width="1.6" '
+                f'transform="rotate({turn * 360 // SEARCH_SLOT_SPINNER_FRAMES} 11 9)"/>\n')
+
+    # the focus bar is option_bkds' focused frame (the settings rows'), drawn at this row's size
+    bar = (f'  <rect x="0.5" y="0.5" width="{width - 1}" height="{height - 1}" rx="8" fill="#002244" '
+           'stroke="#2299ff" stroke-width="1"/>\n')
+    return ([slot(you), slot('  <rect x="6" y="4" width="10" height="10" fill="#2896ff"/>\n')] +
+            [slot(spinner(turn)) for turn in range(SEARCH_SLOT_SPINNER_FRAMES)] +
+            [slot(bar + you)])
 
 
 def _search_slots(base: str) -> tuple:

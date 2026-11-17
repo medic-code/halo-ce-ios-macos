@@ -6016,7 +6016,14 @@ enum
 #define MATCHMAKING_TEXT_LENGTH 160
 #define MATCHMAKING_ROWS (1 + NUMBER_OF_P2P_MM_PLAYLISTS)
 
-enum { _search_slot_you, _search_slot_matched, _search_slot_looking };
+#define SEARCH_SLOT_SPINNER_FRAMES 8
+enum
+{
+	_search_slot_you,
+	_search_slot_matched,
+	_search_slot_looking,
+	_search_slot_you_focused = _search_slot_looking + SEARCH_SLOT_SPINNER_FRAMES
+};
 enum { _matchmaking_ask_none, _matchmaking_ask_remove, _matchmaking_ask_leave };
 
 /* port_settings.py's button_bar, in matchmaking_bar_names' order */
@@ -6156,7 +6163,7 @@ static wchar_t const *matchmaking_party_mark(const struct p2p_party_status *part
 	const struct matchmaking_party_view *view, short index)
 {
 	if (index && index == view->focused)
-		return view->asking == _matchmaking_ask_remove ? L"REMOVE?" : L"X REMOVE";
+		return view->asking == _matchmaking_ask_remove ? L"REMOVE?" : L"PRESS X TO REMOVE";
 	if ((party->count > 1 || matchmaking_party_member(party)) && party->members[index].leader)
 		return L"LEADER";
 	return (party->count <= 1 && !matchmaking_party_member(party)) || party->members[index].you ? L"YOU" : L"";
@@ -6192,7 +6199,7 @@ static void matchmaking_party_words(const struct p2p_party_status *party, const 
 		usnprintf(help, size - 1, L"A party of %d plays %ls or larger:\r\n%ls skipped.", party->count,
 			matchmaking_size_words[first], skipped[first]);
 	else if (ended)
-		usnprintf(help, size - 1, L"You are on your own. SEARCH to look\r\nfor a game, or INVITE friends.");
+		usnprintf(help, size - 1, L"You are on your own. SEARCH to look\r\nfor a game, or invite friends.");
 	if (matchmaking_party_member(party))
 	{
 		if (leader[0])
@@ -6201,7 +6208,7 @@ static void matchmaking_party_words(const struct p2p_party_status *party, const 
 	else if (view->invited)
 		usnprintf(line, size - 1, L"Party link copied, and on\r\nDiscord's INVITE.");
 	else if (party->count <= 1 && !ended)
-		usnprintf(line, size - 1, L"Just you. INVITE friends: they search\r\nwith you and play on your team.");
+		usnprintf(line, size - 1, L"Just you. COPY LINK for friends: they\r\nsearch with you, on your team.");
 	help[size - 1] = line[size - 1] = 0;
 }
 
@@ -6471,8 +6478,8 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 			continue;
 		widget->visible = slot < shown;
 		widget->disabled = !slot || !rows;
-		widget->animation.current_frame_index = (short)(party->count && !party->members[slot].you ?
-			_search_slot_matched : _search_slot_you);
+		widget->animation.current_frame_index = (short)(rows && widget == list->focused_child ? _search_slot_you_focused :
+			party->count && !party->members[slot].you ? _search_slot_matched : _search_slot_you);
 		mods_wide_text(party->members[slot].name, text, P2P_PARTY_NAME_SIZE + 1);
 		text_set_length(named(widget, "party_slot_name", 0), party->count ? text : matchmaking_screen.name,
 			MATCHMAKING_TEXT_LENGTH);
@@ -6711,7 +6718,6 @@ static void matchmaking_lines(const struct p2p_mm_status *status, const struct p
 	title[size - 1] = count[size - 1] = help[size - 1] = notice[size - 1] = 0;
 }
 
-#define SEARCH_SLOT_SPINNER_FRAMES 8
 #define SEARCH_SLOTS 8
 
 static short matchmaking_search_slots(struct p2p_mm_status const *status, short chosen_size, short *filled)
