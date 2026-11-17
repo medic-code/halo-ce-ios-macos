@@ -7019,18 +7019,12 @@ static void matchmaking_party_show(struct widget_instance *list, const struct p2
 	}
 	{
 		struct widget_instance *title = named(screen, "party_friends_title", 0);
-		struct widget_instance *count = named(screen, "party_friends_count", 0);
 
 		visible_set(title, heading != NONE);
-		visible_set(count, heading != NONE);
 		visible_set(named(screen, "party_scroll_up", 0), matchmaking_screen.scroll > 0);
 		visible_set(named(screen, "party_scroll_down", 0), matchmaking_screen.scroll + P2P_PARTY_MAXIMUM < total);
 		if (heading != NONE)
-		{
-			title->vertical_offset = count->vertical_offset = (short)(20 + 21 * heading);
-			usnprintf(text, MATCHMAKING_TEXT_LENGTH - 1, friends.online_count ? L"%d" : L"", friends.online_count);
-			text_set_length(count, text, MATCHMAKING_TEXT_LENGTH);
-		}
+			title->vertical_offset = (short)(20 + 21 * heading);
 	}
 	matchmaking_party_words(party, &view, help, line, MATCHMAKING_TEXT_LENGTH);
 	if (matchmaking_screen.asking == _matchmaking_ask_friend_invite && pending)
@@ -7641,7 +7635,7 @@ menu_tags.c's pause_patch): the game ends as its time limit would, its
 players staying for the next (the carnage report, then the host's PICK GAME) */
 static boolean pause_end_game(void)
 {
-	if (!global_network_game_server_get() || !game_engine_running())
+	if (!global_network_game_server_get() || !game_engine_running() || matchmaking_game_locked())
 		return campaign_fail();
 	game_engine_end_game();
 	return TRUE;

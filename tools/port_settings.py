@@ -2199,7 +2199,6 @@ def _matchmaking() -> list:
     party_texts = [("notice", 35, 74, 570, 16, gold, None, None), ("title", 340, 92, 200, 18, "#FF2896FF", None, "PARTY"),
                    ("count", 340, 92, 265, 18, "#FFFFFFFF", "right", None),
                    ("friends_title", 340, 92, 200, 18, "#FF2896FF", None, "FRIENDS"),
-                   ("friends_count", 340, 92, 265, 18, "#FFFFFFFF", "right", None),
                    ("line", 340, 284, 265, 36, "#FFFFFFFF", None, None),
                    ("help", 340, 340, 265, 60, "#FFFFFFFF", None, None)]
     lines = _widget(f"{MT}/multiplayer_type_matchmaking_item",
